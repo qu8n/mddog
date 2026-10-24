@@ -1,0 +1,1 @@
+{"scopeName":"text.python.console","patterns":[{"captures":{"1":{"name":"punctuation.separator.prompt.python.console"},"2":{"patterns":[{"include":"source.python"}]}},"match":"^(>{3}|\\.{3}|In \\[\\d+\\]:) (.+)$"}],"name":"text.python.console"}

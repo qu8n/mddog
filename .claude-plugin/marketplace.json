@@ -1,0 +1,5 @@
+{
+  "name": "mddog",
+  "owner": { "name": "Quan Nguyen" },
+  "plugins": [{ "name": "mddog", "source": "./plugins/claude-code", "description": "Preview a Markdown file with mddog in a pane beside the chat" }]
+}

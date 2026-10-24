@@ -1,0 +1,8 @@
+/target
+reference/node_modules
+reference/scratch/
+.DS_Store
+__pycache__/
+reference/e2e/winlist
+reference/renders/
+reference/baseline/

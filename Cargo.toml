@@ -1,0 +1,58 @@
+[package]
+name = "mddog"
+version = "0.1.0"
+edition = "2024"
+description = "Render Markdown and MDX in the terminal as a browser shows them, styled like GitHub by default"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "mdd"
+path = "src/main.rs"
+
+[dependencies]
+comrak = { version = "0.56", default-features = false }
+emojis = "0.9.0"
+html5ever = "0.35"
+include_dir = "0.7.4"
+irosashi = { version = "=0.3.0", default-features = false }
+kuchikiki = "0.8.9-speedreader"
+markdown = "1"
+notify = "8"
+png = "0.18.1"
+regex = "1"
+serde_json = "1"
+similar = "3.2.0"
+tree-sitter = "0.27"
+tree-sitter-css = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-highlight = "0.27"
+tree-sitter-html = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-php = "0.25.1"
+tree-sitter-python = "0.25.0"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-rust = "0.24.2"
+tree-sitter-typescript = "0.23.2"
+unicode-width = "0.2"
+libc = "0.2"
+signal-hook = "0.4.5"
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["objc2-core-graphics", "objc2-core-foundation", "NSApplication", "NSImageRep", "NSGraphics", "NSGraphicsContext", "NSRunningApplication", "NSScreen"] }
+objc2-core-foundation = { version = "0.3", default-features = false }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGBitmapContext", "CGDataProvider"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSRunLoop", "NSUserDefaults"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["objc2-core-foundation", "WKWebView", "WKWebViewConfiguration", "WKSnapshotConfiguration", "WKWebsiteDataStore", "WKNavigation", "WKPreferences", "block2", "objc2-app-kit"] }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
+ignore = "0.4.33"
+nucleo-matcher = "0.3.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+
+[[test]]
+name = "search"
+harness = false

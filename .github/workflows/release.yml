@@ -1,0 +1,25 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - run: cargo build --release --locked --target aarch64-apple-darwin --target x86_64-apple-darwin
+      - name: Package a universal binary
+        run: |
+          lipo -create -output mdd target/aarch64-apple-darwin/release/mdd target/x86_64-apple-darwin/release/mdd
+          codesign --force --sign - mdd
+          tar czf mdd-macos.tar.gz mdd
+          shasum -a 256 mdd-macos.tar.gz > mdd-macos.tar.gz.sha256
+      - run: gh release create "$GITHUB_REF_NAME" mdd-macos.tar.gz mdd-macos.tar.gz.sha256 --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

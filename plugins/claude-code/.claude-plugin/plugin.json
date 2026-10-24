@@ -1,0 +1,9 @@
+{
+  "name": "mddog",
+  "version": "0.1.0",
+  "description": "Preview a Markdown file with mddog in a pane beside the chat, refreshed as the file changes",
+  "author": {
+    "name": "Quan Nguyen"
+  },
+  "types": "./types/index.d.ts"
+}

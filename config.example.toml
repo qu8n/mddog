@@ -1,0 +1,32 @@
+# Example mddog config. Copy it to ~/.config/mddog/config.toml, or to
+# $XDG_CONFIG_HOME/mddog/config.toml if XDG_CONFIG_HOME is set.
+# Every value here is the default, so you only need the keys you change.
+# An unknown key or a bad value stops mddog with an error that names the key.
+
+# One theme, such as "github-dark", or one for each macOS appearance as below.
+# A theme is a built-in name (github-light, github-dark, obsidian-light, obsidian-dark)
+# or the path to a .css file. "light:obsidian-light,dark:obsidian-dark" looks like Obsidian.
+# A relative path starts from this folder, and ~ is your home. See the README for how to write one.
+# A theme file can build on another with :root { --mddog-base: obsidian-dark; --mddog-bg: #202a44; }
+theme = "light:github-light,dark:github-dark"
+
+# Reload the preview when the file changes.
+live_reload = true
+
+# Let d/u, f/b, Space, g/G and the other jump keys glide to the new position
+# instead of jumping. j/k, the mouse wheel and search always move at once.
+smooth_scroll = true
+
+# How long a glide over one screen takes, in milliseconds. Half a screen takes half as long.
+# A jump key pressed within 100 ms of the last one glides in 50 ms, so a held key keeps up.
+glide_ms_per_page = 200
+
+# Copy the text you select with a mouse drag or a double-click, as soon as you let go.
+copy_on_select = false
+
+[mermaid]
+# pele (GitHub's frame and buttons, its own layout) or obsidian (draws like Obsidian).
+# Unset, the theme picks: obsidian under the Obsidian themes, pele otherwise.
+# engine = "pele"
+
+# For other colors, put CSS in style.css next to config.toml. See the README.

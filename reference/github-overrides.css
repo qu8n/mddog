@@ -1,0 +1,24 @@
+/* mddog's own rules, after the MIT sheets: what github.com's repo view does that github-markdown-css and Primer CSS leave out. */
+.markdown-body{background-color:transparent}
+.markdown-body>:first-child>.heading-element:first-child{margin-top:0!important}
+.markdown-body a,.markdown-body a:hover{text-decoration:underline;text-underline-offset:.2rem}
+.markdown-body :is(h1,h2,h3,h4,h5,h6,.markdown-heading)>.anchor{text-decoration:none}
+.markdown-body hr{height:1px}
+.markdown-body .markdown-heading{position:relative}
+.markdown-body .markdown-heading .anchor{position:absolute;top:50%;left:-28px;display:flex;align-items:center;justify-content:center;width:28px;height:28px;margin:auto;padding:0 var(--base-size-4) 0 0;float:none;line-height:1;border-radius:var(--borderRadius-medium);opacity:0;transform:translateY(-50%)}
+.markdown-body .markdown-heading h1.heading-element+.anchor,.markdown-body .markdown-heading h2.heading-element+.anchor{transform:translateY(calc(-50% - .3rem))}
+.markdown-body .markdown-heading .heading-element:hover+.anchor,.markdown-body .markdown-heading .anchor:hover{opacity:1}
+.markdown-body .markdown-heading .anchor .octicon{display:block;color:var(--fgColor-default)}
+.markdown-body .highlight,.markdown-body .snippet-clipboard-content{display:flex;justify-content:space-between;margin-bottom:var(--base-size-16);background-color:var(--bgColor-muted)}
+.markdown-body .highlight pre,.markdown-body .snippet-clipboard-content pre{margin-bottom:0}
+.markdown-body .highlight pre:has(+.zeroclipboard-container){min-height:52px}
+.markdown-body .zeroclipboard-container{display:block}
+.markdown-body .zeroclipboard-container clipboard-copy{width:var(--control-small-size,28px);height:var(--control-small-size,28px)}
+.ClipboardButton{position:relative}
+math-renderer{max-width:100%;overflow:auto}
+.js-inline-math{vertical-align:bottom;overflow:auto hidden}
+.js-inline-math>math{overflow:auto hidden}
+.js-display-math>math{padding-top:var(--base-size-6);padding-bottom:var(--base-size-6);overflow-x:auto}
+.render-needs-enrichment{margin-bottom:var(--base-size-16)}
+.render-container{padding:var(--base-size-32);text-align:center;line-height:0;background:var(--bgColor-muted);border-bottom-right-radius:var(--borderRadius-medium);border-bottom-left-radius:var(--borderRadius-medium)}
+markdown-accessiblity-table{display:block}
