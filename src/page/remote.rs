@@ -16,7 +16,19 @@ fn private_ip(ip: std::net::IpAddr) -> bool {
                 || matches!(v.octets(), [0, ..] | [100, 64..=127, ..] | [198, 18 | 19, ..] | [240..=255, ..])
         }
         std::net::IpAddr::V6(v) => {
-            v.to_ipv4_mapped().is_some_and(|m| private_ip(m.into())) || v.is_loopback() || v.is_unspecified() || v.is_multicast() || v.is_unique_local() || v.is_unicast_link_local()
+            let s = v.segments();
+            // An IPv4 address inside: IPv4-compatible ::a.b.c.d, NAT64 64:ff9b::a.b.c.d, and 6to4 2002:aabb:ccdd::.
+            let v4 = |hi: u16, lo: u16| private_ip(std::net::Ipv4Addr::from((u32::from(hi) << 16) | u32::from(lo)).into());
+            v.to_ipv4_mapped().is_some_and(|m| private_ip(m.into()))
+                || (s[..6] == [0; 6] && v4(s[6], s[7]))
+                || (s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] && v4(s[6], s[7]))
+                || (s[0] == 0x2002 && v4(s[1], s[2]))
+                || s[0] & 0xffc0 == 0xfec0
+                || v.is_loopback()
+                || v.is_unspecified()
+                || v.is_multicast()
+                || v.is_unique_local()
+                || v.is_unicast_link_local()
         }
     }
 }
@@ -104,10 +116,11 @@ mod tests {
 
     #[test]
     fn private_hosts_are_refused() {
-        for ip in ["10.1.2.3", "127.0.0.1", "169.254.1.1", "100.100.1.1", "0.1.2.3", "::1", "fd00::1", "fe80::1", "::ffff:192.168.1.1"] {
+        for ip in ["10.1.2.3", "127.0.0.1", "169.254.1.1", "100.100.1.1", "0.1.2.3", "::1", "fd00::1", "fe80::1", "::ffff:192.168.1.1", "::127.0.0.1", "64:ff9b::a00:1", "2002:c0a8:101::1", "fec0::1"]
+        {
             assert!(private_ip(ip.parse().unwrap()), "{ip}");
         }
-        for ip in ["8.8.8.8", "140.82.112.3", "2606:4700::1111"] {
+        for ip in ["8.8.8.8", "140.82.112.3", "2606:4700::1111", "64:ff9b::808:808", "2002:808:808::1"] {
             assert!(!private_ip(ip.parse().unwrap()), "{ip}");
         }
         assert!(private_name("router") && private_name("nas.home.arpa") && private_name("wiki.internal"));

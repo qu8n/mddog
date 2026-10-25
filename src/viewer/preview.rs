@@ -435,17 +435,18 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         }
     };
     trace::mark("markdown rendered");
-    p.render_doc(first.0, first.1, first.2, false);
+    let loaded = p.render_doc(first.0, first.1, first.2, false);
     trace::mark("first paint sent");
     engine::spare::spawn();
     crate::sweep::spawn();
-    let ext = p.file.extension().map(|e| e.to_string_lossy().to_lowercase());
-    if !p.probe.answered {
+    // A failed load already put its reason in the status row.
+    if !loaded {
+    } else if !p.probe.answered {
         p.notify("The terminal did not answer. A blank page means it can't show images");
         p.notice_until = Some(Instant::now() + Duration::from_secs(15));
     } else if std::str::from_utf8(&p.stamp).is_err() {
         p.notify("Some bytes are not UTF-8 and show as �");
-    } else if !p.stdin && !matches!(ext.as_deref(), Some("md" | "mdx" | "markdown" | "mdown" | "mkd")) {
+    } else if !p.stdin && !picker::is_markdown(&p.file) {
         p.notify("Not a .md file, shown as Markdown");
     }
     p.start_threads(leftover);
@@ -1103,6 +1104,24 @@ impl Preview {
         if at_px > 0 { position::capture(&self.layout.blocks, f64::from(at_px) / self.scale) } else { None }
     }
 
+    /// Where each Backspace row is in the content, as `anchor` takes the view's.
+    fn back_anchors(&self) -> Vec<Option<position::Anchor>> {
+        self.app.back_rows().iter().map(|&r| if r > 0 { position::capture(&self.layout.blocks, f64::from(self.phase + r * self.cell_h) / self.scale) } else { None }).collect()
+    }
+
+    /// Puts the Backspace rows back on the same content after a new layout, with `line`
+    /// mapping an old source line to the new source.
+    fn restore_back(&mut self, anchors: &[Option<position::Anchor>], line: impl Fn(u32) -> u32) {
+        let rows = self
+            .app
+            .back_rows()
+            .iter()
+            .zip(anchors)
+            .map(|(&r, a)| a.and_then(|a| position::restore(&self.layout.blocks, position::Anchor { line: line(a.line), offset: a.offset })).map_or(r, |y| self.row_of(y)))
+            .collect();
+        self.app.set_back_rows(rows);
+    }
+
     /// Where the view is drawn: the glide's position while one runs, else `scroll_px`.
     fn shown_px(&self) -> u32 {
         self.glide.map_or_else(|| self.scroll_px(), |g| g.1)
@@ -1133,8 +1152,9 @@ impl Preview {
         }
         let base = self.base();
         let (src, doc) = page::doc(&self.file, &bytes, &base, |s, d| self.engine.render(s, d));
-        self.render_doc(bytes, src, doc, true);
-        self.notify("Reloaded");
+        if self.render_doc(bytes, src, doc, true) {
+            self.notify("Reloaded");
+        }
         trace::mark("reloaded");
     }
 
@@ -1173,8 +1193,10 @@ impl Preview {
         self.draw_chrome();
     }
 
-    fn render_doc(&mut self, bytes: Vec<u8>, src: String, doc: markdown::Doc, keep: bool) {
+    /// Returns false when the page did not load, after it put the reason in the status row.
+    fn render_doc(&mut self, bytes: Vec<u8>, src: String, doc: markdown::Doc, keep: bool) -> bool {
         let anchor = if keep { self.anchor() } else { None };
+        let back = if keep { self.back_anchors() } else { Vec::new() };
         let code = if keep { self.engine.eval("mddogCode.positions ? mddogCode.positions() : '[]'").unwrap_or_default() } else { String::new() };
         let mut old_src = std::mem::take(&mut self.src);
         let mut anchor = anchor;
@@ -1189,7 +1211,7 @@ impl Preview {
         self.engine.resize(css_width, vp_css.max(100.0));
         self.app.expanded = false;
         self.touched = false;
-        let loaded = page::load(&self.engine, &self.tmp_html, &html, theme.dark, Duration::from_secs(3)).is_ok();
+        let loaded = page::load(&self.engine, &self.tmp_html, &html, theme.dark, Duration::from_secs(3));
         trace::mark("page loaded");
         if doc.mermaid && config::mermaid(theme) == config::Mermaid::Obsidian {
             let sizes = self.sizes.get_or_insert_with(Sizes::open);
@@ -1210,8 +1232,10 @@ impl Preview {
             let _ = self.engine.eval(&format!("mddogCode.restore && mddogCode.restore({})", serde_json::Value::from(code)));
         }
         self.measure();
-        if loaded {
-            self.stamp = bytes;
+        // The stamp keeps the source even when the load failed: stdin and live_reload = false
+        // re-render from it, and the missing doc makes the next re-render try again.
+        self.stamp = bytes;
+        if loaded.is_ok() {
             self.doc = Some(doc);
         }
         self.src = src;
@@ -1223,9 +1247,16 @@ impl Preview {
             }
         }
         self.settle(scroll_px);
+        if keep {
+            self.restore_back(&back, position::line_map(&old_src, &self.src));
+        }
         if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
-            return;
+            return false;
+        }
+        if let Err(e) = &loaded {
+            self.app.notice = Some(format!("{}{}", e[..1].to_uppercase(), &e[1..]));
+            self.notice_until = Some(Instant::now() + NOTICE);
         }
         if remote::load(&self.engine) {
             late.push(script::REMOTE_DONE);
@@ -1237,15 +1268,22 @@ impl Preview {
         if start {
             let _ = self.engine.eval(script::START_MERMAID);
         }
+        loaded.is_ok()
+    }
+
+    /// Takes the terminal's size in cells and, when it tells, in pixels: a font size change keeps
+    /// the cells but not their pixels, which the pixel mouse divides by.
+    fn take_size(&mut self) {
+        self.size = self.tty.size();
+        if let Some((w, h)) = self.size.cell_px(self.scale) {
+            (self.cell_w, self.cell_h) = (w, h);
+        }
     }
 
     /// Takes the terminal's size and returns the TOC width and the page width in CSS pixels.
     fn fit(&mut self) -> (u16, f64) {
         let before = (self.size, self.img_col);
-        self.size = self.tty.size();
-        if let Some((w, h)) = self.size.cell_px(self.scale) {
-            (self.cell_w, self.cell_h) = (w, h);
-        }
+        self.take_size();
         let toc = self.app.toc_cols(self.size.cols);
         self.img_col = toc;
         self.img_cols = self.size.cols.saturating_sub(toc).max(1);
@@ -1269,6 +1307,7 @@ impl Preview {
             return false;
         }
         let anchor = self.anchor();
+        let back = self.back_anchors();
         let old = (self.size, self.cell_w, self.cell_h);
         let (toc, css_width) = self.fit();
         self.engine.resize(css_width, self.view_css().1.max(100.0));
@@ -1288,6 +1327,7 @@ impl Preview {
         self.stale_hover();
         let scroll_px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(0, |y| (y * self.scale).round() as u32);
         self.settle(scroll_px);
+        self.restore_back(&back, |l| l);
         if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
             return true;
@@ -1540,7 +1580,7 @@ impl Preview {
         if self.resize.due(Instant::now()) && self.tty.size() != self.size {
             trace::mark("resize");
             if !self.opened {
-                self.size = self.tty.size();
+                self.take_size();
                 self.show();
             } else if !self.resize_in_place() {
                 self.rerender_keep();
@@ -1574,10 +1614,12 @@ impl Preview {
     fn relayout(&mut self) {
         let scroll_px = self.scroll_px();
         let anchor = self.anchor();
+        let back = self.back_anchors();
         self.measure();
         self.stale_hover();
         let scroll_px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(scroll_px, |y| (y * self.scale).round() as u32);
         self.settle(scroll_px);
+        self.restore_back(&back, |l| l);
         self.show();
         trace::mark("late content settled");
     }
@@ -1608,7 +1650,7 @@ impl Preview {
         if self.opened {
             self.rerender(read);
         } else {
-            self.size = self.tty.size();
+            self.take_size();
             self.show();
         }
     }

@@ -75,6 +75,14 @@ impl Shm {
         &self.name
     }
 
+    /// Removes the name now and keeps the mapping, so a kill can't leave the object behind.
+    /// Only for memory that no other process opens by name after this.
+    pub fn unlink(&mut self) {
+        if std::mem::take(&mut self.owned) {
+            shm_unlink(&self.name);
+        }
+    }
+
     pub fn hand_off(mut self) -> String {
         self.owned = false;
         std::mem::take(&mut self.name)
@@ -208,6 +216,15 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn unlink_keeps_the_mapping() {
+        let mut shm = Shm::create(shm_name(), 4).unwrap();
+        shm.copy_from_slice(b"abcd");
+        shm.unlink();
+        assert!(Shm::open(shm.name()).is_none());
+        assert_eq!(&shm[..], b"abcd");
     }
 
     #[test]

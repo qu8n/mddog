@@ -475,10 +475,14 @@ pub fn parse_keys(buf: &mut Vec<u8>, flush_esc: bool) -> Vec<Key> {
                 continue;
             }
             if matches!(n, b']' | b'P' | b'_' | b'^' | b'X') {
-                match (i + 2..b.len()).find(|&j| b[j] == 0x07 || (b[j] == 0x1b && b.get(j + 1) == Some(&b'\\'))) {
-                    Some(j) => i = j + if b[j] == 0x07 { 1 } else { 2 },
-                    None if flush_esc => i = b.len(),
-                    None => break,
+                // A reply holds no ESC but its ST, so another ESC means Alt+P or the like began it:
+                // drop the two bytes and read on, or every mouse report after it would wait.
+                match (i + 2..b.len()).find(|&j| b[j] == 0x07 || b[j] == 0x1b).map(|j| (j, b.get(j + 1))) {
+                    Some((j, _)) if b[j] == 0x07 => i = j + 1,
+                    Some((j, Some(b'\\'))) => i = j + 2,
+                    Some((j, Some(_))) => i = j,
+                    Some(_) | None if flush_esc => i = b.len(),
+                    Some(_) | None => break,
                 }
                 continue;
             }
@@ -646,6 +650,13 @@ mod tests {
         assert_eq!(parse_keys(&mut b, true), vec![Key::Char('k')]);
         let mut b = b"\x1b_Gi=4001;OK\x1b\\".to_vec();
         assert!(parse_keys(&mut b, true).is_empty());
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn alt_p_does_not_hold_the_input_after_it() {
+        let mut b = b"\x1bP\x1b[<35;5;6Mj".to_vec();
+        assert_eq!(parse_keys(&mut b, false), vec![Key::Mouse(Click::Move, 5, 6), Key::Char('j')]);
         assert!(b.is_empty());
     }
 

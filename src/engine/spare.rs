@@ -129,6 +129,9 @@ pub fn serve() -> i32 {
             }
         }
     };
+    // Another spare can replace a stale socket under this one, so remove only the socket bound here.
+    let bound = std::fs::symlink_metadata(&path).map(|m| (m.dev(), m.ino())).ok();
+    let remove = || remove_if(&path, bound);
     let (src_tx, src_rx) = mpsc::channel::<(String, PathBuf)>();
     let (doc_tx, doc_rx) = mpsc::channel();
     let _ = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
@@ -146,7 +149,7 @@ pub fn serve() -> i32 {
     let client = loop {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            let _ = std::fs::remove_file(&path);
+            remove();
             return 0;
         }
         let mut fds = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
@@ -154,7 +157,7 @@ pub fn serve() -> i32 {
             0 => continue,
             n if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => continue,
             n if n < 0 => {
-                let _ = std::fs::remove_file(&path);
+                remove();
                 return 1;
             }
             _ => {}
@@ -168,13 +171,20 @@ pub fn serve() -> i32 {
             break s;
         }
     };
-    let _ = std::fs::remove_file(&path);
+    remove();
     drop(listener);
     serve_on(&mut engine, client, |src, dir| {
         src_tx.send((src.to_string(), dir.to_path_buf())).ok()?;
         doc_rx.recv().ok()
     });
     0
+}
+
+/// Removes the file at `path` when it is still the one `id` (device, inode) names.
+fn remove_if(path: &Path, id: Option<(u64, u64)>) {
+    if std::fs::symlink_metadata(path).is_ok_and(|m| Some((m.dev(), m.ino())) == id) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 fn same_user(s: &UnixStream) -> bool {
@@ -249,6 +259,10 @@ pub fn connect() -> Option<Client> {
         return None;
     }
     let mut s = UnixStream::connect(&path).ok()?;
+    // The owner check above and the connect are two steps, so check who answered too.
+    if !same_user(&s) {
+        return None;
+    }
     write_frame(&mut s, HELLO).ok()?;
     Client::over(s)
 }
@@ -341,5 +355,20 @@ mod tests {
         a.write_all(&u32::MAX.to_le_bytes()).unwrap();
         assert_eq!(read_frame(&mut b).unwrap_err().kind(), io::ErrorKind::InvalidData);
         assert!(same_user(&a));
+    }
+
+    #[test]
+    fn a_spare_removes_only_its_own_socket() {
+        let path = crate::sweep::temp_path("mddog-test-", ".sock");
+        let mine = UnixListener::bind(&path).unwrap();
+        let id = std::fs::symlink_metadata(&path).map(|m| (m.dev(), m.ino())).ok();
+        std::fs::remove_file(&path).unwrap();
+        let theirs = UnixListener::bind(&path).unwrap();
+        remove_if(&path, id);
+        assert!(path.exists(), "removed another spare's socket");
+        let id = std::fs::symlink_metadata(&path).map(|m| (m.dev(), m.ino())).ok();
+        remove_if(&path, id);
+        assert!(!path.exists());
+        drop((mine, theirs));
     }
 }

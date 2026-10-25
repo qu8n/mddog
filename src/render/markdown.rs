@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use comrak::nodes::NodeValue;
 use comrak::{Arena, Options, format_html, parse_document};
@@ -250,11 +250,26 @@ fn local_media(url: &str, dir: &Path, root: &Path) -> Option<String> {
         return None;
     }
     let path = t.split(['?', '#']).next().unwrap_or_default();
+    // An encoded slash is one URL segment but more than one folder on disk, so the two can't agree.
+    if path.to_ascii_lowercase().contains("%2f") {
+        return None;
+    }
     let path = percent_decode(path);
-    let full = match path.strip_prefix('/') {
+    let joined = match path.strip_prefix('/') {
         Some(rest) => root.join(rest),
         None => dir.join(&path),
     };
+    // WebKit drops `..` with the segment before it as text, before it follows any symlink.
+    let mut full = PathBuf::new();
+    for c in joined.components() {
+        match c {
+            Component::ParentDir => {
+                full.pop();
+            }
+            Component::CurDir => {}
+            c => full.push(c),
+        }
+    }
     if !std::fs::canonicalize(full).ok()?.starts_with(root) {
         return None;
     }
@@ -541,21 +556,26 @@ fn footnotes(section: &NodeRef) {
 }
 
 fn footnote_ref(sup: &NodeRef) {
-    let Some(a) = sup.children().find(|c| attr(c, "data-footnote-ref").is_some()) else { return };
-    remove_attr(sup, "class");
-    let href = attr(&a, "href").unwrap_or_default();
-    let id = attr(&a, "id").unwrap_or_default();
-    let fresh = el(
-        "a",
-        &[
-            ("href", &format!("#user-content-{}-{RUN_ID}", href.trim_start_matches('#'))),
-            ("id", &format!("user-content-{id}-{RUN_ID}")),
-            ("data-footnote-ref", ""),
-            ("aria-describedby", "footnote-label"),
-        ],
-    );
-    move_children(&a, &fresh);
-    replace(&a, &fresh);
+    // The sanitizer keeps a footnote anchor's id unprefixed, so raw HTML's extra anchors are rebuilt too.
+    let refs: Vec<NodeRef> = sup.children().filter(|c| attr(c, "data-footnote-ref").is_some()).collect();
+    if !refs.is_empty() {
+        remove_attr(sup, "class");
+    }
+    for a in refs {
+        let href = attr(&a, "href").unwrap_or_default();
+        let id = attr(&a, "id").unwrap_or_default();
+        let fresh = el(
+            "a",
+            &[
+                ("href", &format!("#user-content-{}-{RUN_ID}", href.trim_start_matches('#'))),
+                ("id", &format!("user-content-{id}-{RUN_ID}")),
+                ("data-footnote-ref", ""),
+                ("aria-describedby", "footnote-label"),
+            ],
+        );
+        move_children(&a, &fresh);
+        replace(&a, &fresh);
+    }
 }
 
 fn code_block(pre: &NodeRef) {
@@ -674,11 +694,27 @@ fn text_filters(body: &NodeRef) {
 
 pub fn inline_math(s: &str) -> Vec<(usize, usize)> {
     let b = s.as_bytes();
-    let escaped = |i: usize| b[..i].iter().rev().take_while(|&&c| c == b'\\').count() % 2 == 1;
+    let n = b.len();
+    let mut escaped = vec![false; n];
+    for i in 1..n {
+        escaped[i] = b[i - 1] == b'\\' && !escaped[i - 1];
+    }
+    let dollar = |j: usize| b[j] == b'$' && !escaped[j];
+    let ws_before = |j: usize| s[..j].chars().next_back().is_none_or(char::is_whitespace);
+    let after_ok = |after: usize| s[after..].chars().next().is_none_or(|c| !c.is_alphanumeric());
+    // stop[d - 1][k]: the first closer of width d at or after k that ends the search, either a
+    // match or a `$` after whitespace. Other closers are skipped, so an opener never rescans.
+    let mut stop = [vec![usize::MAX; n + 1], vec![usize::MAX; n + 1]];
+    for j in (0..n).rev() {
+        for d in 1..=2 {
+            let closer = dollar(j) && (d == 1 || b.get(j + 1) == Some(&b'$'));
+            stop[d - 1][j] = if closer && (ws_before(j) || after_ok(j + d)) { j } else { stop[d - 1][j + 1] };
+        }
+    }
     let mut out = Vec::new();
     let mut i = 0;
-    while i < b.len() {
-        if b[i] != b'$' || escaped(i) {
+    while i < n {
+        if !dollar(i) {
             i += 1;
             continue;
         }
@@ -690,28 +726,12 @@ pub fn inline_math(s: &str) -> Vec<(usize, usize)> {
             i += delim;
             continue;
         }
-        let mut found = None;
-        let mut j = open_end;
-        while j < b.len() {
-            if b[j] == b'$' && !escaped(j) && (delim == 1 || b.get(j + 1) == Some(&b'$')) {
-                if s[..j].chars().next_back().is_none_or(char::is_whitespace) {
-                    break;
-                }
-                let after = j + delim;
-                let after_ok = s[after..].chars().next().is_none_or(|c| !c.is_alphanumeric());
-                if after_ok {
-                    found = Some(after);
-                    break;
-                }
+        match stop[delim - 1][open_end] {
+            j if j != usize::MAX && !ws_before(j) => {
+                out.push((i, j + delim));
+                i = j + delim;
             }
-            j += 1;
-        }
-        match found {
-            Some(end) => {
-                out.push((i, end));
-                i = end;
-            }
-            None => i += delim,
+            _ => i += delim,
         }
     }
     out
@@ -903,6 +923,24 @@ mod tests {
     }
 
     #[test]
+    fn a_symlink_then_dots_cannot_leave_the_repo() {
+        let top = std::env::temp_dir().join(format!("mddog-media-link-{}", std::process::id()));
+        let repo = top.join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("docs/img/x/y")).unwrap();
+        std::os::unix::fs::symlink("img/x/y", repo.join("docs/l")).unwrap();
+        // On disk l/../../.. is docs, where this decoy sits. WebKit reads it as the folder above the repo.
+        std::fs::write(repo.join("docs/secret.png"), b"x").unwrap();
+        std::fs::write(top.join("secret.png"), b"x").unwrap();
+        std::fs::write(repo.join("docs/img/x/y/in.png"), b"x").unwrap();
+        let dir = std::fs::canonicalize(repo.join("docs")).unwrap();
+        let html = render_in("![a](l/../../../secret.png) ![b](l%2F..%2F..%2F..%2Fsecret.png) ![c](l/in.png)\n", Some(&dir)).html;
+        let _ = std::fs::remove_dir_all(&top);
+        assert!(!html.contains("src=\"l/..") && !html.contains("src=\"l%2F"), "{html}");
+        assert!(html.contains("src=\"l/in.png\""), "{html}");
+    }
+
+    #[test]
     fn media_root_is_the_repo_then_home_then_the_folder() {
         let top = std::env::temp_dir().join(format!("mddog-root-{}", std::process::id()));
         for d in ["home/repo/.git", "home/repo/docs", "home/notes/a", "home/sibling", "other"] {
@@ -938,6 +976,21 @@ mod tests {
         }
         let html = render("\u{feff}```\n$a_b$\n```\n").html;
         assert!(html.contains("$a_b$"), "{html}");
+    }
+
+    #[test]
+    fn openers_without_closers_take_linear_time() {
+        let s = "($a$a".repeat(100_000);
+        let t = std::time::Instant::now();
+        assert!(inline_math(&s).is_empty());
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn raw_footnote_anchors_get_prefixed_ids() {
+        let html = render("<sup><a data-footnote-ref href=\"#\">1</a><a data-footnote-ref id=\"pele\" name=\"x\" href=\"#\">2</a></sup>\n").html;
+        assert!(!html.contains("id=\"pele\"") && !html.contains("name=\"x\""), "{html}");
+        assert_eq!(html.matches("id=\"user-content-").count(), 2, "{html}");
     }
 
     #[test]

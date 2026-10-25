@@ -257,6 +257,16 @@ impl App {
         a
     }
 
+    /// The rows Backspace returns to, oldest first.
+    pub fn back_rows(&self) -> &[u32] {
+        &self.back
+    }
+
+    /// Moves the Backspace history to a new layout, one row for each in `back_rows`.
+    pub fn set_back_rows(&mut self, rows: Vec<u32>) {
+        self.back = rows;
+    }
+
     fn go_back(&mut self) -> Vec<Action> {
         let Some(row) = self.back.pop() else {
             return vec![if self.back_file { Action::BackFile } else { Action::Notice("Nothing to go back to".into()) }];

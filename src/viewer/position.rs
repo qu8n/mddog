@@ -24,27 +24,26 @@ pub fn capture(blocks: &[Block], y: f64) -> Option<Anchor> {
 }
 
 pub fn map_line(old: &str, new: &str, line: u32) -> u32 {
+    line_map(old, new)(line)
+}
+
+/// Maps each line of `old` to its line in `new`, from one diff: a deleted line to the line that
+/// took its place, and a line past the end to the end.
+pub fn line_map(old: &str, new: &str) -> impl Fn(u32) -> u32 + use<> {
     let diff = TextDiff::from_lines(old, new);
-    let (mut o, mut n) = (1u32, 1u32);
+    // to[o - 1] is the new line for old line o.
+    let (mut to, mut n) = (Vec::new(), 1u32);
     for change in diff.iter_all_changes() {
         match change.tag() {
             ChangeTag::Equal => {
-                if o == line {
-                    return n;
-                }
-                o += 1;
+                to.push(n);
                 n += 1;
             }
-            ChangeTag::Delete => {
-                if o == line {
-                    return n;
-                }
-                o += 1;
-            }
+            ChangeTag::Delete => to.push(n),
             ChangeTag::Insert => n += 1,
         }
     }
-    n
+    move |line| line.checked_sub(1).and_then(|i| to.get(i as usize).copied()).unwrap_or(n)
 }
 
 pub fn restore(blocks: &[Block], anchor: Anchor) -> Option<f64> {

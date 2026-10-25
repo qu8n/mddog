@@ -46,6 +46,11 @@ fn start(args: &[&str], dir: Option<&std::path::Path>, cols: u16, env: &[(&str, 
 }
 
 fn start_exe(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>, cols: u16, cell: (u16, u16), env: &[(&str, &str)], job: bool) -> Viewer {
+    start_replying(exe, args, dir, cols, cell, probe_reply(cell), env, job)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>, cols: u16, cell: (u16, u16), reply: Vec<u8>, env: &[(&str, &str)], job: bool) -> Viewer {
     let (mut master, mut slave) = (0, 0);
     let mut size = libc::winsize { ws_row: 40, ws_col: cols, ws_xpixel: cols * cell.0, ws_ypixel: 40 * cell.1 };
     assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) }, 0);
@@ -74,7 +79,7 @@ fn start_exe(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>
     let child = cmd.spawn().unwrap();
     let tty = unsafe { std::fs::File::from_raw_fd(master) };
     let out = Arc::new(Mutex::new(Vec::new()));
-    let (reader, mut writer, seen, reply) = (tty.try_clone().unwrap(), tty.try_clone().unwrap(), out.clone(), probe_reply(cell));
+    let (reader, mut writer, seen) = (tty.try_clone().unwrap(), tty.try_clone().unwrap(), out.clone());
     std::thread::spawn(move || {
         let mut reader = reader;
         let mut buf = vec![0; 1 << 16];
@@ -219,6 +224,72 @@ fn contents_toggle_keeps_the_loaded_version_without_live_reload() {
     let _ = exits_within(&mut child, Duration::from_secs(5));
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!beta, "t read the file from disk with live_reload off");
+}
+
+#[test]
+fn a_page_that_does_not_load_keeps_its_source() {
+    let dir = scratch("noload");
+    std::fs::write(dir.join("mddog/config.toml"), "live_reload = false\n").unwrap();
+    // WebKit waits on a FIFO with no writer, so the load event never comes.
+    let fifo = std::ffi::CString::new(dir.join("stall.png").to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+    let file = dir.join("a.md");
+    std::fs::write(&file, "# Alpha\n\n![](stall.png)\n\n## Alpha two\n").unwrap();
+    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 100, &[("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
+    wait_for(&out, 0, b"The page did not load");
+    let before = out.lock().unwrap().len();
+    tty.write_all(b"t").unwrap();
+    let end = Instant::now() + Duration::from_secs(10);
+    while find(&out.lock().unwrap()[before..], b"Alpha two").is_none() && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let kept = find(&out.lock().unwrap()[before..], b"Alpha two").is_some();
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(kept, "t after a failed load lost the document");
+}
+
+/// The last `top=` the viewer traced after the line that contains `after`, once one is there.
+fn top_after(trace: &std::path::Path, after: &str) -> String {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        let log = std::fs::read_to_string(trace).unwrap_or_default();
+        if let Some(i) = log.rfind(after)
+            && let Some(top) = log[i..].lines().rev().find_map(|l| l.split_once(" top=").map(|t| t.1))
+        {
+            return top.split('@').next().unwrap_or_default().to_string();
+        }
+        assert!(Instant::now() < end, "no view after {after:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn backspace_after_a_resize_returns_to_the_same_text() {
+    let dir = scratch("backwrap");
+    let trace = dir.join("trace.log");
+    std::fs::write(dir.join("mddog/config.toml"), "smooth_scroll = false\n").unwrap();
+    let Viewer { mut child, mut tty, out } = open(GFM, 100, &[("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(&b"j".repeat(60)).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let before = top_after(&trace, "key Char('j')");
+    tty.write_all(b"5").unwrap();
+    top_after(&trace, "key Char('5')");
+    // A narrower terminal wraps the text onto more rows.
+    let size = libc::winsize { ws_row: 40, ws_col: 60, ws_xpixel: 60 * 18, ws_ypixel: 40 * 38 };
+    use std::os::fd::AsRawFd;
+    assert_eq!(unsafe { libc::ioctl(tty.as_raw_fd(), libc::TIOCSWINSZ, &size) }, 0);
+    top_after(&trace, "mark resize");
+    std::thread::sleep(Duration::from_millis(500));
+    tty.write_all(b"\x7f").unwrap();
+    let back = top_after(&trace, "key Backspace");
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!before.is_empty());
+    assert_eq!(back, before, "Backspace went to another place after a resize re-wrapped the page");
 }
 
 #[test]
@@ -425,6 +496,39 @@ fn bare_mdd_lists_files_and_opens_one() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(list < probe, "the list waited for the terminal probe");
     assert_eq!(quit, Some(true));
+}
+
+#[test]
+fn a_pixel_click_in_the_list_follows_a_font_size_change() {
+    let dir = scratch("listfont");
+    let now = std::time::SystemTime::now();
+    for i in 0..6u64 {
+        let f = dir.join(format!("f{i}.md"));
+        std::fs::write(&f, format!("# Title {i}\n")).unwrap();
+        std::fs::File::options().write(true).open(&f).unwrap().set_modified(now - Duration::from_secs(60 * i)).unwrap();
+    }
+    let mut reply = probe_reply((18, 38));
+    reply.splice(0..0, *b"\x1b[?1016;2$y");
+    let Viewer { mut child, tty, out } = start_replying(env!("CARGO_BIN_EXE_mdd").as_ref(), &[dir.to_str().unwrap()], None, 80, (18, 38), reply, &[], false);
+    wait_for(&out, 0, b"\x1b[c");
+    wait_for(&out, 0, b"Title 5");
+    // A bigger font: the same 80 by 40 cells, 50 pixels tall.
+    let before = out.lock().unwrap().len();
+    let size = libc::winsize { ws_row: 40, ws_col: 80, ws_xpixel: 80 * 24, ws_ypixel: 40 * 50 };
+    use std::os::fd::AsRawFd;
+    assert_eq!(unsafe { libc::ioctl(tty.as_raw_fd(), libc::TIOCSWINSZ, &size) }, 0);
+    wait_for(&out, before, b"Title 5");
+    // Row 6 holds the third file, f2.md.
+    let (x, y) = (10 * 24 + 12, 5 * 50 + 25);
+    let mut tty = tty;
+    tty.write_all(format!("\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m").as_bytes()).unwrap();
+    let opened = wait_for(&out, before, b"a=p,");
+    std::thread::sleep(Duration::from_millis(300));
+    let f2 = find(&out.lock().unwrap()[opened..], b" f2.md ").is_some();
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(f2, "the click opened another file: {:?}", String::from_utf8_lossy(&out.lock().unwrap()[opened..]).chars().filter(|c| c.is_ascii_graphic() || *c == ' ').collect::<String>().get(..400));
 }
 
 #[test]

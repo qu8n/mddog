@@ -312,8 +312,13 @@ impl Picker {
             hay.push_str(&it.rel);
             hay.push(' ');
             hay.push_str(&it.title);
+            // Utf32Str::new counts graphemes, or bytes, in a name with combining marks (common in
+            // macOS file names), but the hits are drawn per char, so it gets the chars.
+            buf.clear();
+            buf.extend(hay.chars());
+            let text = if hay.is_ascii() { Utf32Str::Ascii(hay.as_bytes()) } else { Utf32Str::Unicode(&buf) };
             let mut hits = Vec::new();
-            if let Some(score) = pattern.indices(Utf32Str::new(&hay, &mut buf), &mut self.matcher, &mut hits) {
+            if let Some(score) = pattern.indices(text, &mut self.matcher, &mut hits) {
                 hits.sort_unstable();
                 hits.dedup();
                 scored.push((score, Row { item: i, hits }));
@@ -478,6 +483,16 @@ impl Picker {
 mod tests {
     use super::*;
 
+    #[test]
+    fn markdown_is_md_markdown_or_mdx_in_any_case() {
+        for f in ["a.md", "a.MD", "a.markdown", "a.mdx", "dir.d/a.Mdx"] {
+            assert!(is_markdown(Path::new(f)), "{f}");
+        }
+        for f in ["a.mdown", "a.mkd", "a.txt", "md", "a.md.bak"] {
+            assert!(!is_markdown(Path::new(f)), "{f}");
+        }
+    }
+
     fn dark() -> Palette {
         crate::theme::builtin("github-dark").unwrap().palette
     }
@@ -516,6 +531,14 @@ mod tests {
         for c in s.chars() {
             p.handle(Key::Char(c), 24);
         }
+    }
+
+    #[test]
+    fn hits_count_chars_in_decomposed_names() {
+        let mut p = picker(vec![item("cafe\u{301}.md", "", 1), item("re\u{301}sume\u{301}/x.md", "", 2)]);
+        typed(&mut p, "md");
+        let hits: Vec<Vec<u32>> = p.rows.iter().map(|r| r.hits.clone()).collect();
+        assert_eq!(hits, [vec![6, 7], vec![11, 12]]);
     }
 
     #[test]

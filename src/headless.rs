@@ -168,7 +168,9 @@ impl Renderer {
             let mut top = 0;
             while top < rows {
                 let n = tile_rows.min(rows - top);
-                let bmp = self.engine.snapshot(f64::from(top * self.cell_h) / self.scale, f64::from(n * self.cell_h) / self.scale, self.scale).ok_or("the snapshot failed")?;
+                let mut bmp = self.engine.snapshot(f64::from(top * self.cell_h) / self.scale, f64::from(n * self.cell_h) / self.scale, self.scale).ok_or("the snapshot failed")?;
+                // Claude Code kills this process on every width change, and a named object outlives it.
+                bmp.rgba.unlink();
                 let path = self.dir.join(format!("{round}-{}.png", tiles.len()));
                 tiles.push(serde_json::json!({ "file": path, "rows": n }));
                 if encoding.len() == ENCODERS {
