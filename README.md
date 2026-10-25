@@ -10,15 +10,18 @@ Needs macOS and a terminal with the [kitty graphics protocol](https://sw.kovidgo
 curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 ```
 
-This puts `mdd` in `~/.local/bin` and adds a login agent that starts a warm spare, so even the first preview after login opens in about 40 ms instead of 250 ms. Run it again to update. `MDDOG_INSTALL_DIR` picks another folder, and `MDDOG_NO_AGENT=1` skips the agent.
+This puts `mdd` in `~/.local/bin`. It also has macOS start a hidden `mdd` at login with WebKit already loaded, so your first preview opens in about 40 ms instead of 250 ms. Run the script again to update.
 
-From source: `cargo install --path . && mdd --install-agent`.
+- `MDDOG_INSTALL_DIR=<folder>` installs somewhere else.
+- `MDDOG_NO_START_AT_LOGIN=1` skips the start at login.
+- To uninstall, run `mdd --no-start-at-login`, then delete `~/.local/bin/mdd`.
+- To build from source instead, install [Rust](https://rust-lang.org/tools/install/) and run `cargo install --path . && mdd --start-at-login` in a clone of this repo.
 
 ## Usage
 
 ```sh
-mdd              # pick a file in this git repo (or folder)
-mdd docs/        # pick a file in a folder
+mdd              # list the Markdown files in this git repo (or folder) and pick one
+mdd docs/        # same, for another folder
 mdd README.md    # preview a file
 command | mdd    # preview standard input
 ```
@@ -27,17 +30,18 @@ The preview reloads when the file changes. Press `?` for every key.
 
 | Key | Action |
 | --- | --- |
-| `j` `k`, `Space` `b`, wheel | scroll |
-| `/`, `n` `N` | search |
+| `j` `k`, mouse wheel | scroll a line |
+| `Space` `b` | scroll a page |
+| `/`, then `n` `N` | search, then go to the next or previous match |
 | `t`, `1`-`9` | table of contents, jump to a section |
-| click | open a link, press a copy button |
+| click | open a link, or copy a code block with its copy button |
 | drag, `Cmd-c` | select and copy text |
-| `Backspace` | go back |
-| `Ctrl-p` | open another file |
+| `Backspace` | go back to where you were before a jump or file change |
+| `Ctrl-p` | pick another file |
 | `e` | edit in `$EDITOR` |
 | `q` | quit |
 
-`Cmd-c` needs the [kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) and a terminal that doesn't keep `Cmd-c` for itself. Ghostty and kitty work as they are. In WezTerm, set `enable_kitty_keyboard = true` and unbind `Cmd-c`. Elsewhere, use `copy_on_select = true`. Copies also go out as OSC 52, so they work over SSH.
+`Cmd-c` works only when the terminal passes it to mddog instead of running its own copy. Ghostty and kitty do. In WezTerm, set `enable_kitty_keyboard = true` and remove its `Cmd-c` binding. In iTerm2, set `copy_on_select = true` instead. mddog copies through the terminal (OSC 52), so copying also works over SSH.
 
 ## Claude Code plugin
 
@@ -60,20 +64,22 @@ smooth_scroll = true
 copy_on_select = false
 
 [mermaid]
-engine = "pele"  # or "obsidian". Unset: the theme picks
+engine = "pele"  # GitHub-style box with zoom, copy, and expand buttons
+# engine = "obsidian"  # plain Mermaid, drawn as Obsidian draws it
+# Unset, each theme picks its own
 ```
 
-Built-in themes: `github-light`, `github-dark`, `obsidian-light`, `obsidian-dark`. For small changes, put CSS in `style.css` next to the config. To write your own theme, see [docs/themes.md](docs/themes.md).
+Built-in themes: `github-light`, `github-dark`, `obsidian-light`, `obsidian-dark`. To change a few colors or fonts, put CSS in `~/.config/mddog/style.css`. It loads after the theme. To write your own theme, see [docs/themes.md](docs/themes.md).
 
 ## Limitations
 
-- mddog refuses to run in Warp and zellij, whose bugs garble scrolling ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424), [zellij#5573](https://github.com/zellij-org/zellij/issues/5573)). It can't detect a multiplexer running inside Warp.
+- mddog refuses to run in Warp and zellij, whose bugs garble scrolling ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424), [zellij#5573](https://github.com/zellij-org/zellij/issues/5573)). In a multiplexer running inside Warp, mddog can't tell and runs anyway, with the same garbling.
 - tmux can't show images yet ([tmux#5445](https://github.com/tmux/tmux/pull/5445)).
-- In herdr, scrolling lags outside Ghostty ([herdr#5512](https://github.com/herdrdev/herdr/issues/5512)). `TERM_PROGRAM=ghostty herdr` fixes it, but herdr then treats the terminal as Ghostty.
+- In herdr, scrolling lags outside Ghostty ([herdr#5512](https://github.com/herdrdev/herdr/issues/5512)). Starting herdr with `TERM_PROGRAM=ghostty herdr` fixes it, but herdr then also treats the terminal as Ghostty for notifications and focus.
 
 ## How it works
 
-mddog turns the file into the HTML GitHub's Markdown API returns, lays it out in an off-screen WebKit view, and sends the page to the terminal as kitty graphics tiles. Scrolling moves the tiles without rendering again. The Claude Code plugin runs `mdd --headless`, which writes the tiles as PNG files instead. [ARCHITECTURE.md](ARCHITECTURE.md) has the details.
+mddog turns the file into the HTML GitHub's Markdown API returns, lays it out in a hidden WebKit view, and sends the page to the terminal as image strips over the kitty graphics protocol. Scrolling moves the strips without rendering again. The Claude Code plugin runs `mdd --headless`, which writes the strips as PNG files instead. [ARCHITECTURE.md](ARCHITECTURE.md) has the details.
 
 ## License
 

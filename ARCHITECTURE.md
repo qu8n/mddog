@@ -9,7 +9,7 @@ It is a macOS-only Rust binary with no library users. The behavior contract for 
 ```
 src/
   lib.rs             crate root: exports render, the other modules are hidden and serve the binary
-  main.rs            CLI: options, file and stdin checks, --spare, --install-agent
+  main.rs            CLI: options, file and stdin checks, --spare, --start-at-login, --no-start-at-login
   config.rs          optional config file: theme, live reload, smooth scroll, Mermaid engine
   theme.rs           themes: built-in list, mode and --mddog-* chrome colors read from a theme's CSS
   headless.rs        --headless: render to PNG files, for the Claude Code plugin
@@ -47,7 +47,7 @@ src/
   engine/
     mod.rs           Engine: a local WKWebView or a warm spare, 10 s call limit
     webview.rs       AppKit window and WKWebView
-    spare.rs         warm spare process, socket protocol, launchd agent
+    spare.rs         warm spare process, socket protocol, launchd job
 assets/
   github.css         the github style's CSS, built from github-markdown-css and Primer CSS (both MIT), without its colors
   themes/            built-in themes, one CSS file each: github-light.css and github-dark.css (Primer's colors), obsidian-light.css and obsidian-dark.css (Obsidian's reading view)
@@ -146,7 +146,7 @@ WebKit fires the load event, then spends about 7 ms on the first full layout bef
 
 ### Warm spare
 
-A cold first paint takes 200 to 215 ms on files without diagrams, most of it AppKit and WebKit startup, and about 260 ms on `fixtures/gfm.md`. A warm one takes 35 to 45 ms, and about 70 ms on `fixtures/gfm.md` (medians of 10 rounds, 2026-10-21). So after the first paint the viewer starts `mdd --spare`. The spare loads a warm page and waits on a Unix socket in the per-user temp dir. The socket name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. The viewer connects only to a socket its own user owns, and the spare answers only a peer with its own uid (`getpeereid`). It ignores a connection that never sends hello. The next viewer drives the spare's WebView with six requests (eval, load, resize, wait, snap, render). `load` carries the theme as its third element, and `render` is `["render", src, dir]` so the spare confines media to the same root. A late or missing reply to the first render ends the connection, so it can't answer the main thread's next request. The spare warms a file page, math, and Mermaid before a viewer asks, since the first of each costs more. One thread with the viewer's 64 MiB stack builds every highlighter (they are cached per thread) and does every render. Snapshots go straight into the shared memory the tile is sent in. A spare serves one viewer, then exits. An unused spare exits after 12 hours. It forks once more and the middle process exits, so launchd adopts it: Claude Code kills the plugin's child and all its descendants on each width change, and the next child would otherwise borrow a dying spare. The login agent has no `KeepAlive`, so after the first spare the viewers start their own. `--install-agent` adds a launchd agent that starts one spare at login. `MDDOG_NO_SPARE` turns it off.
+A cold first paint takes 200 to 215 ms on files without diagrams, most of it AppKit and WebKit startup, and about 260 ms on `fixtures/gfm.md`. A warm one takes 35 to 45 ms, and about 70 ms on `fixtures/gfm.md` (medians of 10 rounds, 2026-10-21). So after the first paint the viewer starts `mdd --spare`. The spare loads a warm page and waits on a Unix socket in the per-user temp dir. The socket name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. The viewer connects only to a socket its own user owns, and the spare answers only a peer with its own uid (`getpeereid`). It ignores a connection that never sends hello. The next viewer drives the spare's WebView with six requests (eval, load, resize, wait, snap, render). `load` carries the theme as its third element, and `render` is `["render", src, dir]` so the spare confines media to the same root. A late or missing reply to the first render ends the connection, so it can't answer the main thread's next request. The spare warms a file page, math, and Mermaid before a viewer asks, since the first of each costs more. One thread with the viewer's 64 MiB stack builds every highlighter (they are cached per thread) and does every render. Snapshots go straight into the shared memory the tile is sent in. A spare serves one viewer, then exits. An unused spare exits after 12 hours. It forks once more and the middle process exits, so launchd adopts it: Claude Code kills the plugin's child and all its descendants on each width change, and the next child would otherwise borrow a dying spare. The launchd job has no `KeepAlive`, so after the first spare the viewers start their own. `--start-at-login` adds a launchd job that starts one spare at login, and `--no-start-at-login` stops and removes it. `MDDOG_NO_SPARE` turns it off.
 
 ### Display
 
@@ -302,7 +302,7 @@ No database. The binary reads `config.toml` and `style.css` from its config fold
 - `~/Library/Caches/mddog/diagram-sizes.json`: the last 512 obsidian-engine diagram sizes, oldest dropped first. It is written through `diagram-sizes.tmp<pid>` and a rename. Read and write errors are ignored, since a missing size only brings back the jump.
 - Private temp files, each named with the pid and a per-run hex nonce: the page (`mddog-<pid>-<hex>.html`, kept until the viewer exits, since the Mermaid frames load `file:` scripts after the page loads and WebKit refuses them once the page file is gone), the spare's warm-up page (`-warm.html`), a stdin copy (`-stdin.md`), and graphics transfers (`tty-graphics-protocol-mddog-<pid>-<hex>-<tag>`, which the terminal deletes).
 - The spare's socket in the per-user temp dir, `mddog-<uid>-<hash>.sock`, mode 0700 (owner only).
-- `~/Library/LaunchAgents/dev.mddog.spare.plist`, only with `--install-agent`.
+- `~/Library/LaunchAgents/dev.mddog.spare.plist`, only with `--start-at-login`.
 - With `--headless`, a private temp folder `mddog-tiles-<pid>-<hex>` (mode 0700) of PNG tiles. It is removed on a normal exit and on SIGTERM, SIGINT, or SIGHUP.
 
 A SIGKILL or a crash skips all of that cleanup, and Claude Code SIGKILLs the plugin's `mdd --headless` on every width change. So after the first paint (headless: after the first render), `sweep.rs` runs once on a side thread. It matches only the names above, only entries the user owns, and removes:

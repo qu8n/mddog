@@ -20,7 +20,8 @@ With -, or with input piped in, it reads standard input.
 Options
   -h, --help              show this help
   -V, --version           show the version
-      --install-agent     start a warm spare at login
+      --start-at-login    have launchd start a prewarmed mdd at login, so the first preview opens fast
+      --no-start-at-login undo --start-at-login
       --headless COLS     write the preview as PNG tiles COLS cells wide and print them as JSON, for the Claude Code plugin
 
 In the preview, press ? to list the keys.
@@ -34,9 +35,17 @@ fn main() {
         let _ = config::load();
         std::process::exit(engine::spare::serve());
     }
-    if std::env::args().nth(1).as_deref() == Some("--install-agent") {
-        match engine::spare::install_agent() {
-            Ok(p) => println!("mdd: a spare now starts at login. To undo: launchctl bootout gui/$(id -u)/dev.mddog.spare; rm {}", p.display()),
+    if std::env::args().nth(1).as_deref() == Some("--start-at-login") {
+        match engine::spare::start_at_login() {
+            Ok(_) => println!("mdd: launchd now starts a prewarmed mdd at login, so your first preview opens in about 40 ms instead of 250 ms. Undo with: mdd --no-start-at-login"),
+            Err(e) => fail(&e),
+        }
+        return;
+    }
+    if std::env::args().nth(1).as_deref() == Some("--no-start-at-login") {
+        match engine::spare::no_start_at_login() {
+            Ok(true) => println!("mdd: launchd no longer starts mdd at login"),
+            Ok(false) => println!("mdd: nothing to undo, launchd wasn't starting mdd at login"),
             Err(e) => fail(&e),
         }
         return;

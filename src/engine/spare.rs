@@ -53,10 +53,18 @@ fn read_frame(s: &mut UnixStream) -> io::Result<Vec<u8>> {
 
 const AGENT: &str = "dev.mddog.spare";
 
-pub fn install_agent() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+fn agent_plist() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
-    let plist = PathBuf::from(home).join(format!("Library/LaunchAgents/{AGENT}.plist"));
+    Ok(PathBuf::from(home).join(format!("Library/LaunchAgents/{AGENT}.plist")))
+}
+
+fn agent_target() -> String {
+    format!("gui/{}", unsafe { libc::getuid() })
+}
+
+pub fn start_at_login() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let plist = agent_plist()?;
     let esc = |p: &Path| p.to_string_lossy().replace('&', "&amp;").replace('<', "&lt;");
     let body = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{AGENT}</string><key>ProgramArguments</key><array><string>{}</string><string>--spare</string></array><key>EnvironmentVariables</key><dict><key>TMPDIR</key><string>{}</string></dict><key>RunAtLoad</key><true/></dict></plist>\n",
@@ -65,10 +73,21 @@ pub fn install_agent() -> Result<PathBuf, String> {
     );
     std::fs::create_dir_all(plist.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
     std::fs::write(&plist, body).map_err(|e| format!("{}: {e}", plist.display()))?;
-    let target = format!("gui/{}", unsafe { libc::getuid() });
+    let target = agent_target();
     let _ = Command::new("launchctl").args(["bootout", &format!("{target}/{AGENT}")]).stderr(Stdio::null()).status();
     let ok = Command::new("launchctl").args(["bootstrap", &target]).arg(&plist).status().is_ok_and(|s| s.success());
     if ok { Ok(plist) } else { Err(format!("launchctl could not load {}", plist.display())) }
+}
+
+/// Stops the launchd job and removes its plist. Returns false when there was none.
+pub fn no_start_at_login() -> Result<bool, String> {
+    let plist = agent_plist()?;
+    let _ = Command::new("launchctl").args(["bootout", &format!("{}/{AGENT}", agent_target())]).stderr(Stdio::null()).status();
+    match std::fs::remove_file(&plist) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("{}: {e}", plist.display())),
+    }
 }
 
 pub fn spawn() {
