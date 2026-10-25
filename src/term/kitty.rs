@@ -1,9 +1,9 @@
 use std::ffi::CString;
 use std::fmt::Write as _;
 use std::io::Write as _;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use std::sync::OnceLock;
+
+use crate::sweep::{self, write_private};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Medium {
@@ -108,7 +108,7 @@ impl Drop for Shm {
 
 pub fn shm_name() -> String {
     static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    format!("/mddog-{:08x}-{}", nonce() as u32, SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    format!("/mddog-{:08x}-{}", crate::sweep::nonce() as u32, SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
 pub fn shm_write(name: &str, data: &[u8]) -> bool {
@@ -126,21 +126,8 @@ pub fn shm_unlink(name: &str) {
     }
 }
 
-pub fn nonce() -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    static N: OnceLock<u64> = OnceLock::new();
-    *N.get_or_init(|| std::collections::hash_map::RandomState::new().build_hasher().finish())
-}
-
-pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let _ = std::fs::remove_file(path);
-    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?.write_all(data)
-}
-
 pub fn temp_path(tag: &str) -> String {
-    let dir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp/".into());
-    let dir = if dir.ends_with('/') { dir } else { format!("{dir}/") };
-    format!("{dir}tty-graphics-protocol-mddog-{}-{:x}-{tag}", std::process::id(), nonce())
+    sweep::temp_path("tty-graphics-protocol-mddog-", &format!("-{tag}")).to_string_lossy().into_owned()
 }
 
 pub fn transmit(out: &mut Vec<u8>, medium: Medium, id: u32, width: usize, height: usize, rgba: Shm, seq: u64) -> Medium {

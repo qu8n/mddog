@@ -17,8 +17,6 @@ const DELAY: Duration = Duration::from_millis(100);
 const MIN_SHOWN: Duration = Duration::from_millis(100);
 /// Frames in one shimmer sweep.
 const SWEEP: usize = 14;
-/// The page's padding in CSS pixels, as in page.rs.
-const PAD_CSS: f64 = 24.0;
 
 /// The colors and margins of a skeleton, taken from the page it stands in for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,7 +37,7 @@ impl Look {
         let bg = t.palette.bg;
         let d = |a: u8, b: u8| f64::from(a) - f64::from(b);
         let s = t.palette.skeleton;
-        let pad = |px: u32| (PAD_CSS * scale / f64::from(px.max(1))).round() as u16;
+        let pad = |px: u32| (crate::page::PAD * scale / f64::from(px.max(1))).round() as u16;
         Look { dark: t.dark, bg, lift: (d(s.0, bg.0), d(s.1, bg.1), d(s.2, bg.2)), bar_bg: t.palette.bar_bg, muted: t.palette.fg_muted, pad_cols: pad(cell.0), pad_rows: pad(cell.1) }
     }
 

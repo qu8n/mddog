@@ -10,13 +10,12 @@ use super::app::{self, Action, App, Heading};
 use super::cache::{Batch, Cache, View};
 use super::chrome::{self, Chrome};
 use super::loading::Loader;
-use super::page;
 use super::picker::{self, Pick, Picker};
 use super::position;
-use super::remote;
-use super::script::{self, Layout, Press, Rect};
 use super::sizes::Sizes;
-use crate::engine::{self, Engine};
+use crate::engine::{self, Bitmap, Engine};
+use crate::page::script::{self, Layout, Press, Rect};
+use crate::page::{self, remote};
 use crate::render::markdown;
 use crate::term::kitty;
 use crate::term::{self, Click, Event, Key, Probe, Size, Tty};
@@ -111,21 +110,23 @@ fn open_url(url: String) {
     });
 }
 
+/// Snapshots `height` device pixels from `top`, after the frame that a page change asked for.
+fn snapper<'a>(engine: &'a Engine, scale: f64, frame_due: &'a mut bool) -> impl FnMut(u32, u32) -> Option<Bitmap> + 'a {
+    move |top, height| {
+        if std::mem::take(frame_due) {
+            engine.wait_frame();
+        }
+        engine.snapshot(f64::from(top) / scale, f64::from(height) / scale, scale)
+    }
+}
+
 fn pasteable(text: &str) -> String {
     text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t' | '\r')).collect()
 }
 
 /// OSC 52 puts `text` on the clipboard of the terminal the user sits at, also over SSH.
 fn osc52(text: &str) -> String {
-    const ABC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::from("\x1b]52;c;");
-    for c in text.as_bytes().chunks(3) {
-        let n = c.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
-        for i in 0..4 {
-            out.push(if i <= c.len() { char::from(ABC[(n >> (18 - 6 * i) & 63) as usize]) } else { '=' });
-        }
-    }
-    out + "\x1b\\"
+    format!("\x1b]52;c;{}\x1b\\", kitty::base64(text.as_bytes()))
 }
 
 fn pbcopy(text: String) {
@@ -298,7 +299,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let shm_name = kitty::shm_name();
     let temp = kitty::temp_path("q");
     let _ = kitty::shm_write(&shm_name, &[0, 0, 0]);
-    let _ = kitty::write_private(Path::new(&temp), &[0, 0, 0]);
+    let _ = crate::sweep::write_private(Path::new(&temp), &[0, 0, 0]);
     trace::mark("tty ready");
     let engine = spare.map_or_else(
         || {
@@ -378,7 +379,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         cache,
         img_col: 0,
         img_cols: size.cols,
-        tmp_html: std::env::temp_dir().join(format!("mddog-{}-{:x}.html", std::process::id(), kitty::nonce())),
+        tmp_html: crate::sweep::temp_path("mddog-", ".html"),
         doc: None,
         theme: &config::get().themes.light,
         touched: false,
@@ -1096,6 +1097,12 @@ impl Preview {
         self.phase + self.app.scroll * self.cell_h
     }
 
+    /// Where the view is in the content, so a new layout can come back to it. None at the top.
+    fn anchor(&self) -> Option<position::Anchor> {
+        let at_px = self.scroll_px();
+        if at_px > 0 { position::capture(&self.layout.blocks, f64::from(at_px) / self.scale) } else { None }
+    }
+
     /// Where the view is drawn: the glide's position while one runs, else `scroll_px`.
     fn shown_px(&self) -> u32 {
         self.glide.map_or_else(|| self.scroll_px(), |g| g.1)
@@ -1167,8 +1174,7 @@ impl Preview {
     }
 
     fn render_doc(&mut self, bytes: Vec<u8>, src: String, doc: markdown::Doc, keep: bool) {
-        let at_px = self.scroll_px();
-        let anchor = if keep && at_px > 0 { position::capture(&self.layout.blocks, f64::from(at_px) / self.scale) } else { None };
+        let anchor = if keep { self.anchor() } else { None };
         let code = if keep { self.engine.eval("mddogCode.positions ? mddogCode.positions() : '[]'").unwrap_or_default() } else { String::new() };
         let mut old_src = std::mem::take(&mut self.src);
         let mut anchor = anchor;
@@ -1183,9 +1189,8 @@ impl Preview {
         self.engine.resize(css_width, vp_css.max(100.0));
         self.app.expanded = false;
         self.touched = false;
-        let loaded = page::load(&self.engine, &self.tmp_html, &html, theme.dark, Duration::from_secs(3));
+        let loaded = page::load(&self.engine, &self.tmp_html, &html, theme.dark, Duration::from_secs(3)).is_ok();
         trace::mark("page loaded");
-        self.engine.wait_js(script::READY, Duration::from_millis(500));
         if doc.mermaid && config::mermaid(theme) == config::Mermaid::Obsidian {
             let sizes = self.sizes.get_or_insert_with(Sizes::open);
             if !sizes.is_empty() {
@@ -1218,8 +1223,7 @@ impl Preview {
             }
         }
         self.settle(scroll_px);
-        let want = if self.app.toc_visible && !self.app.entries.is_empty() { app::toc_width(self.size.cols) } else { 0 };
-        if want != toc {
+        if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
             return;
         }
@@ -1242,7 +1246,7 @@ impl Preview {
         if let Some((w, h)) = self.size.cell_px(self.scale) {
             (self.cell_w, self.cell_h) = (w, h);
         }
-        let toc = if self.app.toc_visible && !self.app.entries.is_empty() { app::toc_width(self.size.cols) } else { 0 };
+        let toc = self.app.toc_cols(self.size.cols);
         self.img_col = toc;
         self.img_cols = self.size.cols.saturating_sub(toc).max(1);
         // Some terminals draw the old text over the new tiles, or keep it at rows the status row left.
@@ -1264,8 +1268,7 @@ impl Preview {
         if self.live() && std::fs::read(&self.file).ok().is_none_or(|b| b != self.stamp) {
             return false;
         }
-        let at_px = self.scroll_px();
-        let anchor = if at_px > 0 { position::capture(&self.layout.blocks, f64::from(at_px) / self.scale) } else { None };
+        let anchor = self.anchor();
         let old = (self.size, self.cell_w, self.cell_h);
         let (toc, css_width) = self.fit();
         self.engine.resize(css_width, self.view_css().1.max(100.0));
@@ -1285,8 +1288,7 @@ impl Preview {
         self.stale_hover();
         let scroll_px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(0, |y| (y * self.scale).round() as u32);
         self.settle(scroll_px);
-        let want = if self.app.toc_visible && !self.app.entries.is_empty() { app::toc_width(self.size.cols) } else { 0 };
-        if want != toc {
+        if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
             return true;
         }
@@ -1403,13 +1405,7 @@ impl Preview {
         if std::mem::take(&mut self.help_drawn) {
             frees.push_str(&format!("{}\x1b[2J", self.theme.palette.reset()));
         }
-        let (engine, scale, frame_due) = (&self.engine, self.scale, &mut self.frame_due);
-        let mut snap = |top: u32, height: u32| {
-            if std::mem::take(frame_due) {
-                engine.wait_frame();
-            }
-            engine.snapshot(f64::from(top) / scale, f64::from(height) / scale, scale)
-        };
+        let mut snap = snapper(&self.engine, self.scale, &mut self.frame_due);
         let first = !keep.is_empty();
         keep.extend(&vis);
         let mut b = Batch { keep: &keep, scroll_px: v.scroll_px, snap: &mut snap, bytes: Vec::new(), cmds: frees };
@@ -1424,6 +1420,7 @@ impl Preview {
             }
         }
         let (frees, bytes) = (b.cmds, b.bytes);
+        drop(snap);
         if let Some(l) = loader {
             l.finish();
         }
@@ -1510,13 +1507,7 @@ impl Preview {
 
     /// Sends the tiles `todo` now, keeping `keep` from eviction.
     fn send_tiles(&mut self, todo: &[usize], keep: &[usize], scroll_px: u32) {
-        let (engine, scale, frame_due) = (&self.engine, self.scale, &mut self.frame_due);
-        let mut snap = |top: u32, height: u32| {
-            if std::mem::take(frame_due) {
-                engine.wait_frame();
-            }
-            engine.snapshot(f64::from(top) / scale, f64::from(height) / scale, scale)
-        };
+        let mut snap = snapper(&self.engine, self.scale, &mut self.frame_due);
         let mut b = Batch { keep, scroll_px, snap: &mut snap, bytes: Vec::new(), cmds: String::new() };
         let mut sent = false;
         for &i in todo {
@@ -1582,7 +1573,7 @@ impl Preview {
 
     fn relayout(&mut self) {
         let scroll_px = self.scroll_px();
-        let anchor = if scroll_px > 0 { position::capture(&self.layout.blocks, f64::from(scroll_px) / self.scale) } else { None };
+        let anchor = self.anchor();
         self.measure();
         self.stale_hover();
         let scroll_px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(scroll_px, |y| (y * self.scale).round() as u32);
@@ -1658,8 +1649,7 @@ impl Preview {
         };
         let (wrap, toc_visible) = (self.app.wrap, self.app.toc_visible);
         if self.opened {
-            let at_px = self.scroll_px();
-            let anchor = if at_px > 0 { position::capture(&self.layout.blocks, f64::from(at_px) / self.scale) } else { None };
+            let anchor = self.anchor();
             let visit = Visit { file: std::mem::take(&mut self.file), stdin: self.stdin, name: std::mem::take(&mut self.name), app: std::mem::take(&mut self.app), anchor, src: self.src.clone() };
             self.history.push(visit);
             if self.history.len() > HISTORY {

@@ -132,9 +132,9 @@ pub fn serve() -> i32 {
     let (src_tx, src_rx) = mpsc::channel::<(String, PathBuf)>();
     let (doc_tx, doc_rx) = mpsc::channel();
     let _ = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
-        crate::render(WARM_MD, true);
+        crate::render(WARM_MD);
         for (src, dir) in src_rx {
-            if doc_tx.send(crate::render::markdown::render_in(&src, true, Some(&dir))).is_err() {
+            if doc_tx.send(crate::render::markdown::render_in(&src, Some(&dir))).is_err() {
                 break;
             }
         }
@@ -222,17 +222,14 @@ pub fn serve_on(engine: &mut Engine, mut client: UnixStream, render: impl Fn(&st
 fn warm(engine: &Engine) {
     let theme = crate::config::theme();
     let runtime = crate::assets::runtime_dir();
-    let opts =
-        crate::viewer::page::Opts { theme, base: Path::new("/"), pad_x: 0.0, pad_y: 0.0, math: true, mermaid: true, engine: crate::config::mermaid(theme), wrap: false, runtime: Some(&runtime) };
-    let html = crate::viewer::page::build("<p>$x$</p><section data-type=\"mermaid\"><pre lang=\"mermaid\">graph TD; a-->b</pre></section>", &opts);
-    let file = std::env::temp_dir().join(format!("mddog-{}-{:x}-warm.html", std::process::id(), crate::term::kitty::nonce()));
-    if crate::term::kitty::write_private(&file, html.as_bytes()).is_ok() {
-        engine.load_file(&file, theme.dark);
-        engine.wait_js("location.protocol === 'file:' && !document.documentElement.dataset.stale && document.readyState === 'complete'", Duration::from_secs(5));
-        let _ = engine.eval(crate::viewer::script::START_MERMAID);
+    let opts = crate::page::Opts { theme, base: Path::new("/"), pad_x: 0.0, pad_y: 0.0, math: true, mermaid: true, engine: crate::config::mermaid(theme), wrap: false, runtime: Some(&runtime) };
+    let html = crate::page::build("<p>$x$</p><section data-type=\"mermaid\"><pre lang=\"mermaid\">graph TD; a-->b</pre></section>", &opts);
+    let file = crate::sweep::temp_path("mddog-", "-warm.html");
+    if crate::page::load(engine, &file, &html, theme.dark, Duration::from_secs(5)).is_ok() {
+        let _ = engine.eval(crate::page::script::START_MERMAID);
         engine.wait_js("document.fonts.status === 'loaded' && mddog.state.math === true && mddog.state.mermaid === true", Duration::from_secs(5));
-        let _ = std::fs::remove_file(&file);
     }
+    let _ = std::fs::remove_file(&file);
 }
 
 pub struct Client {

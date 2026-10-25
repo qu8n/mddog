@@ -1,4 +1,4 @@
-use mddog::viewer::{page, script};
+use mddog::page::{self, script};
 use mddog::{assets, config::Mermaid, engine::Engine, render};
 use std::{path::Path, time::Duration};
 const WAIT: Duration = Duration::from_secs(30);
@@ -25,7 +25,7 @@ fn load_unstarted(eng: &mut Engine, md: &str, width: f64, wrap: bool, engine: Me
     load_themed(eng, md, width, wrap, engine, "github-dark")
 }
 fn load_themed(eng: &mut Engine, md: &str, width: f64, wrap: bool, engine: Mermaid, theme: &str) -> bool {
-    let doc = render(md, false);
+    let doc = render(md);
     let runtime = doc.mermaid.then(assets::runtime_dir);
     let html = page::build(
         &doc.html,
@@ -34,7 +34,7 @@ fn load_themed(eng: &mut Engine, md: &str, width: f64, wrap: bool, engine: Merma
     // The viewer's own load, so the diagram checks also cover what it does with the page file.
     let tmp = std::env::temp_dir().join(format!("mddog-search-test-{}.html", std::process::id()));
     eng.resize(width, 600.0);
-    assert!(page::load(eng, &tmp, &html, true, WAIT), "timed out after {WAIT:?} loading the page");
+    page::load(eng, &tmp, &html, true, WAIT).unwrap();
     wait(eng, "document.fonts.status === 'loaded'");
     doc.mermaid
 }
@@ -375,7 +375,7 @@ fn main() {
     check("o5_skeleton_takes_the_drawn_height", guessed == [true, true]);
 
     for (name, dark, want) in [("th1_dark_background", true, [0x0d, 0x11, 0x17]), ("th1_light_background", false, [0xff, 0xff, 0xff])] {
-        let doc = render("# Title\n\ntext\n", false);
+        let doc = render("# Title\n\ntext\n");
         let html = page::build(
             &doc.html,
             &page::Opts {
@@ -533,7 +533,7 @@ fn main() {
         let _ = std::fs::remove_file(&tmp);
         Some((eng.eval("String(1 + 1)").ok()?, eng.snapshot(0.0, 100.0, s)?.rgba.to_vec()))
     });
-    mddog::engine::spare::serve_on(&mut eng, b, |src, _| Some(render(src, false)));
+    mddog::engine::spare::serve_on(&mut eng, b, |src, _| Some(render(src)));
     check("spare_serves_a_viewer", viewer.join().unwrap().is_some_and(|(two, px)| two == "2" && px == local));
 
     let _ = std::fs::remove_file(std::env::temp_dir().join(format!("mddog-search-test-{}.html", std::process::id())));

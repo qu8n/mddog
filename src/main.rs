@@ -1,4 +1,3 @@
-use mddog::term::kitty;
 use mddog::viewer::preview;
 use mddog::*;
 
@@ -134,8 +133,8 @@ fn stdin_copy() -> Result<PathBuf, String> {
     if looks_binary(&bytes) {
         return Err("standard input looks like a binary file, not Markdown".into());
     }
-    let path = std::env::temp_dir().join(format!("mddog-{}-{:x}-stdin.md", std::process::id(), kitty::nonce()));
-    kitty::write_private(&path, &bytes).map_err(|e| format!("cannot keep standard input: {}", term::io_error(&e)))?;
+    let path = sweep::temp_path("mddog-", "-stdin.md");
+    sweep::write_private(&path, &bytes).map_err(|e| format!("cannot keep standard input: {}", term::io_error(&e)))?;
     Ok(path)
 }
 
@@ -252,7 +251,7 @@ mod tests {
 
     #[test]
     fn near_match_accepts_one_edit_or_the_same_stem() {
-        let dir = std::env::temp_dir().join(format!("mddog-near-{}-{:x}", std::process::id(), kitty::nonce()));
+        let dir = std::env::temp_dir().join(format!("mddog-near-{}-{:x}", std::process::id(), sweep::nonce()));
         std::fs::create_dir_all(&dir).unwrap();
         for f in ["readme.md", "notes.mdx", "guide.markdown", "guid.md", "todo.txt", "plan.md"] {
             std::fs::write(dir.join(f), "x").unwrap();

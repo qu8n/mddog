@@ -2,10 +2,11 @@
 //! does: temp files and folders whose name holds a pid that is gone, spare sockets nobody
 //! listens on, and runtime folders no build has used for a week.
 
-use std::io;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::io::{self, Write};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 /// A `runtime-<hash>` folder that no run has touched for this long goes.
@@ -21,6 +22,23 @@ pub fn spawn() {
         cache(&crate::assets::cache_dir(), crate::assets::RUNTIME, SystemTime::now());
         crate::trace::mark("swept");
     });
+}
+
+/// A temp path this run owns: `<prefix><pid>-<nonce><suffix>`. `temp_owner` must match each prefix and suffix, or
+/// what a killed run leaves never goes.
+pub fn temp_path(prefix: &str, suffix: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("{prefix}{}-{:x}{suffix}", std::process::id(), nonce()))
+}
+
+pub fn nonce() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    static N: OnceLock<u64> = OnceLock::new();
+    *N.get_or_init(|| std::collections::hash_map::RandomState::new().build_hasher().finish())
+}
+
+pub fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+    let _ = std::fs::remove_file(path);
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?.write_all(data)
 }
 
 enum Owner {
@@ -154,6 +172,12 @@ mod tests {
             assert!(matches!(temp_owner(name), Some(Owner::Pid(12))), "{name}");
         }
         assert!(matches!(temp_owner(&format!("mddog-{uid}-00ff.sock")), Some(Owner::Socket)));
+        let me = std::process::id() as i32;
+        let made = [("mddog-", ".html"), ("mddog-", "-stdin.md"), ("mddog-", "-warm.html"), ("mddog-tiles-", ""), ("tty-graphics-protocol-mddog-", "-q")];
+        for path in made.map(|(prefix, suffix)| temp_path(prefix, suffix)) {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(matches!(temp_owner(&name), Some(Owner::Pid(p)) if p == me), "{name}");
+        }
         for name in [
             &format!("mddog-{}-00ff.sock", uid + 1),
             "mddog-tiles-test-12",

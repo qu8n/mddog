@@ -3,7 +3,7 @@
 use kuchikiki::NodeRef;
 
 use crate::config;
-use crate::viewer::page::Opts;
+use crate::page::Opts;
 
 mod github;
 

@@ -4,9 +4,12 @@ use std::time::Duration;
 use crate::engine::Engine;
 use crate::render::markdown::{self, Doc};
 use crate::render::mdx;
-use crate::term::kitty;
+use crate::term;
 use crate::theme::Theme;
 use crate::{assets, config, trace};
+
+pub mod remote;
+pub mod script;
 
 const RUNTIME_JS: &str = include_str!("../../assets/mddog.js");
 
@@ -22,13 +25,14 @@ pub struct Opts<'a> {
     pub runtime: Option<&'a Path>,
 }
 
-const PAD: f64 = 24.0;
+/// The page's padding in CSS pixels. The loading skeleton uses it too.
+pub const PAD: f64 = 24.0;
 
 pub fn doc(file: &Path, bytes: &[u8], base: &Path, spare: impl FnOnce(&str, &Path) -> Option<Doc>) -> (String, Doc) {
     let text = String::from_utf8_lossy(bytes).into_owned();
     let src = if file.extension().is_some_and(|e| e.eq_ignore_ascii_case("mdx")) { mdx::to_markdown(&text) } else { text };
     let shown = if src.trim().is_empty() { "*This file is empty.*" } else { &src };
-    let doc = spare(shown, base).unwrap_or_else(|| markdown::render_in(shown, true, Some(base)));
+    let doc = spare(shown, base).unwrap_or_else(|| markdown::render_in(shown, Some(base)));
     (src, doc)
 }
 
@@ -57,14 +61,18 @@ pub(crate) fn scripts(o: &Opts) -> String {
     out
 }
 
-/// Writes the page to `path`, readable by its owner only, and loads it. Returns false when the write fails or the
-/// load takes longer than `wait`. The file must stay while the page is open: WebKit won't load the Mermaid frames'
-/// `file:` scripts once it is gone.
-pub fn load(engine: &Engine, path: &Path, html: &str, dark: bool, wait: Duration) -> bool {
-    let written = kitty::write_private(path, html.as_bytes()).is_ok();
+/// Writes the page to `path`, readable by its owner only, loads it within `wait`, then gives its fonts and images up
+/// to 500 ms. The file must stay while the page is open: WebKit won't load the Mermaid frames' `file:` scripts once
+/// it is gone.
+pub fn load(engine: &Engine, path: &Path, html: &str, dark: bool, wait: Duration) -> Result<(), String> {
+    crate::sweep::write_private(path, html.as_bytes()).map_err(|e| format!("cannot write the page: {}", term::io_error(&e)))?;
     trace::mark("page written");
     engine.load_file(path, dark);
-    written && engine.wait_loaded(wait)
+    if !engine.wait_loaded(wait) {
+        return Err("the page did not load".into());
+    }
+    engine.wait_js(script::READY, Duration::from_millis(500));
+    Ok(())
 }
 
 pub fn build(article: &str, o: &Opts) -> String {
@@ -93,7 +101,7 @@ mod tests {
         assert!(empty.html.contains("This file is empty"));
         let (src, _) = doc(Path::new("a.MDX"), b"import X from './x'\n\n# Hi\n", Path::new("."), |_, _| None);
         assert!(!src.contains("import"));
-        let (_, spare) = doc(Path::new("a.md"), b"# Hi", Path::new("."), |s, _| Some(markdown::render(&format!("{s} from the spare"), true)));
+        let (_, spare) = doc(Path::new("a.md"), b"# Hi", Path::new("."), |s, _| Some(markdown::render(&format!("{s} from the spare"))));
         assert!(spare.html.contains("from the spare"));
     }
 }

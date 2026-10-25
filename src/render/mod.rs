@@ -1,5 +1,4 @@
 pub use markdown::{Doc, render};
-pub use mdx::to_markdown as mdx_to_markdown;
 
 pub(crate) mod dom;
 pub(crate) mod emoji;

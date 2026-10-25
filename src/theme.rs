@@ -282,7 +282,7 @@ pub fn relative_urls(css: &str, dir: &Path) -> String {
             continue;
         }
         out.push_str(&css[last..m.start()]);
-        out.push_str(&format!("{}/{target}", crate::viewer::page::file_url(&dir)));
+        out.push_str(&format!("{}/{target}", crate::page::file_url(&dir)));
         last = m.end();
     }
     out.push_str(&css[last..]);
@@ -395,7 +395,7 @@ mod tests {
         let names: Vec<_> = a.layers().iter().map(|l| l.name.clone()).collect();
         assert_eq!(names[..2], ["github-light", "obsidian-light"]);
         // A base's own URLs start from its own folder.
-        assert!(a.layers()[2].css.contains(&format!("url({}/img.png)", crate::viewer::page::file_url(&dir.join("sub")))));
+        assert!(a.layers()[2].css.contains(&format!("url({}/img.png)", crate::page::file_url(&dir.join("sub")))));
         std::fs::write(dir.join("sub/b.css"), ":root{--mddog-base:../a.css}").unwrap();
         let e = file(&dir.join("a.css")).unwrap_err();
         let (a, b) = (dir.join("a.css").display().to_string(), dir.join("sub/b.css").display().to_string());

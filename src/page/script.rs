@@ -1,5 +1,13 @@
-use super::position::Block;
 use crate::engine::Engine;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+/// A block of the page: its source lines and where it sits, in CSS pixels.
+pub struct Block {
+    pub start: u32,
+    pub end: u32,
+    pub top: f64,
+    pub height: f64,
+}
 
 pub type Rect = [f64; 4];
 

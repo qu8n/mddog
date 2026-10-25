@@ -17,7 +17,7 @@ src/
   editor.rs          runs $EDITOR
   trace.rs           test and debug logging
   assets.rs          extracts embedded runtime files to the cache
-  sweep.rs           removes temp files, sockets, and runtime folders that dead runs left behind
+  sweep.rs           names and writes private temp files, and removes the temp files, sockets, and runtime folders that dead runs left behind
   render/            Markdown and MDX to HTML, the crate's only documented API
     markdown.rs      comrak to the HTML GitHub's Markdown API returns, then the style's markup
     mdx.rs           MDX to Markdown
@@ -25,6 +25,10 @@ src/
     highlight.rs     tree-sitter highlighting
     textmate.rs      TextMate highlighting (irosashi)
     emoji.rs, octicons.rs  :shortcodes: and inline icons
+  page/              shared by the viewer, headless mode, and the spare
+    mod.rs           reads the source, has the style wrap the article in its page, CSS, and scripts, writes and loads it
+    script.rs        calls into mddog.js and parses its replies (layout, search, press)
+    remote.rs        resolves remote image hosts and refuses private ones
   viewer/
     preview.rs       the viewer: first paint, event loop, mouse, links, selection, terminal writes
     cache.rs         tile ids, resident bytes, eviction, herdr bands, placements
@@ -34,10 +38,7 @@ src/
     loading.rs       page skeleton (heading, text, code block, in the page's theme and padding), drawn when the page isn't ready after 100 ms and held at least 100 ms. Warm starts are usually done before then
     picker.rs        the file list: walk, fuzzy filter, drawing, and keys
     position.rs      keeps the view on the same content across re-renders
-    remote.rs        resolves remote image hosts and refuses private ones
     sizes.rs         each obsidian-engine diagram's drawn size, so the next skeleton opens at its height
-    script.rs        calls into mddog.js and parses its replies (layout, search, press)
-    page.rs          reads the source, has the style wrap the article in its page, CSS, and scripts
   style/
     mod.rs           Style: markup, page, CSS, and Mermaid engine; DEFAULT is GITHUB
     github.rs        GitHub's look: repo-view markup, page wrapper, CSS layers, Mermaid viewer
@@ -69,7 +70,7 @@ config.toml + style.css (read once) -> theme, Mermaid engine, live reload
 
 file or stdin
   -> mdx.rs (MDX only) -> markdown.rs + sanitize + highlight -> article HTML
-  -> page.rs + style (default github: page, light and dark CSS, Mermaid engine) + mddog.js, MathJax
+  -> page/ + style (default github: page, light and dark CSS, Mermaid engine) + mddog.js, MathJax
   -> engine: WKWebView in this process, or in a warm spare over a Unix socket
   -> layout and tile snapshots (RGBA)
   -> kitty.rs -> terminal (shared memory, temp file, or PNG chunks)
@@ -126,7 +127,7 @@ The terminal chrome draws with the theme's `Palette`. `Palette::reset()` is `\x1
 1. `.mdx` goes through `mdx.rs`: markdown-rs parses it, imports, exports, expressions, and comments are dropped, and each component (a JSX element whose name is not lowercase HTML) becomes a `jsx` code block of its source. Lowercase elements such as `<details>` stay as HTML and go through the sanitizer. Nothing is executed. On a parse error the file renders as plain Markdown.
 2. `markdown.rs` parses with comrak (GFM on) and writes the HTML GitHub's Markdown API returns: alerts, footnotes, task lists, and math and Mermaid blocks. `sanitize.rs` cleans raw HTML with GitHub's allowlist. It notes whether the page has math or Mermaid, then calls the style's `dress`. The github style adds what github.com's repo view has after its scripts ran: heading anchors, frontmatter tables, and the Mermaid container. Last, `markdown.rs` links raw URLs and keeps source positions on top-level blocks only. cmark drops a backslash before punctuation and reads `*` and `_` in math as emphasis, so math is escaped before parsing. cmark also turns `\$` into `$`, so an escaped dollar outside code is held as `HELD_DOLLAR` until the math pass. Local media is confined to a root folder (see Security).
 3. Code is highlighted the way GitHub does it. tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, and PHP. irosashi, a Rust port of vscode-textmate, covers the rest with starry-night's grammars. Both map to GitHub's `pl-*` classes. `tests/textmate.golden` pins the output.
-4. `page.rs` (`page::doc`, `page::html`) is the one path from file bytes to a page, shared by the viewer and headless mode. It hands the article to the style's `page`, which adds the style's page context, its CSS layers (see Theme), `mddog.js` and MathJax from `page::scripts`, and its Mermaid scripts. The runtime files are extracted once to `~/Library/Caches/mddog/runtime-<hash>/`. `build.rs` computes the hash. WebKit's fallback draws the footnote back-link `↩` from a text font where Chrome uses Apple Color Emoji, so `EXTRA_CSS` forces the emoji font.
+4. `page/` (`page::doc`, `page::html`) is the one path from file bytes to a page, shared by the viewer and headless mode. It hands the article to the style's `page`, which adds the style's page context, its CSS layers (see Theme), `mddog.js` and MathJax from `page::scripts`, and its Mermaid scripts. The runtime files are extracted once to `~/Library/Caches/mddog/runtime-<hash>/`. `build.rs` computes the hash. WebKit's fallback draws the footnote back-link `↩` from a text font where Chrome uses Apple Color Emoji, so `EXTRA_CSS` forces the emoji font.
 
 ### Styles
 

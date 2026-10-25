@@ -1,12 +1,6 @@
 use similar::{ChangeTag, TextDiff};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Block {
-    pub start: u32,
-    pub end: u32,
-    pub top: f64,
-    pub height: f64,
-}
+use crate::page::script::Block;
 
 pub fn top_text(blocks: &[Block], texts: &[String], y: f64) -> String {
     match capture(blocks, y) {

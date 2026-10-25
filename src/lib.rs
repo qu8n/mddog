@@ -1,7 +1,7 @@
 #[cfg(not(target_os = "macos"))]
 compile_error!("mddog runs on macOS only");
 
-pub use render::{Doc, mdx_to_markdown, render};
+pub use render::{Doc, render};
 
 mod render;
 mod style;
@@ -16,6 +16,8 @@ pub mod editor;
 pub mod engine;
 #[doc(hidden)]
 pub mod headless;
+#[doc(hidden)]
+pub mod page;
 #[doc(hidden)]
 pub mod sweep;
 #[doc(hidden)]

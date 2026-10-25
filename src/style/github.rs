@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use kuchikiki::NodeRef;
 
 use crate::config;
+use crate::page::{self, Opts, file_url, percent_path};
 use crate::render::dom::*;
 use crate::render::markdown::escape;
 use crate::render::octicons;
 use crate::theme::{self, Theme};
-use crate::viewer::page::{self, Opts, file_url, percent_path};
 
 const CSS: &str = include_str!("../../assets/github.css");
 const EXTRA_CSS: &str = concat!(

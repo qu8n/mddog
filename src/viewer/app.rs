@@ -684,6 +684,11 @@ impl App {
         self.toc_grab = None;
     }
 
+    /// The contents sidebar's width at `cols` columns: 0 while it is hidden or has no entries.
+    pub fn toc_cols(&self, cols: u16) -> u16 {
+        if self.toc_visible && !self.entries.is_empty() { toc_width(cols) } else { 0 }
+    }
+
     pub fn current_entry(&self) -> Option<usize> {
         if self.entries.is_empty() {
             return None;

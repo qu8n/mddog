@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use crate::Doc;
 use crate::engine::{self, Engine};
+use crate::page::{self, remote, script};
 use crate::term;
 use crate::term::kitty;
-use crate::viewer::{page, remote, script};
 use crate::watch;
 
 const TILE_ROWS: u32 = 100;
@@ -19,7 +19,7 @@ const ENCODERS: usize = 4;
 type FirstRender = JoinHandle<Option<(Vec<u8>, Doc)>>;
 
 pub fn run(file: PathBuf, cols: u16) -> i32 {
-    let dir = std::env::temp_dir().join(format!("mddog-tiles-{}-{:x}", std::process::id(), kitty::nonce()));
+    let dir = crate::sweep::temp_path("mddog-tiles-", "");
     if let Err(e) = std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(&dir) {
         eprintln!("mdd: cannot make {}: {}", dir.display(), term::io_error(&e));
         return 1;
@@ -139,14 +139,9 @@ impl Renderer {
         let base = page::base_dir(&self.file, false);
         let doc = first.unwrap_or_else(|| page::doc(&self.file, &bytes, &base, |s, d| self.engine.render(s, d)).1);
         let (html, theme) = page::html(&doc, &base, false);
-        kitty::write_private(&self.html, html.as_bytes()).map_err(|e| format!("cannot write the page: {}", term::io_error(&e)))?;
         let width_px = self.cols * self.cell_w;
         self.engine.resize(f64::from(width_px) / self.scale, 600.0);
-        self.engine.load_file(&self.html, theme.dark);
-        if !self.engine.wait_loaded(Duration::from_secs(3)) {
-            return Err("the page did not load".into());
-        }
-        self.engine.wait_js(script::READY, Duration::from_millis(500));
+        page::load(&self.engine, &self.html, &html, theme.dark, Duration::from_secs(3))?;
         let mut late = vec!["true"];
         if doc.math {
             late.push(script::MATH_DONE);

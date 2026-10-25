@@ -324,11 +324,11 @@ fn confine_media(body: &NodeRef, dir: &Path) {
     }
 }
 
-pub fn render(src: &str, defer_remote: bool) -> Doc {
-    render_in(src, defer_remote, None)
+pub fn render(src: &str) -> Doc {
+    render_in(src, None)
 }
 
-pub fn render_in(src: &str, defer_remote: bool, dir: Option<&Path>) -> Doc {
+pub fn render_in(src: &str, dir: Option<&Path>) -> Doc {
     let (body, front) = api_dom(src, true);
     let math = elements(&body).iter().any(|n| is(n, "math-renderer"));
     let mermaid = elements(&body).iter().any(|n| is(n, "div") && has_class(n, "highlight-source-mermaid"));
@@ -342,39 +342,37 @@ pub fn render_in(src: &str, defer_remote: bool, dir: Option<&Path>) -> Doc {
     if let Some(dir) = dir {
         confine_media(&body, dir);
     }
-    if defer_remote {
-        let remote = is_remote;
-        for v in elements(&body).into_iter().filter(|n| is(n, "video")) {
-            let media = std::iter::once(v.clone()).chain(v.children().filter(|c| is(c, "source")));
-            if !attr(&v, "poster").is_some_and(|p| remote(&p)) && !media.into_iter().any(|m| attr(&m, "src").is_some_and(|s| remote(&s))) {
-                continue;
-            }
-            set_attr(&v, "preload", "none");
-            remove_attr(&v, "autoplay");
-            if let Some(poster) = attr(&v, "poster").filter(|p| remote(p)) {
-                set_attr(&v, "data-mddog-poster", &poster);
-                remove_attr(&v, "poster");
-            }
-            for m in std::iter::once(v.clone()).chain(v.children().filter(|c| is(c, "source"))) {
-                if let Some(src) = attr(&m, "src").filter(|s| remote(s)) {
-                    set_attr(&m, "data-mddog-media", &src);
-                    remove_attr(&m, "src");
-                }
+    let remote = is_remote;
+    for v in elements(&body).into_iter().filter(|n| is(n, "video")) {
+        let media = std::iter::once(v.clone()).chain(v.children().filter(|c| is(c, "source")));
+        if !attr(&v, "poster").is_some_and(|p| remote(&p)) && !media.into_iter().any(|m| attr(&m, "src").is_some_and(|s| remote(&s))) {
+            continue;
+        }
+        set_attr(&v, "preload", "none");
+        remove_attr(&v, "autoplay");
+        if let Some(poster) = attr(&v, "poster").filter(|p| remote(p)) {
+            set_attr(&v, "data-mddog-poster", &poster);
+            remove_attr(&v, "poster");
+        }
+        for m in std::iter::once(v.clone()).chain(v.children().filter(|c| is(c, "source"))) {
+            if let Some(src) = attr(&m, "src").filter(|s| remote(s)) {
+                set_attr(&m, "data-mddog-media", &src);
+                remove_attr(&m, "src");
             }
         }
-        for n in elements(&body).into_iter().filter(|n| is(n, "source") || is(n, "img")) {
-            if let Some(set) = attr(&n, "srcset").filter(|s| s.split(',').any(remote)) {
-                set_attr(&n, "data-mddog-srcset", &set);
-                remove_attr(&n, "srcset");
-            }
+    }
+    for n in elements(&body).into_iter().filter(|n| is(n, "source") || is(n, "img")) {
+        if let Some(set) = attr(&n, "srcset").filter(|s| s.split(',').any(remote)) {
+            set_attr(&n, "data-mddog-srcset", &set);
+            remove_attr(&n, "srcset");
         }
-        for img in elements(&body).into_iter().filter(|n| is(n, "img")) {
-            let src = attr(&img, "src").unwrap_or_default();
-            let sources = attr(&img, "data-mddog-srcset").is_some() || img.parent().is_some_and(|p| is(&p, "picture") && p.children().any(|c| attr(&c, "data-mddog-srcset").is_some()));
-            if remote(&src) || sources {
-                set_attr(&img, "data-mddog-src", &src);
-                set_attr(&img, "src", BLANK_GIF);
-            }
+    }
+    for img in elements(&body).into_iter().filter(|n| is(n, "img")) {
+        let src = attr(&img, "src").unwrap_or_default();
+        let sources = attr(&img, "data-mddog-srcset").is_some() || img.parent().is_some_and(|p| is(&p, "picture") && p.children().any(|c| attr(&c, "data-mddog-srcset").is_some()));
+        if remote(&src) || sources {
+            set_attr(&img, "data-mddog-src", &src);
+            set_attr(&img, "src", BLANK_GIF);
         }
     }
     Doc { html: inner_html(&body), math, mermaid }
@@ -768,15 +766,15 @@ mod tests {
 
     #[test]
     fn raw_html_cannot_write_source_positions() {
-        let html = render("<p DATA-SOURCEPOS = \"1:1-1:10\">x</p>\n\n<ul><li/data-sourcepos=\"1:1-1:10\">y</li></ul>\n", false).html;
+        let html = render("<p DATA-SOURCEPOS = \"1:1-1:10\">x</p>\n\n<ul><li/data-sourcepos=\"1:1-1:10\">y</li></ul>\n").html;
         assert!(!html.contains("data-sourcepos=\"1:1-1:10\""), "{html}");
-        let html = render("<p title=\"data-sourcepos\">data-sourcepos = x</p>\n", false).html;
+        let html = render("<p title=\"data-sourcepos\">data-sourcepos = x</p>\n").html;
         assert!(html.contains(">data-sourcepos = x<") && html.contains("title=\"data-sourcepos\""), "{html}");
     }
 
     #[test]
     fn remote_picture_sources_are_deferred() {
-        let html = render("<picture>\n<source media=\"(prefers-color-scheme: dark)\" srcset=\"https://x.test/d.png\">\n<img alt=\"a\" src=\"local.png\">\n</picture>\n", true).html;
+        let html = render("<picture>\n<source media=\"(prefers-color-scheme: dark)\" srcset=\"https://x.test/d.png\">\n<img alt=\"a\" src=\"local.png\">\n</picture>\n").html;
         assert!(!html.contains(" srcset="), "{html}");
         assert!(html.contains("data-mddog-srcset=\"https://x.test/d.png\""), "{html}");
         assert!(html.contains("data-mddog-src=\"local.png\""), "{html}");
@@ -784,7 +782,7 @@ mod tests {
 
     #[test]
     fn emoji_in_link_text_unless_it_is_the_url() {
-        let html = render("[Sponsors :heart:](#x) <https://example.com/:smile:/x> [see $x$ here](#a) <img src=\"HTTPS://x.test/a.png\">\n", true).html;
+        let html = render("[Sponsors :heart:](#x) <https://example.com/:smile:/x> [see $x$ here](#a) <img src=\"HTTPS://x.test/a.png\">\n").html;
         assert!(html.contains(">Sponsors \u{2764}"), "{html}");
         assert!(html.contains(">https://example.com/:smile:/x<"), "{html}");
         assert!(html.contains(">see $x$ here<"), "{html}");
@@ -795,7 +793,6 @@ mod tests {
     fn remote_video_and_mixed_srcset_are_deferred() {
         let html = render(
             "<video src=\"https://x.test/v.mp4\" poster=\"https://x.test/p.png\"></video>\n\n<picture>\n<source srcset=\"a.png 1x, https://x.test/b.png 2x\">\n<img src=\"a.png\">\n</picture>\n",
-            true,
         )
         .html;
         assert!(html.contains("preload=\"none\""), "{html}");
@@ -811,13 +808,13 @@ mod tests {
         for url in ["a.png", "./http://x", "foo:bar", "//x.test/a.png", ""] {
             assert!(!is_remote(url), "{url:?}");
         }
-        let local = render("<video src=\"clip.mp4\"></video>\n", true).html;
+        let local = render("<video src=\"clip.mp4\"></video>\n").html;
         assert!(!local.contains("preload"), "{local}");
     }
 
     #[test]
     fn raw_autolink_ends_at_quote_or_angle() {
-        let html = render("<iframe src=\"https://example.com\"></iframe>\n\n<iframe>see https://a.test/x&lt;b</iframe>\n", true).html;
+        let html = render("<iframe src=\"https://example.com\"></iframe>\n\n<iframe>see https://a.test/x&lt;b</iframe>\n").html;
         assert!(html.contains("&lt;iframe src=\"<a href=\"https://example.com\" rel=\"nofollow\">https://example.com</a>\"&gt;&lt;/iframe&gt;"), "{html}");
         assert!(html.contains("<a href=\"https://a.test/x\" rel=\"nofollow\">https://a.test/x</a>&lt;b"), "{html}");
     }
@@ -846,7 +843,7 @@ mod tests {
 
     #[test]
     fn escaped_dollar_is_not_math() {
-        let html = render("Price \\$5 and \\$10, math $x_1$.\n", false).html;
+        let html = render("Price \\$5 and \\$10, math $x_1$.\n").html;
         assert!(!html.contains(HELD_DOLLAR) && html.contains("Price $5 and $10"), "{html}");
         let html = api_html("Price \\$k$ here and $l\\$ m$\n");
         assert!(!html.contains(HELD_DOLLAR) && html.contains("Price $k$ here"), "{html}");
@@ -856,17 +853,17 @@ mod tests {
 
     #[test]
     fn unmatched_display_math_leaves_the_rest_alone() {
-        let html = render("$$\n\nSome *em* and `a\\b`\n", false).html;
+        let html = render("$$\n\nSome *em* and `a\\b`\n").html;
         assert!(html.contains("<em>em</em>") && html.contains("<code>a\\b</code>"), "{html}");
-        let html = render("$$\n\n```\n$$\n```\n\nSome *em*\n", false).html;
+        let html = render("$$\n\n```\n$$\n```\n\nSome *em*\n").html;
         assert!(html.contains("<em>em</em>"), "{html}");
-        let html = render("    $$\n    a\\b\n    $$\n", false).html;
+        let html = render("    $$\n    a\\b\n    $$\n").html;
         assert!(html.contains("a\\b") && !html.contains("a\\\\b"), "{html}");
     }
 
     #[test]
     fn slugs_keep_what_github_keeps() {
-        let html = render("# हिन्दी\n\n# เมื่อ\n\n# x²\n\n# a‿b\n\n# Café\n\n# Café\n", false).html;
+        let html = render("# हिन्दी\n\n# เมื่อ\n\n# x²\n\n# a‿b\n\n# Café\n\n# Café\n").html;
         for id in ["हिन्दी", "เมื่อ", "\"user-content-x\"", "a‿b", "\"user-content-café\"", "\"user-content-café-1\""] {
             assert!(html.contains(id), "{id}: {html}");
         }
@@ -874,7 +871,7 @@ mod tests {
 
     #[test]
     fn footnote_links_reach_their_targets() {
-        let html = render("See[^n].\n\n[^n]: Note.\n", false).html;
+        let html = render("See[^n].\n\n[^n]: Note.\n").html;
         let ref_href = html.split("data-footnote-ref").next().unwrap().rsplit("href=\"#").next().unwrap().split('"').next().unwrap().to_string();
         assert!(html.contains(&format!("id=\"{ref_href}\"")), "{ref_href}: {html}");
         assert!(html.contains("data-footnote-backref"), "{html}");
@@ -898,7 +895,7 @@ mod tests {
         let src = format!(
             "<img alt=\"g\" src=\"..\\..\\..\\secret.png\"> <img alt=\"t\" src=\".&#9;./.&#9;./secret.png\"> ![a](img/a%20b.png) ![b](/logo.png) ![c](../../secret.png) ![d]({outside}) ![e](//host/x.png) ![f](https://x.test/r.png)\n\n<picture><source srcset=\"img/a%20b.png 1x, ../../secret.png 2x\"><img src=\"img/a%20b.png\"></picture>\n"
         );
-        let html = render_in(&src, false, Some(&dir)).html;
+        let html = render_in(&src, Some(&dir)).html;
         let _ = std::fs::remove_dir_all(&top);
         assert!(html.contains("src=\"img/a%20b.png\"") && html.contains("src=\"../logo.png\"") && html.contains("src=\"https://x.test/r.png\""), "{html}");
         assert!(!html.contains("src=\"..\\") && !html.contains("src=\".\t") && !html.contains(&format!("src=\"{outside}")) && !html.contains("src=\"//host"), "{html}");
@@ -936,10 +933,10 @@ mod tests {
     #[test]
     fn escaped_dollar_stays_in_code() {
         for src in ["<pre>\necho \\$HOME\n</pre>\n", ">     echo \\$HOME\n", "> ~~~\n> echo \\$HOME\n> ~~~\n"] {
-            let html = render(src, false).html;
+            let html = render(src).html;
             assert!(html.contains("echo \\$HOME"), "{html}");
         }
-        let html = render("\u{feff}```\n$a_b$\n```\n", false).html;
+        let html = render("\u{feff}```\n$a_b$\n```\n").html;
         assert!(html.contains("$a_b$"), "{html}");
     }
 
@@ -952,7 +949,7 @@ mod tests {
 
     #[test]
     fn padded_remote_urls_and_autoplay_are_deferred() {
-        let html = render("<img src=\" http://x.test/a.png\">\n\n<video autoplay src=\"https://x.test/v.mp4\" poster=\" https://x.test/p.png\"></video>\n", true).html;
+        let html = render("<img src=\" http://x.test/a.png\">\n\n<video autoplay src=\"https://x.test/v.mp4\" poster=\" https://x.test/p.png\"></video>\n").html;
         assert!(html.contains("data-mddog-src=\" http://x.test/a.png\""), "{html}");
         assert!(html.contains("data-mddog-poster=") && !html.contains("autoplay"), "{html}");
         assert!(html.contains("data-mddog-media=\"https://x.test/v.mp4\"") && !html.contains(" src=\"https://x.test/v.mp4\""), "{html}");
@@ -972,24 +969,24 @@ mod tests {
     fn deep_nesting_renders_on_a_small_stack() {
         let divs = format!("{}x{}", "<div>".repeat(10_000), "</div>".repeat(10_000));
         let quotes = format!("{}y", "> ".repeat(3_000));
-        let out = std::thread::Builder::new().stack_size(2 << 20).spawn(move || (render(&divs, true).html, render(&quotes, true).html)).unwrap().join().unwrap();
+        let out = std::thread::Builder::new().stack_size(2 << 20).spawn(move || (render(&divs).html, render(&quotes).html)).unwrap().join().unwrap();
         assert!(out.0.contains('x'));
         assert!(out.1.contains('y'));
     }
 
     #[test]
     fn first_node_is_sanitized() {
-        let img = render("<img src=x onerror=alert(1)>\n", false).html;
+        let img = render("<img src=x onerror=alert(1)>\n").html;
         assert!(!img.contains("onerror"), "{img}");
-        let center = render("<center>x</center>\n", false).html;
+        let center = render("<center>x</center>\n").html;
         assert!(!center.contains("<center"), "{center}");
-        let p = render("<p style=\"color:red\" id=\"y\">p</p>\n", false).html;
+        let p = render("<p style=\"color:red\" id=\"y\">p</p>\n").html;
         assert!(!p.contains("style=") && p.contains("user-content-y"), "{p}");
     }
 
     #[test]
     fn raw_heading_keeps_attributes() {
-        let html = render("<h1 align=\"center\">Title</h1>\n\n# Plain\n", false).html;
+        let html = render("<h1 align=\"center\">Title</h1>\n\n# Plain\n").html;
         assert!(html.contains("<h1 align=\"center\" class=\"heading-element\" dir=\"auto\">Title</h1>"), "{html}");
         assert!(html.contains("<h1 class=\"heading-element\" dir=\"auto\">Plain</h1>"), "{html}");
     }
