@@ -1,6 +1,9 @@
-pub fn replace(s: &str) -> String {
+use std::borrow::Cow;
+
+/// `s` with each `:shortcode:` swapped for its emoji. Borrowed when `s` has no shortcode.
+pub fn replace(s: &str) -> Cow<'_, str> {
     if !s.contains(':') {
-        return s.to_string();
+        return Cow::Borrowed(s);
     }
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
@@ -20,7 +23,7 @@ pub fn replace(s: &str) -> String {
         }
     }
     out.push_str(rest);
-    out
+    if out == s { Cow::Borrowed(s) } else { Cow::Owned(out) }
 }
 
 #[cfg(test)]

@@ -45,7 +45,7 @@ impl Debounce {
 }
 
 /// How long a glide lasts.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pace {
     /// `per_page` for each `page` pixels it covers.
     Page {
@@ -63,7 +63,7 @@ impl Pace {
 }
 
 /// A pixel scroll from one position to another, easing out.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Glide {
     from: u32,
     to: u32,
@@ -107,21 +107,21 @@ impl Glide {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heading {
     pub level: u8,
     pub title: String,
     pub row: u32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub root: bool,
     pub title: String,
     pub row: u32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     Scroll,
     /// A scroll that may glide: a jump of several rows from a key.
@@ -548,7 +548,7 @@ impl App {
     }
 
     fn digit(&mut self, c: char) -> Vec<Action> {
-        let n = c.to_digit(10).unwrap() as usize - 1;
+        let n = c as usize - '1' as usize;
         let g = self.group(n);
         if g.is_empty() {
             return vec![];
@@ -788,10 +788,7 @@ pub fn toc_entries(headings: &[Heading]) -> Vec<Entry> {
     let mut levels: Vec<u8> = headings.iter().map(|h| h.level).collect();
     levels.sort_unstable();
     levels.dedup();
-    if levels.is_empty() {
-        return vec![];
-    }
-    let cap = *levels.get(2).unwrap_or(levels.last().unwrap());
+    let Some(&cap) = levels.get(2).or(levels.last()) else { return vec![] };
     let kept: Vec<&Heading> = headings.iter().filter(|h| h.level <= cap).collect();
     let mut present: Vec<u8> = kept.iter().map(|h| h.level).collect();
     present.sort_unstable();

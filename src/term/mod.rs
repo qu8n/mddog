@@ -16,7 +16,7 @@ pub struct Tty {
     pub fd: i32,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Size {
     pub cols: u16,
     pub rows: u16,
@@ -415,7 +415,7 @@ fn csi_u(params: &str) -> Option<Key> {
 pub fn parse_keys(buf: &mut Vec<u8>, flush_esc: bool) -> Vec<Key> {
     let mut keys = Vec::new();
     let mut i = 0;
-    let b = buf.clone();
+    let b = &buf[..];
     while i < b.len() {
         let c = b[i];
         if c == 0x1b {

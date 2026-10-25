@@ -1,6 +1,6 @@
 # Architecture
 
-mddog previews a Markdown or MDX file in the terminal as a browser shows it. It writes HTML, dresses it in a style (GitHub's look is the default and, for now, the only one), lays it out in an off-screen WebKit view, cuts the page into image tiles, and draws them with the Kitty graphics protocol. Keys and the mouse scroll, search, and follow links. The file reloads when it changes. The page and the terminal parts take their colors from a theme, one CSS file. By default it is GitHub's light or dark theme, following the macOS appearance. With no file, or with a folder, it lists the Markdown files there to pick from. A Claude Code plugin shows the preview inside a session through a headless mode.
+mddog previews a Markdown or MDX file in the terminal as a browser shows it. It writes HTML, dresses it in a style (GitHub's look is the default and the only one so far), lays it out in an off-screen WebKit view, cuts the page into image tiles, and draws them with the Kitty graphics protocol. Keys and the mouse scroll, search, and follow links, and the file reloads when it changes. Colors come from a theme, one CSS file: GitHub's light or dark by default, following the macOS appearance. With no file, or with a folder, it lists the Markdown files there to pick from. A Claude Code plugin shows the preview inside a session through headless mode.
 
 It is a macOS-only Rust binary with no library users. The behavior contract for keys and events is in [docs/behavior.md](docs/behavior.md). Measurements, spike findings, and rejected approaches are in [docs/archive/](docs/archive/design-notes.md).
 
@@ -26,7 +26,7 @@ src/
     textmate.rs      TextMate highlighting (irosashi)
     emoji.rs, octicons.rs  :shortcodes: and inline icons
   page/              shared by the viewer, headless mode, and the spare
-    mod.rs           reads the source, has the style wrap the article in its page, CSS, and scripts, writes and loads it
+    mod.rs           reads the source, has the style wrap the article in its page, CSS, and scripts, writes the page and loads it (waits for fonts and images)
     script.rs        calls into mddog.js and parses its replies (layout, search, press)
     remote.rs        resolves remote image hosts and refuses private ones
   viewer/
@@ -58,7 +58,7 @@ assets/
 fixtures/            gfm.md, component.mdx and its GitHub twin, diagram.svg
 tests/               integration tests (help over a pty, search, watch, headless, textmate golden)
 reference/           Node and Python dev tools: CSS build, grammar export, captures, e2e
-docs/                behavior spec and archive
+docs/                behavior spec, theme guide, terminal UAT notes, archive
 plugins/
   claude-code/       Claude Code plugin: a pane that draws --headless output
 ```
@@ -70,7 +70,7 @@ config.toml + style.css (read once) -> theme, Mermaid engine, live reload
 
 file or stdin
   -> mdx.rs (MDX only) -> markdown.rs + sanitize + highlight -> article HTML
-  -> page/ + style (default github: page, light and dark CSS, Mermaid engine) + mddog.js, MathJax
+  -> page/ + style (github: page, CSS, Mermaid engine) + mddog.js, MathJax
   -> engine: WKWebView in this process, or in a warm spare over a Unix socket
   -> layout and tile snapshots (RGBA)
   -> kitty.rs -> terminal (shared memory, temp file, or PNG chunks)
@@ -85,7 +85,7 @@ Threads in the viewer:
 - **Main thread.** Owns the tty writes, the engine, the `App` state, and the tiles. It blocks on one channel and spins the WebKit run loop while it waits for a call.
 - **Render worker** (64 MiB stack). Reads the file and produces the HTML.
 - **Input thread.** Parses keys and mouse reports.
-- **Signal thread.** SIGWINCH becomes a resize. SIGTERM, SIGINT, and SIGHUP become a clean quit.
+- **Signal thread.** SIGWINCH becomes a resize. SIGTERM, SIGINT, and SIGHUP become a clean quit. A SIGINT that arrives while the editor runs is ignored. The signal handler checks whether the viewer was paused at delivery time, because the same Ctrl-C ends the editor, and by the time this thread runs the viewer may have its screen back.
 - **Watcher.** notify's own thread.
 - **Walker.** Lists files for the file list while it is open.
 - **Skeleton.** Held at least 100 ms once drawn. It stops in the same synchronized update as the first tiles.
@@ -100,7 +100,7 @@ Each subsystem has its own section, so a new note goes under the one it belongs 
 
 ### Config
 
-`src/config.rs` owns the optional config file: `$XDG_CONFIG_HOME/mddog/config.toml`, else `~/.config/mddog/config.toml`, plus an optional `style.css` in the same folder. The keys are `theme` (one theme, or `light:THEME,dark:THEME`; a theme is a built-in name or a `.css` path), `live_reload`, `smooth_scroll` (default true, and false makes every jump instant), `glide_ms_per_page` (default 200, how long a glide over one screen takes, see Event loop and keys), and `mermaid.engine` (pele or obsidian; unset, the theme picks). README.md documents them. `main` loads the file once, before the viewer takes the terminal, into a `OnceLock`. Everything else calls `config::get()`, which gives the defaults when nothing was loaded (tests, the library). Unknown keys and bad values stop the run with one line that names the file, the line, and the dotted key. `parse` also reads the theme files, so a missing file or a bad theme stops the run the same way. The spare loads the config too, for its warm-up page, and ignores errors there.
+`src/config.rs` owns the optional config file: `$XDG_CONFIG_HOME/mddog/config.toml`, else `~/.config/mddog/config.toml`, plus an optional `style.css` in the same folder. The keys are `theme` (one theme, or `light:THEME,dark:THEME`; a theme is a built-in name or a `.css` path), `live_reload`, `smooth_scroll` (default true, and false makes every jump instant), `glide_ms_per_page` (default 200, how long a glide over one screen takes, see Event loop and keys), `copy_on_select` (default false), and `mermaid.engine` (pele or obsidian; unset, the theme picks). `config.example.toml` lists them. `main` loads the file once, before the viewer takes the terminal, into a `OnceLock`. Everything else calls `config::get()`, which gives the defaults when nothing was loaded (tests, the library). Unknown keys and bad values stop the run with one line that names the file, the line, and the dotted key. `parse` also reads the theme files, so a missing file or a bad theme stops the run the same way. The spare loads the config too, for its warm-up page, and ignores errors there.
 
 ### Theme
 
@@ -127,7 +127,7 @@ The terminal chrome draws with the theme's `Palette`. `Palette::reset()` is `\x1
 1. `.mdx` goes through `mdx.rs`: markdown-rs parses it, imports, exports, expressions, and comments are dropped, and each component (a JSX element whose name is not lowercase HTML) becomes a `jsx` code block of its source. Lowercase elements such as `<details>` stay as HTML and go through the sanitizer. Nothing is executed. On a parse error the file renders as plain Markdown.
 2. `markdown.rs` parses with comrak (GFM on) and writes the HTML GitHub's Markdown API returns: alerts, footnotes, task lists, and math and Mermaid blocks. `sanitize.rs` cleans raw HTML with GitHub's allowlist. It notes whether the page has math or Mermaid, then calls the style's `dress`. The github style adds what github.com's repo view has after its scripts ran: heading anchors, frontmatter tables, and the Mermaid container. Last, `markdown.rs` links raw URLs and keeps source positions on top-level blocks only. cmark drops a backslash before punctuation and reads `*` and `_` in math as emphasis, so math is escaped before parsing. cmark also turns `\$` into `$`, so an escaped dollar outside code is held as `HELD_DOLLAR` until the math pass. Local media is confined to a root folder (see Security).
 3. Code is highlighted the way GitHub does it. tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, and PHP. irosashi, a Rust port of vscode-textmate, covers the rest with starry-night's grammars. Both map to GitHub's `pl-*` classes. `tests/textmate.golden` pins the output.
-4. `page/` (`page::doc`, `page::html`) is the one path from file bytes to a page, shared by the viewer and headless mode. It hands the article to the style's `page`, which adds the style's page context, its CSS layers (see Theme), `mddog.js` and MathJax from `page::scripts`, and its Mermaid scripts. The runtime files are extracted once to `~/Library/Caches/mddog/runtime-<hash>/`. `build.rs` computes the hash. WebKit's fallback draws the footnote back-link `↩` from a text font where Chrome uses Apple Color Emoji, so `EXTRA_CSS` forces the emoji font.
+4. `page/` (`page::doc`, `page::html`, `page::load`) is the one path from file bytes to a loaded page, shared by the viewer, headless mode, and the spare. It hands the article to the style's `page`, which adds the style's page context, its CSS layers (see Theme), `mddog.js` and MathJax from `page::scripts`, and its Mermaid scripts. `page::load` writes the page, waits for the load event, then gives fonts and images up to 500 ms. If the load event never comes, it returns an error. The viewer then keeps the source and shows the notice `The page did not load`, and the next re-render tries again. The runtime files are extracted once to `~/Library/Caches/mddog/runtime-<hash>/`. `build.rs` computes the hash. WebKit's fallback draws the footnote back-link `↩` from a text font where Chrome uses Apple Color Emoji, so `EXTRA_CSS` forces the emoji font.
 
 ### Styles
 
@@ -143,11 +143,11 @@ The goal is to show a Markdown file the way a browser or a Markdown app would. G
 
 A WKWebView in a borderless window parked off-screen, at the pane's CSS width and the display's scale. Each load sets its appearance to the theme. It is ordered in with occlusion detection off, because WebKit gives a hidden window almost no rendering updates. Every call has a 10 s limit. After one stall every later call fails at once, so `q` still restores the terminal. WebKit snaps a snapshot rect that starts or ends between CSS pixels, which shifts its rows by a device pixel and rasterizes text differently. With an odd cell height at scale 2, every other tile starts on a half CSS pixel, so `snapshot_into` takes the whole CSS pixels around such a rect and keeps the rows it was asked for.
 
-WebKit fires the load event, then spends about 7 ms on the first full layout before it answers the next call. `measure` would force that layout anyway, so the time after load is not waste. A rendering update (a frame) costs about 2.6 ms most of the time, with outliers whatever the idle gap before it, from 30 ms to 1.6 s. So there is no idle penalty to work around.
+WebKit fires the load event, then spends about 7 ms on the first full layout before it answers the next call. `measure` would force that layout anyway. A rendering update (a frame) costs about 2.6 ms, with outliers from 30 ms to 1.6 s whatever the idle gap before it, so there is no idle penalty to work around.
 
 ### Warm spare
 
-A cold first paint takes 200 to 215 ms on files without diagrams, most of it AppKit and WebKit startup, and about 260 ms on `fixtures/gfm.md`. A warm one takes 35 to 45 ms, and about 70 ms on `fixtures/gfm.md` (medians of 10 rounds, 2026-10-21). So after the first paint the viewer starts `mdd --spare`. The spare loads a warm page and waits on a Unix socket in the per-user temp dir. The socket name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. The viewer connects only to a socket its own user owns, and each side talks only to a peer with its own uid (`getpeereid`). It ignores a connection that never sends hello. The next viewer drives the spare's WebView with six requests (eval, load, resize, wait, snap, render). `load` carries the theme as its third element, and `render` is `["render", src, dir]` so the spare confines media to the same root. A late or missing reply to the first render ends the connection, so it can't answer the main thread's next request. The spare warms a file page, math, and Mermaid before a viewer asks, since the first of each costs more. One thread with the viewer's 64 MiB stack builds every highlighter (they are cached per thread) and does every render. Snapshots go straight into the shared memory the tile is sent in. A spare serves one viewer, then exits. An unused spare exits after 12 hours. It forks once more and the middle process exits, so launchd adopts it: Claude Code kills the plugin's child and all its descendants on each width change, and the next child would otherwise borrow a dying spare. The launchd job has no `KeepAlive`, so after the first spare the viewers start their own. `--start-at-login` adds a launchd job that starts one spare at login, and `--no-start-at-login` stops and removes it. `MDDOG_NO_SPARE` turns it off.
+A cold first paint takes about 200 ms, most of it AppKit and WebKit startup. A warm one takes 35 to 45 ms (medians of 10 rounds, 2026-10-21). So after the first paint the viewer starts `mdd --spare`. The spare loads a warm page and waits on a Unix socket in the per-user temp dir. The socket name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. The viewer connects only to a socket its own user owns, and each side talks only to a peer with its own uid (`getpeereid`). It ignores a connection that never sends hello. The next viewer drives the spare's WebView with six requests (eval, load, resize, wait, snap, render). `load` carries the theme as its third element, and `render` is `["render", src, dir]` so the spare confines media to the same root. A late or missing reply to the first render ends the connection, so it can't answer the main thread's next request. The spare warms a file page, math, and Mermaid before a viewer asks, since the first of each costs more. One thread with the viewer's 64 MiB stack builds every highlighter (they are cached per thread) and does every render. Snapshots go straight into the shared memory the tile is sent in. A spare serves one viewer, then exits. An unused spare exits after 12 hours. It forks once more and the middle process exits, so launchd adopts it: Claude Code kills the plugin's child and all its descendants on each width change, and the next child would otherwise borrow a dying spare. The launchd job has no `KeepAlive`, so after the first spare the viewers start their own. `--start-at-login` adds a launchd job that starts one spare at login, and `--no-start-at-login` stops and removes it. `MDDOG_NO_SPARE` turns it off.
 
 ### Display
 
@@ -177,7 +177,7 @@ The main thread probes the terminal (CSI 16 t, XTVERSION, DECRQM for modes 2026 
 
 While a file loads, `Loader` (`loading.rs`) draws a page-shaped skeleton in terminal cells: a heading bar, text lines, and a code block, with a diagonal shimmer that moves every 100 ms. It draws only when the page is not ready after 100 ms (`DELAY`), so a warm start usually finishes before it shows, and once drawn it stays at least 100 ms (`MIN_SHOWN`), so it never flashes. The margins are the page's 24 CSS px padding times the screen scale, over the cell size. The colors come from the theme (see Theme). `Loader::tune` takes the probe's answers, and a resize redraws the frame in full. `show()` calls `finish()` after the tile snapshots, so the minimum wait overlaps that work, and the clear and the first tiles go out in one synchronized update. The `term::WRITE` lock covers each whole write from `Tty::write` and the loader, so a frame can't split the probe query. The file list has no skeleton. Opening a file from the list, or going back to the file before, starts a new `Loader` before the file is parsed, with the same delay and minimum time. Its first frame clears the screen, so it replaces the list, and `show()` takes it down as at startup.
 
-A warm first paint of `ARCHITECTURE.md` takes about 44 ms: render in the spare (2 ms), page build and write (0.3 ms), page load (20 ms), measure and settle (5 ms), then two 8 MiB snapshots (9 ms and 5 ms). Page load is the largest part, and it is all WebKit. A side thread reads the macOS appearance at startup, because the first `config::theme()` call for a theme pair sets up NSUserDefaults and costs 2.1 ms.
+A warm first paint of this file takes about 44 ms, and page load (20 ms, all WebKit) is the largest part. A side thread reads the macOS appearance at startup, because the first `config::theme()` call for a theme pair sets up NSUserDefaults and costs 2.1 ms.
 
 ### Event loop and keys
 
@@ -191,7 +191,7 @@ A resize lays the live page out again instead of loading it (`Preview::resize_in
 - GitHub's Mermaid viewer drew the diagrams, because it reads the page width once, when it renders
 - the page did not reach its new size, or the frame did not come, within 100 ms. The old geometry is restored first, so the reload keeps the position.
 
-This saves 13 to 21 ms per resize. The archive's "Resize in place" section has the numbers.
+This saves 13 to 21 ms per resize (see the archive's "Resize in place").
 
 The jump keys glide: `d`/`u`, `f`/`b`, Space, PageUp/PageDown, `g`/`G`, Home/End, Backspace/Ctrl-o, digits, `J`/`K`, `]]`/`[[`. `App::handle` turns their `Action::Scroll` into `Action::Glide`. Every key in `App::instant` (`j`, `k`, `n`, `N`, Enter, the wheel) is left alone. `App.scroll` takes the target at once, so the status row and sidebar show where the view is going. Only the drawn offset moves.
 
@@ -227,7 +227,7 @@ Every top-level block carries comrak's `data-sourcepos`. Before a re-render, mdd
 
 ### Search
 
-`mddog.js` finds every occurrence across inline elements and soft wraps, with smart case (any uppercase letter makes it case-sensitive), and highlights them with the CSS Custom Highlight API, so the layout does not change. Only the tiles whose highlights changed are snapshotted and sent again. Under herdr only the changed rows go out, as a band over the tile (see Display). Each match's client rects are measured once, and measured again only when the current match sits in a sideways-scrollable block that `reveal` may have moved. With 408 matches on `ARCHITECTURE.md` the search takes 11.5 ms, and 9 ms of that is WebKit's `Range.getClientRects`. A search snapshot still waits for a frame: CSS highlights paint only during a rendering update, and `afterScreenUpdates` alone does not include them.
+`mddog.js` finds every occurrence across inline elements and soft wraps, with smart case (any uppercase letter makes it case-sensitive), and highlights them with the CSS Custom Highlight API, so the layout does not change. Only the tiles whose highlights changed are snapshotted and sent again. Under herdr only the changed rows go out, as a band over the tile (see Display). Each match's client rects are measured once, and measured again only when the current match sits in a sideways-scrollable block that `reveal` may have moved. The cost is mostly WebKit's `Range.getClientRects`. A search snapshot still waits for a frame: CSS highlights paint only during a rendering update, and `afterScreenUpdates` alone does not include them.
 
 ### Mermaid
 
@@ -241,8 +241,6 @@ Every top-level block carries comrak's `data-sourcepos`. Before a re-render, mdd
   - 45 s after `startMermaid`, whatever hasn't drawn shows an error, so the page settles before the viewer's 60 s `LATE_LIMIT`. Without that, many slow diagrams could change the layout after the last re-send, and the tiles went stale.
   - The skeleton opens at the diagram's drawn height when mddog has seen that diagram before. On reveal, `mddog.js` stores each diagram's viewBox in `state.sizes`, keyed by an FNV-1a hash of the source (`key`). A diagram drawn at its own size is stored with width 0, so its guess isn't scaled down. When the late check settles, `tick` merges those into `Sizes` (`viewer/sizes.rs`). After `READY`, `render_doc` passes them to `mddog.guess`, which sets each known box to that height at the current width. The sizes live in memory for reloads and in a cache file for reopens. The reveal clears the guessed height before it applies the real one, so the settled page doesn't depend on the guess. Only the viewer guesses. Headless mode doesn't.
   - `OBSIDIAN_CSS` in `style/github.rs` left-aligns the diagram and hides GitHub's diagram buttons, and `OBSIDIAN_DARK_CSS` adds the filter when the theme is dark. A width change doesn't need a reload: a diagram at its own size keeps it, and one that fits the width scales with CSS.
-
-The archive's "Mermaid with Pele" section has the comparison that made Pele the only engine for a while.
 
 ### Wide code blocks
 
@@ -337,7 +335,7 @@ Opening a file fetches only what the document names: remote images, video poster
 
 ## Development and testing
 
-- `./check.sh` is the gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
+- `./check.sh` is the gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. `[lints.clippy]` in `Cargo.toml` turns on some pedantic and nursery lints, `unwrap_used` among them. `clippy.toml` exempts unit tests, and each `tests/*.rs` file that needs `unwrap` has its own `#![expect]`. Outside tests, an `expect` names the invariant that holds, such as a built-in asset or a constant regex.
 - `python3 reference/keymap-check.py` checks that every test named in docs/behavior.md ran and passed.
 - `reference/e2e/` drives mddog in a herdr pane inside Ghostty for editor, external change, on-screen, search, and tile checks. The on-screen and search checks capture the Ghostty window.
 - `tests/help.rs` runs mdd in a pty as its own session leader, so Ctrl-z can't stop it there. `ctrl_z_suspends_and_resumes` passes `job: true` to `launch`, which forks a small job-control parent the way a shell does: mdd runs in its own foreground group, and the parent passes its stops and exit status up to the test.

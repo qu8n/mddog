@@ -1,4 +1,6 @@
-use kuchikiki::NodeRef;
+use kuchikiki::{ElementData, NodeRef};
+
+use super::dom::unwrap;
 
 const ALLOWED: &[&str] = &[
     "h1",
@@ -177,31 +179,28 @@ pub fn clean(root: &NodeRef) {
             continue;
         }
         let Some(el) = node.as_element() else { continue };
-        let tag = el.name.local.to_string();
-        if tag == "input" && is_task_box(&node) {
+        let tag: &str = &el.name.local;
+        if tag == "input" && is_task_box(&node, el) {
             let mut a = el.attributes.borrow_mut();
             a.map.retain(|k, _| matches!(&*k.local, "type" | "checked" | "disabled"));
             continue;
         }
-        if DROP_WITH_CONTENT.contains(&tag.as_str()) {
+        if DROP_WITH_CONTENT.contains(&tag) {
             node.detach();
             continue;
         }
-        if !ALLOWED.contains(&tag.as_str()) || from_markdown_only(&tag, &node) {
-            for c in node.children().collect::<Vec<_>>() {
-                node.insert_before(c);
-            }
-            node.detach();
+        if !ALLOWED.contains(&tag) || from_markdown_only(tag, el) {
+            unwrap(&node);
             continue;
         }
         let mut a = el.attributes.borrow_mut();
-        let extra = tag_attrs(&tag);
+        let extra = tag_attrs(tag);
         a.map.retain(|k, v| {
             let k = &*k.local;
             if !(ALL_ATTRS.contains(&k) || extra.contains(&k)) {
                 return false;
             }
-            match (tag.as_str(), k) {
+            match (tag, k) {
                 ("a", "href") => url_ok(&v.value, &["http", "https", "mailto", "github-windows", "github-mac", "x-github-client"]),
                 ("img", "src" | "longdesc") | (_, "cite") => url_ok(&v.value, &["http", "https"]),
                 ("video", "src" | "poster") => url_ok(&v.value, &["http", "https"]),
@@ -224,16 +223,13 @@ pub fn clean(root: &NodeRef) {
         }
         if tag == "a" && !a.contains("href") && !a.contains("name") && !a.contains("id") {
             drop(a);
-            for c in node.children().collect::<Vec<_>>() {
-                node.insert_before(c);
-            }
-            node.detach();
+            unwrap(&node);
         }
     }
 }
 
-fn is_task_box(node: &NodeRef) -> bool {
-    let attrs = node.as_element().unwrap().attributes.borrow();
+fn is_task_box(node: &NodeRef, el: &ElementData) -> bool {
+    let attrs = el.attributes.borrow();
     attrs.get("type") == Some("checkbox") && attrs.contains("disabled") && node.parent().is_some_and(|p| matches!(p.as_element().map(|e| &*e.name.local), Some("li" | "p")))
 }
 
@@ -241,8 +237,8 @@ fn in_footnotes(node: &NodeRef) -> bool {
     node.ancestors().any(|a| a.as_element().is_some_and(|e| &*e.name.local == "section" && e.attributes.borrow().get("class") == Some("footnotes")))
 }
 
-fn from_markdown_only(tag: &str, node: &NodeRef) -> bool {
-    tag == "section" && node.as_element().unwrap().attributes.borrow().get("class") != Some("footnotes")
+fn from_markdown_only(tag: &str, el: &ElementData) -> bool {
+    tag == "section" && el.attributes.borrow().get("class") != Some("footnotes")
 }
 
 #[cfg(test)]

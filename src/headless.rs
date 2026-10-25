@@ -44,7 +44,7 @@ pub fn run(file: PathBuf, cols: u16) -> i32 {
     let first = if spare.is_none() {
         let file = file.clone();
         std::thread::Builder::new()
-            .stack_size(64 << 20)
+            .stack_size(crate::render::STACK)
             .spawn(move || {
                 let bytes = std::fs::read(&file).ok()?;
                 let (_, doc) = page::doc(&file, &bytes, &page::base_dir(&file, false), |_, _| None);

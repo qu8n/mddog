@@ -134,7 +134,7 @@ pub fn serve() -> i32 {
     let remove = || remove_if(&path, bound);
     let (src_tx, src_rx) = mpsc::channel::<(String, PathBuf)>();
     let (doc_tx, doc_rx) = mpsc::channel();
-    let _ = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+    let _ = std::thread::Builder::new().stack_size(crate::render::STACK).spawn(move || {
         crate::render(WARM_MD);
         for (src, dir) in src_rx {
             if doc_tx.send(crate::render::markdown::render_in(&src, Some(&dir))).is_err() {
@@ -275,14 +275,17 @@ impl Client {
     }
 }
 
-fn doc(v: &Value) -> Option<crate::Doc> {
-    Some(crate::Doc { html: v["html"].as_str()?.to_string(), math: v["math"].as_bool()?, mermaid: v["mermaid"].as_bool()? })
+fn doc(v: Value) -> Option<crate::Doc> {
+    // `v["html"].take()` would panic on a reply that is not an object.
+    let Value::Object(mut m) = v else { return None };
+    let Some(Value::String(html)) = m.remove("html") else { return None };
+    Some(crate::Doc { html, math: m.get("math")?.as_bool()?, mermaid: m.get("mermaid")?.as_bool()? })
 }
 
 pub fn render(s: &mut UnixStream, src: &str, dir: &Path) -> Option<crate::Doc> {
     let reply = s.set_read_timeout(Some(CALL_LIMIT)).and_then(|()| write_frame(s, json!(["render", src, dir.to_string_lossy()]).to_string().as_bytes())).and_then(|()| read_frame(s));
     match reply {
-        Ok(b) => doc(&serde_json::from_slice(&b).ok()?),
+        Ok(b) => doc(serde_json::from_slice(&b).ok()?),
         Err(_) => {
             let _ = s.shutdown(std::net::Shutdown::Both);
             None
@@ -296,7 +299,7 @@ impl Client {
     }
 
     pub fn render(&self, src: &str, dir: &Path) -> Option<crate::Doc> {
-        doc(&self.call(json!(["render", src, dir.to_string_lossy()]), Duration::ZERO)?)
+        doc(self.call(json!(["render", src, dir.to_string_lossy()]), Duration::ZERO)?)
     }
 
     fn call(&self, req: Value, wait: Duration) -> Option<Value> {
@@ -346,6 +349,15 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn doc_refuses_a_reply_that_is_not_a_page() {
+        for v in [json!([]), json!("error"), json!(null), json!({"html": 1, "math": false, "mermaid": false})] {
+            assert!(doc(v).is_none());
+        }
+        let page = doc(json!({"html": "<p>x</p>", "math": true, "mermaid": false})).unwrap();
+        assert_eq!((page.html.as_str(), page.math, page.mermaid), ("<p>x</p>", true, false));
+    }
 
     #[test]
     fn frames_round_trip_and_refuse_huge_lengths() {

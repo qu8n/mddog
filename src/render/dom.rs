@@ -40,8 +40,12 @@ pub fn attr(n: &NodeRef, k: &str) -> Option<String> {
     n.as_element().and_then(|e| e.attributes.borrow().get(k).map(str::to_string))
 }
 
+pub fn has_attr(n: &NodeRef, k: &str) -> bool {
+    n.as_element().is_some_and(|e| e.attributes.borrow().contains(k))
+}
+
 pub fn has_class(n: &NodeRef, class: &str) -> bool {
-    attr(n, "class").is_some_and(|c| c.split_whitespace().any(|x| x == class))
+    n.as_element().is_some_and(|e| e.attributes.borrow().get("class").is_some_and(|c| c.split_whitespace().any(|x| x == class)))
 }
 
 pub fn set_attr(n: &NodeRef, k: &str, v: &str) {
@@ -96,11 +100,16 @@ pub fn flatten_deep(root: &NodeRef, max: usize) {
         }
     }
     for n in deep {
-        for c in n.children().collect::<Vec<_>>() {
-            n.insert_before(c);
-        }
-        n.detach();
+        unwrap(&n);
     }
+}
+
+/// Replaces `node` with its children.
+pub fn unwrap(node: &NodeRef) {
+    for c in node.children().collect::<Vec<_>>() {
+        node.insert_before(c);
+    }
+    node.detach();
 }
 
 #[cfg(test)]

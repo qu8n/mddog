@@ -12,7 +12,7 @@ fn help() -> String {
         "{USAGE}
 
 Render Markdown and MDX in the terminal as a browser shows them, styled like GitHub by default. The preview reloads when the file changes.
-It needs a terminal with the Kitty graphics protocol, such as Ghostty, Kitty, WezTerm, iTerm2, or Warp.
+It needs a terminal with the Kitty graphics protocol, such as Ghostty, Kitty, WezTerm, or iTerm2.
 With no file, it lists the Markdown files in the current git repo, or else the current folder, to pick from. With a folder, it lists that folder.
 With -, or with input piped in, it reads standard input.
 

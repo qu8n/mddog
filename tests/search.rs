@@ -1,3 +1,5 @@
+#![expect(clippy::unwrap_used, reason = "a failed step should fail the test")]
+
 use mddog::page::{self, script};
 use mddog::{assets, config::Mermaid, engine::Engine, render};
 use std::{path::Path, time::Duration};
@@ -116,7 +118,7 @@ fn hover_checks(eng: &mut Engine, check: &mut impl FnMut(&str, bool)) {
     check("h3_tooltip_left_of_button_inside_block", eng.eval(fits).unwrap() == "true");
     check("h4_same_target_no_redraw", hover_at(eng, (copy.0 - 1.0, copy.1)) == ("pointer".into(), vec![]));
     let code = center(eng, ".highlight pre span, .highlight pre");
-    check("h5_leaving_clears_and_redraws", hover_at(eng, code) == ("text".into(), vec![block.clone()]) && eng.eval(tip).unwrap() == serde_json::to_string(&idle).unwrap());
+    check("h5_leaving_clears_and_redraws", hover_at(eng, code) == ("text".into(), vec![block]) && eng.eval(tip).unwrap() == serde_json::to_string(&idle).unwrap());
     check("h6_link_is_pointer", hover_at(eng, center(eng, "p a")).0 == "pointer");
     let p: Vec<f64> =
         serde_json::from_str(&eng.eval("(() => { const r = document.querySelector('p').getBoundingClientRect(); return JSON.stringify([r.right - 2, r.top + r.height / 2]); })()").unwrap()).unwrap();
@@ -226,7 +228,7 @@ fn main() {
     load(&mut eng, "alpha beta gamma\n\nsecond para\n", 600.0);
     let rect = eng.eval("(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('p')); const b = r.getBoundingClientRect(); return JSON.stringify([b.left, b.top, b.right, b.bottom]); })()").unwrap();
     let r: Vec<f64> = serde_json::from_str(&rect).unwrap();
-    let y = (r[1] + r[3]) / 2.0;
+    let y = f64::midpoint(r[1], r[3]);
     let before = eng.snapshot(0.0, 100.0, 1.0).unwrap().rgba.to_vec();
     eng.eval(&format!("mddogMouse.select({}, {y}, {}, {y})", r[0], r[2])).unwrap();
     check("m3_select_text", eng.eval("getSelection().toString()").unwrap() == "alpha beta gamma");

@@ -56,3 +56,32 @@ codegen-units = 4
 [[test]]
 name = "search"
 harness = false
+
+# Pedantic and nursery lints that pass cleanly and catch real waste. The rest of those groups
+# mostly flag pixel-math casts and `#[must_use]`/`const fn` noise, so they stay off.
+[lints.clippy]
+cloned_instead_of_copied = "warn"
+dbg_macro = "warn"
+derive_partial_eq_without_eq = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+flat_map_option = "warn"
+implicit_clone = "warn"
+inefficient_to_string = "warn"
+large_stack_arrays = "warn"
+manual_assert = "warn"
+manual_let_else = "warn"
+manual_midpoint = "warn"
+manual_string_new = "warn"
+needless_continue = "warn"
+needless_for_each = "warn"
+redundant_clone = "warn"
+redundant_closure_for_method_calls = "warn"
+ref_option = "warn"
+semicolon_if_nothing_returned = "warn"
+stable_sort_primitive = "warn"
+todo = "warn"
+trivially_copy_pass_by_ref = "warn"
+uninlined_format_args = "warn"
+unnecessary_wraps = "warn"
+unwrap_used = "warn"

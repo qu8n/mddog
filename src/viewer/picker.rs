@@ -24,7 +24,7 @@ pub struct Item {
     pub mtime: SystemTime,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Pick {
     Nothing,
     Redraw,
@@ -689,7 +689,7 @@ mod tests {
             p.receive();
         }
         let mut got: Vec<&str> = p.items.iter().map(|i| i.rel.as_str()).collect();
-        got.sort();
+        got.sort_unstable();
         assert_eq!(got, ["a.md", "b.MDX", "c.markdown", "sub/g.md"]);
         assert!(p.items.iter().all(|i| i.title == "T"));
         std::fs::remove_dir_all(&dir).unwrap();

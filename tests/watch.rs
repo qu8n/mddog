@@ -20,7 +20,7 @@ fn d4_watch_rename() {
     let got = loop {
         match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(Event::FileChanged) => break Some(start.elapsed()),
-            Ok(_) => continue,
+            Ok(_) => {}
             Err(_) => break None,
         }
     };

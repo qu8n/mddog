@@ -35,7 +35,7 @@ const GO_BACK: &str = "Backspace or a click here goes back";
 const FOLD_IDLE: Duration = Duration::from_secs(1);
 /// The X11 name for the arrow, sent with OSC 22 off text, links and buttons.
 const DEFAULT_POINTER: &str = "left_ptr";
-/// How many files Backspace can go back through, as many as the jumps inside one file.
+/// How many files Backspace can go back through.
 const HISTORY: usize = 50;
 const UNSUPPORTED: &str = "mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use Ghostty, Kitty, WezTerm, or iTerm2. Terminal.app, tmux, and screen don't support it.";
 
@@ -175,7 +175,7 @@ pub struct Preview {
     last_press: Option<(Instant, u16, u16)>,
     /// The pointer shape last sent with OSC 22.
     pointer: &'static str,
-    /// Where the last move was hit-tested, with the scroll it was drawn at, so a move within the same spot does nothing.
+    /// Where the last move was hit-tested, with the scroll it was drawn at, so a repeat does nothing.
     hover_at: Option<(Spot, u32)>,
     /// The last move was over the page, so leaving it must clear the page's hover.
     hover_page: bool,
@@ -225,12 +225,12 @@ pub fn run(file: PathBuf, stdin: bool) -> i32 {
     start(file, stdin, None)
 }
 
-/// Starts with the list of Markdown files under `root` instead of a file.
 /// Whether input typed during the first render asks to quit, in either key encoding.
 fn quits(input: &[u8]) -> bool {
     term::parse_keys(&mut input.to_vec(), false).iter().any(|k| matches!(k, Key::Ctrl('c') | Key::Char('q' | 'Q')))
 }
 
+/// Starts with the list of Markdown files under `root` instead of a file.
 pub fn browse(root: PathBuf) -> i32 {
     start(PathBuf::new(), false, Some(root))
 }
@@ -240,11 +240,25 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let spare = engine::spare::connect();
     let (tx, rx) = mpsc::channel();
     let paused = Arc::new(AtomicBool::new(false));
+    // Whether a Ctrl-C came while the screen was ours. Checked at delivery, not when the thread
+    // runs: the same Ctrl-C ends the editor, and the viewer may be back by then.
+    // Registered before `Signals`, so it runs first.
+    let interrupt = Arc::new(AtomicBool::new(false));
+    let (int_paused, int) = (paused.clone(), interrupt.clone());
+    // SAFETY: the action only loads and stores atomics, which is async-signal-safe.
+    // Only ever set here, so a paused Ctrl-C can't erase an earlier one the thread hasn't seen yet.
+    let _ = unsafe {
+        signal_hook::low_level::register(libc::SIGINT, move || {
+            if !int_paused.load(Ordering::SeqCst) {
+                int.store(true, Ordering::SeqCst);
+            }
+        })
+    };
     if let Ok(mut signals) = signal_hook::iterator::Signals::new([libc::SIGWINCH, libc::SIGTERM, libc::SIGINT, libc::SIGHUP]) {
-        let (tx, paused) = (tx.clone(), paused.clone());
+        let tx = tx.clone();
         std::thread::spawn(move || {
             for s in signals.forever() {
-                if s == libc::SIGINT && paused.load(Ordering::SeqCst) {
+                if s == libc::SIGINT && !interrupt.swap(false, Ordering::SeqCst) {
                     continue;
                 }
                 let ev = if s == libc::SIGWINCH { Event::Resize } else { Event::Quit };
@@ -262,7 +276,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         p.list(tx.clone());
     }
     let _ = picker.is_none().then(|| {
-        std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        std::thread::Builder::new().stack_size(crate::render::STACK).spawn(move || {
             let bytes = std::fs::read(&f2);
             let _ = worker_tx.send(bytes.map(|b| {
                 let (src, doc) = page::doc(&f2, &b, &page::base_dir(&f2, stdin), |s, d| remote.and_then(|mut r| engine::spare::render(&mut r, s, d)));
@@ -1023,7 +1037,7 @@ impl Preview {
     }
 
     fn copy_due(&mut self) -> bool {
-        if !self.copy_until.is_some_and(|due| Instant::now() >= due) {
+        if self.copy_until.is_none_or(|due| Instant::now() < due) {
             return false;
         }
         self.copy_until = None;
@@ -1117,7 +1131,10 @@ impl Preview {
             .back_rows()
             .iter()
             .zip(anchors)
-            .map(|(&r, a)| a.and_then(|a| position::restore(&self.layout.blocks, position::Anchor { line: line(a.line), offset: a.offset })).map_or(r, |y| self.row_of(y)))
+            .map(|(&r, a)| {
+                a.and_then(|a| position::restore(&self.layout.blocks, position::Anchor { line: line(a.line), offset: a.offset }))
+                    .map_or(r, |y| ((y * self.scale).round() as u32).saturating_sub(self.phase) / self.cell_h)
+            })
             .collect();
         self.app.set_back_rows(rows);
     }
@@ -1144,7 +1161,7 @@ impl Preview {
             return;
         };
         let was_missing = std::mem::take(&mut self.app.missing);
-        if bytes == self.stamp {
+        if bytes == self.stamp && self.doc.is_some() {
             if was_missing {
                 self.draw_chrome();
             }
@@ -1233,11 +1250,9 @@ impl Preview {
         }
         self.measure();
         // The stamp keeps the source even when the load failed: stdin and live_reload = false
-        // re-render from it, and the missing doc makes the next re-render try again.
+        // re-render from it, and the missing doc makes the next re-render or file event try again.
         self.stamp = bytes;
-        if loaded.is_ok() {
-            self.doc = Some(doc);
-        }
+        self.doc = loaded.is_ok().then_some(doc);
         self.src = src;
         let mut scroll_px = 0u32;
         if let Some(a) = anchor {
@@ -1252,7 +1267,7 @@ impl Preview {
         }
         if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
-            return false;
+            return self.doc.is_some();
         }
         if let Err(e) = &loaded {
             self.app.notice = Some(format!("{}{}", e[..1].to_uppercase(), &e[1..]));
@@ -1664,7 +1679,7 @@ impl Preview {
         self.enter_screen(true);
         match result {
             Err(e) => self.notify(&e),
-            Ok(()) if self.stamp != before => self.notify("Reloaded"),
+            Ok(()) if self.stamp != before && self.doc.is_some() => self.notify("Reloaded"),
             Ok(()) => {}
         }
         trace::mark("editor reload");
@@ -1707,14 +1722,11 @@ impl Preview {
 
     fn back_file(&mut self) {
         let Some(v) = self.history.pop() else { return };
-        let bytes = match std::fs::read(&v.file) {
-            Ok(b) => b,
-            Err(_) => {
-                // Drop it, so the next Backspace reaches the files before it.
-                self.app.back_file = !self.history.is_empty();
-                self.notify(&format!("Can't read {}, so it left the Back list", v.name));
-                return;
-            }
+        let Ok(bytes) = std::fs::read(&v.file) else {
+            // Drop it, so the next Backspace reaches the files before it.
+            self.app.back_file = !self.history.is_empty();
+            self.notify(&format!("Can't read {}, so it left the Back list", v.name));
+            return;
         };
         let (wrap, toc_visible) = (self.app.wrap, self.app.toc_visible);
         self.app = v.app;

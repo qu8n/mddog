@@ -66,7 +66,7 @@ impl TryFrom<String> for ThemeSpec {
         };
         let pair = s.split(',').map(|p| p.trim().split_once(':')).collect::<Option<Vec<_>>>();
         match pair.as_deref() {
-            Some([("light", l), ("dark", d)]) | Some([("dark", d), ("light", l)]) => Ok(ThemeSpec::Pair { light: source(l)?, dark: source(d)? }),
+            Some([("light", l), ("dark", d)] | [("dark", d), ("light", l)]) => Ok(ThemeSpec::Pair { light: source(l)?, dark: source(d)? }),
             _ if s.contains(',') || s.starts_with("light:") || s.starts_with("dark:") => Err(format!("expected one theme, or \"light:THEME,dark:THEME\", but got {s:?}")),
             _ => Ok(ThemeSpec::One(source(&s)?)),
         }
@@ -102,14 +102,14 @@ impl Default for Themes {
     }
 }
 
-#[derive(Deserialize, Debug, Default, PartialEq)]
+#[derive(Deserialize, Debug, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct MermaidConfig {
     /// Unset, the theme's `--mddog-mermaid` picks the engine.
     pub engine: Option<Mermaid>,
 }
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Mermaid {
     Pele,

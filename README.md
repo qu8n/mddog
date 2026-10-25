@@ -16,7 +16,7 @@
 
 https://github.com/user-attachments/assets/dbb4fddc-95a9-47dd-afcf-ce04fe8b5002
 
-mddog fetches the Markdown (pun intended), turns it into a styled HTML page, renders the page in an off-screen [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) window, and sends the result to the terminal, allowing you to see and interact with the Markdown as you would in a browser.
+mddog fetches the Markdown (pun intended), turns it into a styled HTML page, renders the page in an off-screen [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) window, and sends the result to the terminal, so you see and use the Markdown as you would in a browser.
 
 ## Features
 
@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 <details>
 <summary>What this script does</summary>
 
-Running this script installs the latest release of mddog. It also registers a small launchd job that starts mddog with WebKit loaded at login, so the first preview after login opens faster. To opt out of this, run `mdd --no-start-at-login` after installing or set the environment variable `MDDOG_NO_START_AT_LOGIN=1` before running the script.
+The script installs the latest release of mddog. It also registers a small launchd job that starts mddog with WebKit loaded at login, so the first preview after login opens faster. To opt out of this, run `mdd --no-start-at-login` after installing or set the environment variable `MDDOG_NO_START_AT_LOGIN=1` before running the script.
 
 If you want to build from source instead, install [Rust](https://rust-lang.org/tools/install/) first, then run the following commands:
 
@@ -63,7 +63,6 @@ mdd <directory>  # list Markdown files in a directory to pick from
 ```
 
 Press `?` when inside the preview to see all the key bindings.
-
 
 ## Claude Code plugin
 

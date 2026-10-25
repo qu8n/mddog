@@ -75,9 +75,8 @@ pub fn dress(body: &NodeRef, front: Option<&str>) {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" if !has_class(&node, "sr-only") => heading(&node, &tag, &mut slugs),
             "code" | "pre" if has_class(&node, "notranslate") => remove_attr(&node, "class"),
             "table" => remove_attr(&node, "role"),
-            "markdown-accessiblity-table" => set_attr(&node, "data-catalyst", ""),
+            "markdown-accessiblity-table" | "math-renderer" => set_attr(&node, "data-catalyst", ""),
             "input" if has_class(&node, "task-list-item-checkbox") => set_attr(&node, "style", ""),
-            "math-renderer" => set_attr(&node, "data-catalyst", ""),
             "div" if has_class(&node, "highlight-source-mermaid") => {
                 let section = fragment(&mermaid_html(&node.text_contents())).remove(0);
                 if let Some(pos) = attr(&node, "data-sourcepos") {
@@ -93,7 +92,7 @@ pub fn dress(body: &NodeRef, front: Option<&str>) {
         let auto = match tag.as_str() {
             "p" | "ol" => true,
             "ul" => !has_class(&node, "contains-task-list"),
-            "div" => attr(&node, "align").is_some() || has_class(&node, "markdown-alert") || has_class(&node, "highlight"),
+            "div" => has_attr(&node, "align") || has_class(&node, "markdown-alert") || has_class(&node, "highlight"),
             "h2" => has_class(&node, "sr-only"),
             _ => false,
         };
@@ -118,10 +117,10 @@ fn front_matter_html(raw: &str) -> Option<String> {
 }
 
 fn slug(text: &str, slugs: &mut HashMap<String, usize>) -> String {
-    static PUNCTUATION: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"[^\p{L}\p{M}\p{Nd}\p{Pc}\- ]").unwrap());
+    static PUNCTUATION: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"[^\p{L}\p{M}\p{Nd}\p{Pc}\- ]").expect("valid regex"));
     let base = PUNCTUATION.replace_all(&text.to_lowercase(), "").replace(' ', "-");
     let n = slugs.entry(base.clone()).or_insert(0);
-    let out = if *n == 0 { base.clone() } else { format!("{base}-{n}") };
+    let out = if *n == 0 { base } else { format!("{base}-{n}") };
     *n += 1;
     out
 }

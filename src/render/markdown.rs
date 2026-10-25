@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
 
 use comrak::nodes::NodeValue;
 use comrak::{Arena, Options, format_html, parse_document};
 use kuchikiki::NodeRef;
+use kuchikiki::iter::NodeIterator;
 
 use super::dom::*;
 use super::{emoji, highlight, octicons, sanitize};
@@ -254,7 +256,7 @@ fn local_media(url: &str, dir: &Path, root: &Path) -> Option<String> {
     if path.to_ascii_lowercase().contains("%2f") {
         return None;
     }
-    let path = percent_decode(path);
+    let path = percent_decode(path)?;
     let joined = match path.strip_prefix('/') {
         Some(rest) => root.join(rest),
         None => dir.join(&path),
@@ -279,12 +281,15 @@ fn local_media(url: &str, dir: &Path, root: &Path) -> Option<String> {
     }
 }
 
-fn percent_decode(s: &str) -> String {
+/// None when the bytes aren't UTF-8, since the path checked must be the one WebKit opens.
+fn percent_decode(s: &str) -> Option<String> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        match (b[i], s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())) {
+        // from_str_radix takes a sign, and WebKit keeps `%+2` as it is.
+        let hex = b.get(i + 1..i + 3).filter(|h| h.iter().all(u8::is_ascii_hexdigit)).and_then(|h| u8::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok());
+        match (b[i], hex) {
             (b'%', Some(v)) => {
                 out.push(v);
                 i += 3;
@@ -295,7 +300,7 @@ fn percent_decode(s: &str) -> String {
             }
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8(out).ok()
 }
 
 fn media_root(dir: &Path, home: Option<&Path>) -> PathBuf {
@@ -357,35 +362,34 @@ pub fn render_in(src: &str, dir: Option<&Path>) -> Doc {
     if let Some(dir) = dir {
         confine_media(&body, dir);
     }
-    let remote = is_remote;
     for v in elements(&body).into_iter().filter(|n| is(n, "video")) {
-        let media = std::iter::once(v.clone()).chain(v.children().filter(|c| is(c, "source")));
-        if !attr(&v, "poster").is_some_and(|p| remote(&p)) && !media.into_iter().any(|m| attr(&m, "src").is_some_and(|s| remote(&s))) {
+        let mut media = std::iter::once(v.clone()).chain(v.children().filter(|c| is(c, "source")));
+        if !attr(&v, "poster").as_deref().is_some_and(is_remote) && !media.any(|m| attr(&m, "src").as_deref().is_some_and(is_remote)) {
             continue;
         }
         set_attr(&v, "preload", "none");
         remove_attr(&v, "autoplay");
-        if let Some(poster) = attr(&v, "poster").filter(|p| remote(p)) {
+        if let Some(poster) = attr(&v, "poster").filter(|p| is_remote(p)) {
             set_attr(&v, "data-mddog-poster", &poster);
             remove_attr(&v, "poster");
         }
         for m in std::iter::once(v.clone()).chain(v.children().filter(|c| is(c, "source"))) {
-            if let Some(src) = attr(&m, "src").filter(|s| remote(s)) {
+            if let Some(src) = attr(&m, "src").filter(|s| is_remote(s)) {
                 set_attr(&m, "data-mddog-media", &src);
                 remove_attr(&m, "src");
             }
         }
     }
     for n in elements(&body).into_iter().filter(|n| is(n, "source") || is(n, "img")) {
-        if let Some(set) = attr(&n, "srcset").filter(|s| s.split(',').any(remote)) {
+        if let Some(set) = attr(&n, "srcset").filter(|s| s.split(',').any(is_remote)) {
             set_attr(&n, "data-mddog-srcset", &set);
             remove_attr(&n, "srcset");
         }
     }
     for img in elements(&body).into_iter().filter(|n| is(n, "img")) {
         let src = attr(&img, "src").unwrap_or_default();
-        let sources = attr(&img, "data-mddog-srcset").is_some() || img.parent().is_some_and(|p| is(&p, "picture") && p.children().any(|c| attr(&c, "data-mddog-srcset").is_some()));
-        if remote(&src) || sources {
+        let sources = has_attr(&img, "data-mddog-srcset") || img.parent().is_some_and(|p| is(&p, "picture") && p.children().any(|c| has_attr(&c, "data-mddog-srcset")));
+        if is_remote(&src) || sources {
             set_attr(&img, "data-mddog-src", &src);
             set_attr(&img, "src", BLANK_GIF);
         }
@@ -453,8 +457,8 @@ fn alert(bq: &NodeRef) {
     }
     if rest.is_empty() {
         first.detach();
-        if p.first_child().is_some_and(|c| is(&c, "br")) {
-            p.first_child().unwrap().detach();
+        if let Some(br) = p.first_child().filter(|c| is(c, "br")) {
+            br.detach();
             if let Some(nl) = p.first_child().filter(|c| c.as_text().is_some_and(|t| t.borrow().trim().is_empty())) {
                 nl.detach();
             }
@@ -508,7 +512,7 @@ fn image(img: &NodeRef) {
 }
 
 fn link(a: &NodeRef) {
-    if attr(a, "target").is_some() || attr(a, "data-footnote-ref").is_some() || attr(a, "data-footnote-backref").is_some() || a.ancestors().any(|x| has_class(&x, "footnotes")) {
+    if has_attr(a, "target") || has_attr(a, "data-footnote-ref") || has_attr(a, "data-footnote-backref") || a.ancestors().any(|x| has_class(&x, "footnotes")) {
         return;
     }
     let Some(href) = attr(a, "href") else { return };
@@ -521,7 +525,7 @@ fn link(a: &NodeRef) {
 fn task_item(li: &NodeRef) {
     let input = li.children().find(|c| is(c, "input")).or_else(|| li.children().find(|c| is(c, "p")).and_then(|p| p.children().find(|c| is(c, "input"))));
     let Some(input) = input else { return };
-    let checked = attr(&input, "checked").is_some();
+    let checked = has_attr(&input, "checked");
     let fresh = el("input", &[("type", "checkbox"), ("id", ""), ("disabled", ""), ("class", "task-list-item-checkbox"), ("aria-label", if checked { "Completed task" } else { "Incomplete task" })]);
     if checked {
         set_attr(&fresh, "checked", "");
@@ -544,7 +548,7 @@ fn footnotes(section: &NodeRef) {
             set_attr(&li, "id", &format!("user-content-{id}-{RUN_ID}"));
         }
     }
-    for a in fresh.descendants().filter(|n| attr(n, "data-footnote-backref").is_some()).collect::<Vec<_>>() {
+    for a in fresh.descendants().filter(|n| has_attr(n, "data-footnote-backref")).collect::<Vec<_>>() {
         let href = attr(&a, "href").unwrap_or_default();
         let label = attr(&a, "aria-label").unwrap_or_default();
         let fresh_a =
@@ -557,7 +561,7 @@ fn footnotes(section: &NodeRef) {
 
 fn footnote_ref(sup: &NodeRef) {
     // The sanitizer keeps a footnote anchor's id unprefixed, so raw HTML's extra anchors are rebuilt too.
-    let refs: Vec<NodeRef> = sup.children().filter(|c| attr(c, "data-footnote-ref").is_some()).collect();
+    let refs: Vec<NodeRef> = sup.children().filter(|c| has_attr(c, "data-footnote-ref")).collect();
     if !refs.is_empty() {
         remove_attr(sup, "class");
     }
@@ -624,10 +628,13 @@ fn text_filters(body: &NodeRef) {
         }
         let (Some(prev), Some(next)) = (code.previous_sibling(), code.next_sibling()) else { continue };
         let (Some(before), Some(after)) = (prev.as_text(), next.as_text()) else { continue };
-        let (b, a) = (before.borrow().clone(), after.borrow().clone());
-        let (Some(b), Some(a)) = (b.strip_suffix('$'), a.strip_prefix('$')) else { continue };
-        *before.borrow_mut() = b.to_string();
-        *after.borrow_mut() = a.to_string();
+        let (b, a) = {
+            let (b, a) = (before.borrow(), after.borrow());
+            let (Some(b), Some(a)) = (b.strip_suffix('$'), a.strip_prefix('$')) else { continue };
+            (b.to_string(), a.to_string())
+        };
+        *before.borrow_mut() = b;
+        *after.borrow_mut() = a;
         let math = el("math-renderer", &[("class", "js-inline-math"), ("style", "display: inline-block"), ("data-run-id", RUN_ID)]);
         math.append(NodeRef::new_text(format!("${}$", escape(&code.text_contents()))));
         replace(&code, &math);
@@ -648,15 +655,17 @@ fn text_filters(body: &NodeRef) {
             }
         }
     }
-    for text in body.descendants().filter(|n| n.as_text().is_some()).collect::<Vec<_>>() {
-        if in_code(&text) {
+    for text in body.descendants().text_nodes().collect::<Vec<_>>() {
+        let node = text.as_node();
+        if in_code(node) {
             continue;
         }
-        let s = text.as_text().unwrap().borrow().clone();
-        if let Some(a) = link_of(&text) {
-            let replaced = if shows_own_url(&a) { s.clone() } else { emoji::replace(&s) };
-            if replaced != s {
-                *text.as_text().unwrap().borrow_mut() = replaced;
+        let s = text.borrow().clone();
+        if let Some(a) = link_of(node) {
+            if !shows_own_url(&a)
+                && let Cow::Owned(replaced) = emoji::replace(&s)
+            {
+                *text.borrow_mut() = replaced;
             }
             continue;
         }
@@ -670,9 +679,8 @@ fn text_filters(body: &NodeRef) {
             last = b;
         }
         if last == 0 {
-            let replaced = emoji::replace(&s);
-            if replaced != s {
-                *text.as_text().unwrap().borrow_mut() = replaced;
+            if let Cow::Owned(replaced) = emoji::replace(&s) {
+                *text.borrow_mut() = replaced;
             }
             continue;
         }
@@ -680,9 +688,9 @@ fn text_filters(body: &NodeRef) {
             pieces.push(escape(&emoji::replace(&s[last..])));
         }
         for f in fragment(&pieces.concat()) {
-            text.insert_before(f);
+            node.insert_before(f);
         }
-        text.detach();
+        node.detach();
     }
     for node in body.descendants() {
         if let Some(text) = node.as_text().filter(|t| t.borrow().contains(HELD_DOLLAR)) {
@@ -694,6 +702,9 @@ fn text_filters(body: &NodeRef) {
 
 pub fn inline_math(s: &str) -> Vec<(usize, usize)> {
     let b = s.as_bytes();
+    if !b.contains(&b'$') {
+        return Vec::new();
+    }
     let n = b.len();
     let mut escaped = vec![false; n];
     for i in 1..n {
@@ -738,11 +749,12 @@ pub fn inline_math(s: &str) -> Vec<(usize, usize)> {
 }
 
 fn raw_autolinks(body: &NodeRef) {
-    for text in body.descendants().filter(|n| n.as_text().is_some()).collect::<Vec<_>>() {
-        if in_code(&text) || link_of(&text).is_some() {
+    for text in body.descendants().text_nodes().collect::<Vec<_>>() {
+        let node = text.as_node();
+        if in_code(node) || link_of(node).is_some() {
             continue;
         }
-        let s = text.as_text().unwrap().borrow().clone();
+        let s = text.borrow().clone();
         let mut pieces = Vec::new();
         let mut last = 0;
         let mut i = 0;
@@ -774,9 +786,9 @@ fn raw_autolinks(body: &NodeRef) {
         }
         pieces.push(escape(&s[last..]));
         for f in fragment(&pieces.concat()) {
-            text.insert_before(f);
+            node.insert_before(f);
         }
-        text.detach();
+        node.detach();
     }
 }
 
@@ -933,10 +945,15 @@ mod tests {
         std::fs::write(repo.join("docs/secret.png"), b"x").unwrap();
         std::fs::write(top.join("secret.png"), b"x").unwrap();
         std::fs::write(repo.join("docs/img/x/y/in.png"), b"x").unwrap();
+        // Decoys for paths a loose decode would check in place of the ones WebKit opens.
+        for d in ["docs/l\u{2}", "docs/l\u{fffd}"] {
+            std::fs::create_dir_all(repo.join(d)).unwrap();
+            std::fs::write(repo.join(d).join("in.png"), b"x").unwrap();
+        }
         let dir = std::fs::canonicalize(repo.join("docs")).unwrap();
-        let html = render_in("![a](l/../../../secret.png) ![b](l%2F..%2F..%2F..%2Fsecret.png) ![c](l/in.png)\n", Some(&dir)).html;
+        let html = render_in("![a](l/../../../secret.png) ![b](l%2F..%2F..%2F..%2Fsecret.png) ![c](l/in.png) ![d](l%+2/in.png) ![e](l%ff/in.png)\n", Some(&dir)).html;
         let _ = std::fs::remove_dir_all(&top);
-        assert!(!html.contains("src=\"l/..") && !html.contains("src=\"l%2F"), "{html}");
+        assert!(!html.contains("src=\"l/..") && !html.contains("src=\"l%2F") && !html.contains("src=\"l%+2") && !html.contains("src=\"l%ff"), "{html}");
         assert!(html.contains("src=\"l/in.png\""), "{html}");
     }
 

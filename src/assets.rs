@@ -13,7 +13,7 @@ pub fn cache_dir() -> PathBuf {
     home.join("Library/Caches/mddog")
 }
 
-/// Called on each page load, so it also marks the folder as in use for the sweep.
+/// Called when a page needs math or Mermaid, and by the spare. Each call marks the folder as in use for the sweep.
 pub fn runtime_dir() -> PathBuf {
     let dir = cache_dir().join(RUNTIME);
     if let Ok(f) = std::fs::File::open(&dir) {

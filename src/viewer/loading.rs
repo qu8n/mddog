@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Write;
 use std::os::fd::FromRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -60,7 +60,7 @@ impl Look {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct Tune {
     scale: Option<f64>,
     cell: Option<(u32, u32)>,
@@ -78,6 +78,12 @@ struct Shared {
     stop: AtomicBool,
     drawn: Mutex<Shown>,
     tune: Mutex<Tune>,
+}
+
+/// Locks `m` even if the other thread panicked while holding it. The values are plain data, so a
+/// poisoned one is still usable.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Draws a skeleton of a page on the terminal until it is dropped, if the page takes longer than
@@ -116,7 +122,7 @@ impl Loader {
                 }
                 {
                     // Checked under the lock `finish` takes, so a frame is either never drawn or waited for.
-                    let mut drawn = s.drawn.lock().unwrap();
+                    let mut drawn = lock(&s.drawn);
                     if s.stop.load(Ordering::Acquire) {
                         break;
                     }
@@ -125,19 +131,19 @@ impl Loader {
                     }
                 }
                 let look = {
-                    let t = s.tune.lock().unwrap();
+                    let t = *lock(&s.tune);
                     let scale = t.scale.unwrap_or(2.0);
                     let cell = t.cell.or_else(|| size.cell_px(scale)).unwrap_or(((8.0 * scale) as u32, (16.0 * scale) as u32));
                     Look::new(theme, scale, cell)
                 };
                 let bytes = frame(i, &name, size, &look, last != Some((size, look)));
                 {
-                    let _held = term::WRITE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let _held = term::WRITE.lock().unwrap_or_else(PoisonError::into_inner);
                     let _ = out.write_all(bytes.as_bytes());
                 }
                 if last.is_none() {
                     // The minimum time counts from when the frame is out, not when it was started.
-                    *s.drawn.lock().unwrap() = Shown::Since(Instant::now());
+                    *lock(&s.drawn) = Shown::Since(Instant::now());
                     trace::mark("skeleton drawn");
                 }
                 last = Some((size, look));
@@ -150,20 +156,22 @@ impl Loader {
     /// Gives the skeleton what the terminal probe found: the screen scale and the cell size in
     /// device pixels.
     pub fn tune(&self, scale: f64, cell: (u32, u32)) {
-        *self.shared.tune.lock().unwrap() = Tune { scale: Some(scale), cell: Some(cell) };
+        *lock(&self.shared.tune) = Tune { scale: Some(scale), cell: Some(cell) };
     }
 
     /// Stops the skeleton, after it has been up for `MIN_SHOWN` if it was drawn.
     pub fn finish(self) {
         {
-            let d = self.shared.drawn.lock().unwrap();
-            if matches!(*d, Shown::No) {
+            // Stops under the lock, so the thread either sees the stop or has a frame to wait for.
+            let drawn = lock(&self.shared.drawn);
+            if matches!(*drawn, Shown::No) {
                 self.shared.stop.store(true, Ordering::Release);
                 return;
             }
         }
         loop {
-            let left = match *self.shared.drawn.lock().unwrap() {
+            let shown = *lock(&self.shared.drawn);
+            let left = match shown {
                 Shown::Since(at) => (at + MIN_SHOWN).saturating_duration_since(Instant::now()),
                 _ => Duration::from_millis(1),
             };
@@ -182,7 +190,7 @@ impl Drop for Loader {
             t.thread().unpark();
             let _ = t.join();
         }
-        if matches!(*self.shared.drawn.lock().unwrap(), Shown::Since(_)) {
+        if matches!(*lock(&self.shared.drawn), Shown::Since(_)) {
             trace::mark("skeleton cleared");
         }
     }

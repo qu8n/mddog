@@ -1,3 +1,5 @@
+#![expect(clippy::unwrap_used, reason = "a failed step should fail the test")]
+
 use std::io::{Read, Write};
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
@@ -49,7 +51,7 @@ fn start_exe(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>
     start_replying(exe, args, dir, cols, cell, probe_reply(cell), env, job)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "a test helper; each caller sets a different mix")]
 fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>, cols: u16, cell: (u16, u16), reply: Vec<u8>, env: &[(&str, &str)], job: bool) -> Viewer {
     let (mut master, mut slave) = (0, 0);
     let mut size = libc::winsize { ws_row: 40, ws_col: cols, ws_xpixel: cols * cell.0, ws_ypixel: 40 * cell.1 };
@@ -170,13 +172,24 @@ fn ctrl_c_in_the_editor_keeps_the_viewer() {
     std::thread::sleep(Duration::from_millis(300));
     tty.write_all(b"\x03").unwrap();
     let after = wait_for(&out, 0, b"Editor");
-    let alive = exits_within(&mut child, Duration::from_millis(1500)).is_none();
+    // Checked before writing again: a viewer that quit has closed the pty, so the write would fail
+    // with EIO and hide why.
+    assert!(exits_within(&mut child, Duration::from_millis(1500)).is_none(), "Ctrl-C in the editor quit the viewer");
     wait_for(&out, after, b"a=p,");
     tty.write_all(b"q").unwrap();
     let quit = exits_within(&mut child, Duration::from_secs(5));
     let _ = child.kill();
-    assert!(alive, "Ctrl-C in the editor quit the viewer");
     assert_eq!(quit, Some(true));
+}
+
+#[test]
+fn sigint_outside_the_editor_quits() {
+    let Viewer { mut child, out, .. } = open(GFM, 80, &[]);
+    wait_for(&out, 0, b"a=p,");
+    unsafe { libc::kill(child.id().cast_signed(), libc::SIGINT) };
+    let exit = exits_within(&mut child, Duration::from_secs(5));
+    let _ = child.kill();
+    assert!(exit.is_some(), "SIGINT didn't quit the viewer");
 }
 
 fn scratch(name: &str) -> std::path::PathBuf {

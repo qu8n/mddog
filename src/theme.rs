@@ -16,7 +16,7 @@ const BUILTIN: &[(&str, &str)] = &[
 pub type Rgb = (u8, u8, u8);
 
 /// The colors the terminal chrome draws with.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
     pub bg: Rgb,
     pub fg: Rgb,
@@ -270,8 +270,8 @@ fn masks(css: &str) -> (String, String) {
 
 /// Points each relative `url()` and `@import` at `dir`, the CSS file's folder. Otherwise they would start from the page's `<base>`, the Markdown file's folder.
 pub fn relative_urls(css: &str, dir: &Path) -> String {
-    static URL: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"(?i)(?:^|[^\w-])url\(\s*(?:"(x*)"|'(x*)'|([^\s"')]+))|@import\s+(?:"(x*)"|'(x*)')"#).unwrap());
-    static SCHEME: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.-]*:").unwrap());
+    static URL: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"(?i)(?:^|[^\w-])url\(\s*(?:"(x*)"|'(x*)'|([^\s"')]+))|@import\s+(?:"(x*)"|'(x*)')"#).expect("valid regex"));
+    static SCHEME: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.-]*:").expect("valid regex"));
     let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
     let (_, mask) = masks(css);
     let (mut out, mut last) = (String::with_capacity(css.len()), 0);

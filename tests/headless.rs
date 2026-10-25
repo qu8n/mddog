@@ -1,3 +1,5 @@
+#![expect(clippy::unwrap_used, reason = "a failed step should fail the test")]
+
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 

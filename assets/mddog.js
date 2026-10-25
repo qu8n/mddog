@@ -108,11 +108,11 @@ window.mddog = (() => {
     }
   }
 
-  // Obsidian's reading view: plain mermaid with Obsidian's settings. A skeleton holds each box and the drawing waits for startMermaid, so loading mermaid (3 MB) and the first layout stay out of the first paint.
-  // Mermaid lays the diagrams out in a hidden frame whose CSP allows only data: images and fonts, since a diagram can
-  // name images (an image shape, an <img> in a label) and the page's own checks for local and remote media don't
-  // see them. Each SVG then shows as an <img>, which never loads anything either. All diagrams replace their skeletons
-  // together, so the layout changes once.
+  // Obsidian's reading view: plain mermaid with Obsidian's settings. Skeletons hold each box until startMermaid, so
+  // loading mermaid (3 MB) and the first layout stay out of the first paint.
+  // Mermaid lays out in a hidden frame whose CSP allows only data: images and fonts, because a diagram can name
+  // images that the page's media checks don't see. Each SVG then shows as an <img>, which loads nothing either.
+  // All diagrams replace their skeletons together, so the layout changes once.
   function renderObsidian(src) {
     const views = [...document.querySelectorAll('mddog-mermaid')].map((el) => {
       const container = el.parentElement;
@@ -141,8 +141,8 @@ window.mddog = (() => {
         }
       }
     };
-    // Shows every diagram, or its error, at once. A diagram that never drew (mermaid failed to load, or the 45 s cutoff
-    // came first) shows an error. MERMAID_DONE waits until the images are decoded, so a snapshot after it has them.
+    // Shows every diagram, or its error, at once (also for one that never drew: mermaid failed to load, or the 45 s
+    // cutoff came first). MERMAID_DONE waits for the images to decode.
     let revealed = false;
     const reveal = async () => {
       if (revealed) return;
@@ -193,7 +193,7 @@ window.mddog = (() => {
       const done = () => { frame.remove(); reveal(); };
       frame.addEventListener('load', () => { draw(frame.contentWindow.mermaid).catch(() => {}).finally(done); }, { once: true });
       document.body.append(frame);
-      // Each diagram may take 4 s, so the page settles well before the viewer's 60 s LATE_LIMIT, whatever is left.
+      // Stops waiting before the viewer's 60 s LATE_LIMIT, however many diagrams are slow (each gets 4 s).
       setTimeout(done, 45000);
     };
     if (early) startMermaid();
@@ -347,8 +347,8 @@ window.mddogMouse = (() => {
     return [...r.getClientRects()].some((b) => vx >= b.left && vx <= b.right && vy >= b.top && vy <= b.bottom);
   }
 
-  // Off-screen WebKit gets no real pointer, so the viewer reports it here. Returns the pointer shape and the areas to redraw.
-  // Only code-block copy buttons get the hover look. `slack` widens the scroll bars as for a press.
+  // Off-screen WebKit gets no real pointer, so the viewer reports it here. Returns the pointer shape and the areas to
+  // redraw. Only code-block copy buttons get the hover look. `slack` widens the scroll bars as for a press.
   function hover(x, y, slack) {
     const el = x < 0 ? null : pick(x, y);
     const button = el?.closest('.zeroclipboard-container clipboard-copy') || null;

@@ -1,3 +1,5 @@
+use serde::Deserialize;
+
 use crate::engine::Engine;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -71,11 +73,11 @@ pub fn press(json: &str) -> Press {
     match hit[0].as_str() {
         Some("copy") => Press::Copy {
             text: hit[1].as_str().unwrap_or_default().to_string(),
-            rects: serde_json::from_value(hit[2].clone()).unwrap_or_default(),
+            rects: Deserialize::deserialize(&hit[2]).unwrap_or_default(),
             label: hit[3].as_str().unwrap_or("the code").to_string(),
         },
         Some("expand") => Press::Expand(hit[1].as_i64().unwrap_or(-1)),
-        Some("rect") => Press::Rect(serde_json::from_value(hit[1].clone()).ok()),
+        Some("rect") => Press::Rect(Deserialize::deserialize(&hit[1]).ok()),
         _ => Press::Other,
     }
 }

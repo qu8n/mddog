@@ -244,7 +244,7 @@ mod tests {
         while let Some(c) = chars.next() {
             if c != '\x1b' {
                 text.push(c);
-            } else if chars.by_ref().find(|c| c.is_ascii_alphabetic()) == Some('H') {
+            } else if chars.by_ref().find(char::is_ascii_alphabetic) == Some('H') {
                 break;
             }
         }
