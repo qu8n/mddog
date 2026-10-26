@@ -1,4 +1,4 @@
-//! Themes: one CSS file that the page loads after the style's CSS, and whose `color-scheme` and `--mddog-*` colors the terminal chrome draws with.
+//! Themes: one CSS file that the page loads after the style's CSS, and whose `color-scheme` and `--mddog-*` colors the terminal chrome draws with. A theme can recolor the page, as the GitHub themes do, or restyle all of it, as the Obsidian themes do.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};

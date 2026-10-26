@@ -521,3 +521,19 @@ First paint, median ms, 10 rounds per cell. Main is `2c0e206`.
 - Traces of 40 cold and 40 warm runs: no warm run drew the skeleton, and the warm median was 43.3 ms. Every cold run drew it. Cold medians were 105.1 ms to draw, 170.3 ms to layout ready, and 207.2 ms to first paint. The shortest showing was 100.3 ms. On a 1.7 s file it drew at 102 ms and cleared in the same write as the first paint.
 - Tiles were byte-identical to main: 146 of 146 over all four files, cold and warm, scrolled to the end.
 - Left as is: before the probe answers, the margins assume a 2x screen, so a 1x screen gets double margins for the first frames until a full repaint. A `#RGBA` or `#RRGGBBAA` background loses its alpha, and a page background changed in `style.css` is not used. A slow file opened from the file list sits on the list until it paints.
+
+## Figures moved out of ARCHITECTURE.md (2026-10-25)
+
+ARCHITECTURE.md was rewritten for reading. These measurements were in it and are kept here.
+
+- WebKit fires the load event, then spends about 7 ms on the first full layout before it answers the next call. A rendering update (a frame) costs about 2.6 ms, with outliers from 30 ms to 1.6 s whatever the idle gap before it, so there is no idle penalty to work around.
+- A warm first paint takes 35 to 45 ms (medians of 10 rounds, 2026-10-21), against about 200 ms cold.
+- Per 8 MiB tile, the WebKit snapshot takes 3 to 5 ms and NSImage to CGImage takes nothing. The BGRA to RGBA swap takes 1.1 ms, against 2.0 ms for a Core Graphics draw.
+- Under herdr, re-sending an 8 MiB tile costs herdr and Ghostty about 90 ms of CPU, which is why selection and search use bands.
+- After a resize, `retile` polls `innerHeight` until the page has its new size, which takes about 2 ms. Waiting for a frame instead takes 15 to 25 ms, because the rendering update after a resize to the full document height is expensive. The first snapshot then absorbs part of that work, so the net gain is 7 to 15 ms per render.
+- A glide frame takes under 0.1 ms of work in `show()`, except the first frame of a long jump, which sends tiles (12 to 16 ms). The event loop's 8 ms wake is about 9 to 10 ms in practice.
+- A warm first paint of ARCHITECTURE.md took about 44 ms, and page load (20 ms, all WebKit) was the largest part. The first `config::theme()` call for a theme pair costs 2.1 ms, which is why a side thread reads the appearance at startup.
+- Headless: a PNG takes about as long to encode as a snapshot (5 ms for 8 MiB). Encoding on up to 4 threads made a 19-tile page 35% faster.
+- The startup sweep takes under 0.5 ms with nothing to remove. Removing 220 leftovers took 22 ms, all after the first paint, which stayed at 211 ms (median of 30 headless runs with and without the sweep, 2026-10-22).
+- Pele draws 3 to 4 times faster than mermaid. PNG makes a tile about 30 times smaller for about 1 ms of encoding.
+- Resize in place saves 13 to 21 ms per resize (see "Resize in place" above).

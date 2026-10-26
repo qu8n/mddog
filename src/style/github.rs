@@ -1,4 +1,4 @@
-//! GitHub's look: the markup github.com's repo view puts around rendered Markdown, and its page and CSS. The github.com captures in `reference/` test this style.
+//! The GitHub style: the markup github.com's repo view puts around rendered Markdown, and the page and base CSS that every theme builds on. It also holds the CSS and script the obsidian Mermaid engine needs. The github.com captures in `reference/` test this style.
 
 use std::collections::HashMap;
 

@@ -52,7 +52,7 @@ pub(crate) fn file_url(p: &Path) -> String {
     format!("file://{}", percent_path(&p.to_string_lossy()))
 }
 
-/// The runtime every style loads, plus MathJax when the page has math.
+/// The runtime script, plus MathJax when the page has math.
 pub(crate) fn scripts(o: &Opts) -> String {
     let mut out = format!("<script>{RUNTIME_JS}</script>");
     if let (true, Some(rt)) = (o.math, o.runtime) {

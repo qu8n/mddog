@@ -18,7 +18,7 @@ Mouse
 Search
   / or Ctrl-f             search (Enter runs it, Esc cancels)
   n N, Enter              next, previous match
-  Esc                     clear the search
+  Esc                     clear the search, or close the contents
   Ctrl-u Ctrl-w           in the prompt: clear it, delete a word
                           Lowercase matches any case. Uppercase matches exactly.
 

@@ -23,6 +23,8 @@ mddog fetches the Markdown (pun intended), turns it into a styled HTML page, ren
 <img src="assets/mddog-themes.png" alt="Themes preview"/>
 
 - Preview Markdown/MDX with real fonts, Mermaid diagrams, math, and more
+- Look like GitHub or Obsidian, in light or dark to match macOS
+- Search, a table of contents, and a fuzzy file list
 - Keyboard-first navigation with vim-like key bindings
 - Mouse support for scrolling, clicking links, and selecting text
 - Automatically reload when the file changes
@@ -60,6 +62,7 @@ mdd --start-at-login
 mdd README.md    # preview a file
 mdd              # list Markdown files in the current git repo or directory to pick from
 mdd <directory>  # list Markdown files in a directory to pick from
+cat notes.md | mdd  # preview standard input
 ```
 
 Press `?` when inside the preview to see all the key bindings.
@@ -86,14 +89,17 @@ Then start a new session or run `/reload-plugins`.
 
 - Inside a Claude Code session, open a file with `/mddog @<file.md>` or `/mddog <file.md>`, or ask Claude to show you one.
 - Scroll with the mouse wheel, or click the pane and use the arrow and page keys.
+- The pane refreshes when the file changes.
+- If Claude opens the pane and it doesn't appear, the terminal is too narrow. Zoom out, or run `/mddog <file.md>` yourself.
+- To run a different `mdd` binary, set `MDDOG_BIN`.
 
 Note: Claude Code only shows images in the terminals it knows, like Ghostty, kitty, iTerm2, and WezTerm. In other places, start it with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 claude`.
 
 ## Config (optional)
 
-Configure your mddog at `~/.config/mddog/config.toml`. See [`config.example.toml`](config.example.toml) for every option.
+Configure your mddog at `~/.config/mddog/config.toml`, or `$XDG_CONFIG_HOME/mddog/config.toml` when that is set. See [`config.example.toml`](config.example.toml) for every option.
 
-Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`. To tweak the current theme, add CSS to `~/.config/mddog/style.css`. To write your own theme, see [docs/themes.md](docs/themes.md).
+Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`. By default mddog uses the GitHub pair and follows the macOS appearance. The Obsidian themes restyle the whole page like Obsidian's reading view and draw Mermaid diagrams the way Obsidian does. To tweak the current theme, add CSS to `~/.config/mddog/style.css`, which loads after the theme. To write your own theme, see [docs/themes.md](docs/themes.md).
 
 ## Limitations
 

@@ -2,7 +2,7 @@
 
 The key and event contract for the viewer. It started from leaf's Document mode. `python3 reference/keymap-check.py` checks that every test named in the last column ran and passed.
 
-Source: leaf `07653b83749b74aafbad926374b0e86967201221`, Document mode, read in full. Units: one row is one terminal cell row. `H` is the viewport height: terminal rows minus one status row. leaf appends 5 blank rows to every document, so `total` is the document's rows plus 5, and `max = max(0, total - H)`. Every row below has a test named in the last column (in `src/viewer/app.rs` unless noted).
+Source: leaf `07653b83749b74aafbad926374b0e86967201221`, Document mode, read in full. Units: one row is one terminal cell row. `H` is the viewport height: terminal rows minus one status row. leaf appends 5 blank rows to every document, so `total` is the document's rows plus 5, and `max = max(0, total - H)`. Every row below except row 46 has a test named in the last column (in `src/viewer/app.rs` unless noted).
 
 | # | Key or event | Behavior | leaf source | Test |
 |---|---|---|---|---|
@@ -32,8 +32,8 @@ Source: leaf `07653b83749b74aafbad926374b0e86967201221`, Document mode, read in 
 | 24 | Enter, no prompt | With an active search, same as `n`. Otherwise nothing | keyboard.rs:449 | `s13_enter_next` |
 | 25 | matching rule | Literal substring: no regex, and the query is not trimmed. mddog uses smart case, a change from `cfa1dca`: a query with no uppercase letter matches any case, a query with an uppercase letter matches that case exactly | search.rs:108 | `s14_case_insensitive_literal`, plus `s14_case_insensitive`, `s14_literal_not_regex`, `s14_untrimmed_query`, `v6_smart_case` (in `tests/search.rs`) |
 | 26 | inline formatting | A match can span inline formatting (`hello **world**` matches `hello world`) | tests/app.rs:13 | `s15_spans_formatting` (in `tests/search.rs`) |
-| 27 | `t` | Toggles the left sidebar, which mddog calls the contents panel (default hidden). It shows only if the document has headings, otherwise the notice `This file has no headings` appears. It does not open below 40 columns. The document re-renders narrower. The state survives reloads. Esc also closes it (row 22) | keyboard.rs:676, render/mod.rs:52 | `t01_toggle` |
-| 28 | sidebar width | 30 cells plus a 1-cell border, at most `cols / 3`, a change from leaf's `cols / 2 - 1` in `cfa1dca`, and 0 below 40 columns | app/mod.rs:497, picker_width.rs:7 | `t02_width` |
+| 27 | `t` | Toggles the left sidebar, which mddog calls the contents panel (default hidden). It shows only if the document has headings, otherwise the notice `This file has no headings` appears. It does not open below 40 columns, and shows the notice `Too narrow for the contents. It needs 40 columns` instead. The document re-renders narrower. The state survives reloads. Esc also closes it (row 22) | keyboard.rs:676, render/mod.rs:52 | `t01_toggle` |
+| 28 | sidebar width | 30 cells plus a 1-cell border, with the total at most `cols / 3`, a change from leaf's `cols / 2 - 1` in `cfa1dca`, and 0 below 40 columns | app/mod.rs:497, picker_width.rs:7 | `t02_width` |
 | 29 | levels | Keep levels up to the third-smallest distinct level. Root = smallest level, except when it has exactly one heading and 2+ levels exist, then the second-smallest. Sub = the next level. Others hidden | markdown/toc.rs:25, 47 | `t03_levels` |
 | 30 | `1` to `9` | Jump to the Nth root entry (works with the sidebar hidden). Pressing the same digit again steps through that entry's sub-entries and wraps. A sub-entry that already sits at the top of the screen is skipped. An out-of-range digit does nothing. A jump can be undone with Backspace (row 39) | navigation.rs:176, 212 | `t04_digits` |
 | 31 | `0` | Toggles reverse stepping for the next repeat of the same digit | navigation.rs:120, 226 | `t05_zero_reverse` |

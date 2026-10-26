@@ -1,4 +1,4 @@
-//! A style decides how a rendered document looks: the markup added to the HTML from the Markdown, the page around it with its CSS, and which Mermaid engine draws diagrams. GitHub's look is the default and, for now, the only style.
+//! A style is the markup added to the HTML from the Markdown, the page around it with its base CSS, and the Mermaid engine to use when neither the config nor the theme names one. The theme's CSS loads on top and can restyle the whole page, as the Obsidian themes do. GitHub's markup is the only style so far, so it sits under every theme.
 
 use kuchikiki::NodeRef;
 
