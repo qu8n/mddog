@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Write;
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
@@ -103,11 +103,10 @@ impl Loader {
             while !s.stop.load(Ordering::Acquire) && Instant::now() < shown {
                 std::thread::park_timeout(shown.saturating_duration_since(Instant::now()));
             }
-            let fd = unsafe { libc::dup(fd) };
-            if fd < 0 {
-                return;
-            }
-            let mut out = unsafe { File::from_raw_fd(fd) };
+            // SAFETY: the viewer keeps the tty fd open while a Loader runs, and only the clone outlives this line.
+            let Ok(fd) = unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned() else { return };
+            let mut out = File::from(fd);
+            let fd = out.as_raw_fd();
             let theme = config::theme();
             // A terminal too small to draw in waits, so the minimum time starts at a visible frame.
             let mut last = None;

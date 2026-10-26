@@ -90,6 +90,7 @@ impl Tty {
     }
 
     pub fn raw(&mut self) -> io::Result<()> {
+        // SAFETY: termios is plain integers, so all zeros is valid; fd is the open tty, and t outlives each call.
         unsafe {
             let mut t: libc::termios = std::mem::zeroed();
             if libc::tcgetattr(self.fd, &mut t) != 0 {
@@ -110,6 +111,7 @@ impl Tty {
 
     pub fn restore(&mut self) {
         if let Some(t) = self.saved {
+            // SAFETY: fd is the open tty, and t is the termios tcgetattr filled in.
             unsafe {
                 libc::tcsetattr(self.fd, libc::TCSANOW, &t);
                 libc::tcflush(self.fd, libc::TCIFLUSH);
@@ -206,7 +208,8 @@ pub fn pointer(shape: &str) -> String {
 }
 
 pub fn size_of(fd: i32) -> Size {
-    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+    let mut ws = libc::winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
+    // SAFETY: TIOCGWINSZ writes one winsize through the pointer, and a bad fd only returns an error.
     unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) };
     Size { cols: ws.ws_col, rows: ws.ws_row, xpix: ws.ws_xpixel, ypix: ws.ws_ypixel }
 }
@@ -222,6 +225,7 @@ pub fn on_panic_restore(saved: Option<libc::termios>) {
             let _ = f.write_all(leave().as_bytes());
             let _ = f.flush();
             if let Some(t) = saved {
+                // SAFETY: f is open for this call, and t is the termios tcgetattr filled in.
                 unsafe { libc::tcsetattr(f.as_raw_fd(), libc::TCSANOW, &t) };
             }
         }
@@ -242,6 +246,7 @@ pub fn readable(fd: i32, timeout: Duration) -> bool {
     }
     let micros = timeout.as_micros().min(i32::MAX as u128) as i64;
     let mut tv = libc::timeval { tv_sec: micros / 1_000_000, tv_usec: (micros % 1_000_000) as _ };
+    // SAFETY: fd_set is plain integers, so all zeros is valid, and fd < FD_SETSIZE (checked above) keeps FD_SET in bounds.
     unsafe {
         let mut set: libc::fd_set = std::mem::zeroed();
         libc::FD_ZERO(&mut set);
@@ -586,15 +591,10 @@ mod tests {
 
     #[test]
     fn readable_waits_for_input() {
-        let mut fds = [0; 2];
-        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
-        assert!(!readable(fds[0], Duration::from_millis(10)));
-        assert_eq!(unsafe { libc::write(fds[1], b"x".as_ptr().cast(), 1) }, 1);
-        assert!(readable(fds[0], Duration::from_millis(10)));
-        unsafe {
-            libc::close(fds[0]);
-            libc::close(fds[1]);
-        }
+        let (r, mut w) = io::pipe().unwrap();
+        assert!(!readable(r.as_raw_fd(), Duration::from_millis(10)));
+        w.write_all(b"x").unwrap();
+        assert!(readable(r.as_raw_fd(), Duration::from_millis(10)));
         assert!(readable(libc::FD_SETSIZE as i32 + 10, Duration::ZERO));
     }
 

@@ -25,7 +25,7 @@ fn path() -> Option<PathBuf> {
     let meta = std::fs::metadata(&exe).ok()?;
     let mut h = DefaultHasher::new();
     (exe, meta.len(), meta.modified().ok()).hash(&mut h);
-    Some(std::env::temp_dir().join(format!("mddog-{}-{:016x}.sock", unsafe { libc::getuid() }, h.finish())))
+    Some(std::env::temp_dir().join(format!("mddog-{}-{:016x}.sock", crate::sweep::uid(), h.finish())))
 }
 
 fn off() -> bool {
@@ -59,7 +59,7 @@ fn agent_plist() -> Result<PathBuf, String> {
 }
 
 fn agent_target() -> String {
-    format!("gui/{}", unsafe { libc::getuid() })
+    format!("gui/{}", crate::sweep::uid())
 }
 
 pub fn start_at_login() -> Result<PathBuf, String> {
@@ -74,7 +74,16 @@ pub fn start_at_login() -> Result<PathBuf, String> {
     std::fs::create_dir_all(plist.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
     std::fs::write(&plist, body).map_err(|e| format!("{}: {e}", plist.display()))?;
     let target = agent_target();
-    let _ = Command::new("launchctl").args(["bootout", &format!("{target}/{AGENT}")]).stderr(Stdio::null()).status();
+    let service = format!("{target}/{AGENT}");
+    let _ = Command::new("launchctl").args(["bootout", &service]).stderr(Stdio::null()).status();
+    // bootout returns while launchd is still tearing the job down, and a bootstrap then fails with error 5.
+    for _ in 0..100 {
+        let gone = !Command::new("launchctl").args(["print", &service]).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+        if gone {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let ok = Command::new("launchctl").args(["bootstrap", &target]).arg(&plist).status().is_ok_and(|s| s.success());
     if ok { Ok(plist) } else { Err(format!("launchctl could not load {}", plist.display())) }
 }
@@ -100,6 +109,7 @@ pub fn spawn() {
     for k in ["MDDOG_TRACE", "MDDOG_DUMP_VIEW", "MDDOG_DUMP_TILES", "MDDOG_DEBUG"] {
         cmd.env_remove(k);
     }
+    // SAFETY: the hook runs in the forked child, so it calls only setsid, fork, and _exit (async-signal-safe) and allocates nothing.
     unsafe {
         cmd.pre_exec(|| {
             libc::setsid();
@@ -117,6 +127,7 @@ pub fn spawn() {
 
 pub fn serve() -> i32 {
     let Some(path) = path() else { return 1 };
+    // SAFETY: umask only sets the process file mode mask and cannot fail.
     unsafe { libc::umask(0o077) };
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
@@ -145,6 +156,10 @@ pub fn serve() -> i32 {
     let mut engine = Engine::new(800.0);
     engine.load_blank();
     warm(&engine);
+    if !engine.content_rules() {
+        remove();
+        return 1;
+    }
     let deadline = Instant::now() + IDLE;
     let client = loop {
         let left = deadline.saturating_duration_since(Instant::now());
@@ -153,6 +168,7 @@ pub fn serve() -> i32 {
             return 0;
         }
         let mut fds = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+        // SAFETY: fds is one valid pollfd, and the count passed is 1.
         match unsafe { libc::poll(&mut fds, 1, left.as_millis().min(i32::MAX as u128) as i32) } {
             0 => continue,
             n if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => continue,
@@ -189,6 +205,7 @@ fn remove_if(path: &Path, id: Option<(u64, u64)>) {
 
 fn same_user(s: &UnixStream) -> bool {
     let (mut uid, mut gid) = (0, 0);
+    // SAFETY: the socket fd is open for this call, and uid and gid are valid out-pointers.
     unsafe { libc::getpeereid(s.as_raw_fd(), &mut uid, &mut gid) == 0 && uid == libc::geteuid() }
 }
 
@@ -255,7 +272,7 @@ pub fn connect() -> Option<Client> {
     }
     let path = path()?;
     let meta = std::fs::symlink_metadata(&path).ok()?;
-    if meta.uid() != unsafe { libc::getuid() } || !meta.file_type().is_socket() {
+    if !crate::sweep::mine(&meta) || !meta.file_type().is_socket() {
         return None;
     }
     let mut s = UnixStream::connect(&path).ok()?;

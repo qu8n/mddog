@@ -1,6 +1,8 @@
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fmt::Write as _;
+use std::fs::File;
 use std::io::Write as _;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
 
 use crate::sweep::{self, write_private};
@@ -42,32 +44,27 @@ pub struct Shm {
 impl Shm {
     pub fn create(name: String, len: usize) -> Option<Shm> {
         let c = CString::new(name.as_str()).ok()?;
-        let fd = unsafe { libc::shm_open(c.as_ptr(), libc::O_CREAT | libc::O_RDWR | libc::O_EXCL, 0o600) };
-        if fd < 0 {
-            return None;
-        }
-        let sized = unsafe { libc::ftruncate(fd, len as libc::off_t) } == 0;
-        let shm = Shm::map(fd, name, if sized { len } else { 0 }, true);
+        let file = shm_open(&c, libc::O_CREAT | libc::O_RDWR | libc::O_EXCL)?;
+        let len = if file.set_len(len as u64).is_ok() { len } else { 0 };
+        let shm = Shm::map(&file, name, len, true);
         if shm.is_none() {
-            unsafe { libc::shm_unlink(c.as_ptr()) };
+            unlink(&c);
         }
         shm
     }
 
     pub fn open(name: &str) -> Option<Shm> {
-        let c = CString::new(name).ok()?;
-        let fd = unsafe { libc::shm_open(c.as_ptr(), libc::O_RDWR) };
-        if fd < 0 {
-            return None;
-        }
-        let mut st: libc::stat = unsafe { std::mem::zeroed() };
-        let len = if unsafe { libc::fstat(fd, &mut st) } == 0 { st.st_size as usize } else { 0 };
-        Shm::map(fd, name.to_string(), len, false)
+        let file = shm_open(&CString::new(name).ok()?, libc::O_RDWR)?;
+        let len = file.metadata().map_or(0, |m| m.len() as usize);
+        Shm::map(&file, name.to_string(), len, false)
     }
 
-    fn map(fd: libc::c_int, name: String, len: usize, owned: bool) -> Option<Shm> {
-        let p = if len == 0 { libc::MAP_FAILED } else { unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0) } };
-        unsafe { libc::close(fd) };
+    fn map(file: &File, name: String, len: usize, owned: bool) -> Option<Shm> {
+        if len == 0 {
+            return None;
+        }
+        // SAFETY: a new shared mapping of an open fd, which no Rust reference can alias yet.
+        let p = unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, file.as_raw_fd(), 0) };
         (p != libc::MAP_FAILED).then(|| Shm { name, ptr: p.cast(), len, owned })
     }
 
@@ -89,24 +86,29 @@ impl Shm {
     }
 }
 
-// The mapping belongs to this value alone, like a Box<[u8]>, so another thread may own it.
+// SAFETY: the mapping belongs to this value alone, like a Box<[u8]>, so another thread may own it.
 unsafe impl Send for Shm {}
 
 impl std::ops::Deref for Shm {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
+        // SAFETY: ptr maps len bytes until drop. Other mappings are in other processes (the spare, the terminal),
+        // and the snap request and reply keep the spare from writing while this side holds a slice.
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
 }
 
 impl std::ops::DerefMut for Shm {
     fn deref_mut(&mut self) -> &mut [u8] {
+        // SAFETY: ptr maps len bytes until drop, and &mut self is the only reference in this process; other
+        // processes write only while this side waits for their reply.
         unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
 }
 
 impl Drop for Shm {
     fn drop(&mut self) {
+        // SAFETY: ptr and len are the mapping map made, and no reference to it outlives self.
         unsafe { libc::munmap(self.ptr.cast(), self.len) };
         if self.owned {
             shm_unlink(&self.name);
@@ -130,8 +132,21 @@ pub fn shm_write(name: &str, data: &[u8]) -> bool {
 
 pub fn shm_unlink(name: &str) {
     if let Ok(c) = CString::new(name) {
-        unsafe { libc::shm_unlink(c.as_ptr()) };
+        unlink(&c);
     }
+}
+
+fn unlink(c: &CStr) {
+    // SAFETY: c is a NUL-terminated string that outlives the call.
+    unsafe { libc::shm_unlink(c.as_ptr()) };
+}
+
+/// Opens a shared memory object as a File, which then sizes, stats, and closes it.
+fn shm_open(c: &CStr, flags: libc::c_int) -> Option<File> {
+    // SAFETY: c is a NUL-terminated string, and the mode is a plain integer that shm_open reads only with O_CREAT.
+    let fd = unsafe { libc::shm_open(c.as_ptr(), flags, 0o600) };
+    // SAFETY: shm_open returned a new fd that nothing else owns.
+    (fd >= 0).then(|| unsafe { File::from_raw_fd(fd) })
 }
 
 pub fn temp_path(tag: &str) -> String {

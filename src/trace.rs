@@ -16,7 +16,8 @@ fn log(line: &str) {
         use std::io::Write;
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64() * 1000.0);
-            let _ = writeln!(f, "{epoch:.1} {:.1} {line}", ms());
+            // One write per line, since remote fetch threads log too.
+            let _ = f.write_all(format!("{epoch:.1} {:.1} {line}\n", ms()).as_bytes());
         }
     }
 }

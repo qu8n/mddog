@@ -45,6 +45,15 @@ impl Engine {
         }
     }
 
+    /// Whether WebKit blocks loads to private hosts (see `remote::content_rules`). A spare serves only once its
+    /// own rules are in place.
+    pub fn content_rules(&self) -> bool {
+        match self {
+            Engine::Local(e) => e.content_rules(),
+            Engine::Remote(_) => true,
+        }
+    }
+
     pub fn load_file(&self, html: &Path, dark: bool) {
         match self {
             Engine::Local(e) => e.load_file(html, dark),

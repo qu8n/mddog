@@ -23,6 +23,8 @@ use crate::theme::Theme;
 use crate::{config, editor, trace, watch};
 
 const LATE_LIMIT: Duration = Duration::from_secs(60);
+/// How long a remote image may take before it shows as failed. Under `LATE_LIMIT`, so it settles before the last re-send.
+const REMOTE_LIMIT: Duration = Duration::from_secs(15);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const COPY_FEEDBACK: Duration = Duration::from_secs(2);
 const NOTICE: Duration = Duration::from_secs(3);
@@ -1273,7 +1275,7 @@ impl Preview {
             self.app.notice = Some(format!("{}{}", e[..1].to_uppercase(), &e[1..]));
             self.notice_until = Some(Instant::now() + NOTICE);
         }
-        if remote::load(&self.engine) {
+        if remote::load(&self.engine, REMOTE_LIMIT) {
             late.push(script::REMOTE_DONE);
         }
         let start = late.contains(&script::MERMAID_DONE);
@@ -1687,6 +1689,7 @@ impl Preview {
 
     fn suspend(&mut self) {
         self.leave_screen();
+        // SAFETY: kill takes plain integers; pid 0 sends SIGTSTP to this process group.
         unsafe { libc::kill(0, libc::SIGTSTP) };
         let live = self.live();
         self.enter_screen(live);
@@ -1805,6 +1808,7 @@ fn input_loop(fd: i32, tx: Sender<Event>, paused: Arc<AtomicBool>, first: Vec<u8
         let wait = Duration::from_millis(if buf.last() == Some(&0x1b) { 30 } else { 50 });
         let ready = term::readable(fd, wait);
         if ready && !paused.load(Ordering::SeqCst) {
+            // SAFETY: chunk is writable for chunk.len() bytes, and read writes no more than that.
             let n = unsafe { libc::read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
             if n <= 0 {
                 let _ = tx.send(Event::Quit);

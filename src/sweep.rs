@@ -20,6 +20,7 @@ pub fn spawn() {
         crate::trace::mark("sweep started");
         temp(&std::env::temp_dir());
         cache(&crate::assets::cache_dir(), crate::assets::RUNTIME, SystemTime::now());
+        remote(&crate::page::remote::disk_dir(), SystemTime::now());
         crate::trace::mark("swept");
     });
 }
@@ -56,7 +57,7 @@ fn temp_owner(name: &str) -> Option<Owner> {
     }
     let rest = name.strip_prefix("mddog-")?;
     if let Some(s) = rest.strip_suffix(".sock") {
-        return (pid_nonce(s)? as u32 == unsafe { libc::getuid() }).then_some(Owner::Socket);
+        return (pid_nonce(s)? as u32 == uid()).then_some(Owner::Socket);
     }
     ["-warm.html", "-stdin.md", ".html"].iter().find_map(|suffix| rest.strip_suffix(suffix)).and_then(pid_nonce).map(Owner::Pid)
 }
@@ -70,6 +71,7 @@ fn pid_nonce(s: &str) -> Option<i32> {
 
 /// Only ESRCH proves a pid is gone. A reused pid keeps the entry until that process ends too.
 fn dead(pid: i32) -> bool {
+    // SAFETY: signal 0 only checks that the pid exists; it sends nothing.
     pid > 0 && unsafe { libc::kill(pid, 0) } == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
 }
 
@@ -77,8 +79,14 @@ fn remove(path: &Path, meta: &std::fs::Metadata) {
     let _ = if meta.is_dir() { std::fs::remove_dir_all(path) } else { std::fs::remove_file(path) };
 }
 
-fn mine(meta: &std::fs::Metadata) -> bool {
-    meta.uid() == unsafe { libc::getuid() }
+/// This process's real user id.
+pub fn uid() -> u32 {
+    // SAFETY: getuid takes no arguments, cannot fail, and touches no memory.
+    unsafe { libc::getuid() }
+}
+
+pub fn mine(meta: &std::fs::Metadata) -> bool {
+    meta.uid() == uid()
 }
 
 fn temp(dir: &Path) {
@@ -141,6 +149,32 @@ fn cache(dir: &Path, current: &str, now: SystemTime) {
     }
 }
 
+/// Removes remote cache files past the longest lifetime, so expired and half-written ones, then the oldest until
+/// the folder fits in `DISK_BYTES`.
+fn remote(dir: &Path, now: SystemTime) {
+    use crate::page::remote::{DISK_BYTES, KEEP_MAX};
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let meta = std::fs::symlink_metadata(e.path()).ok().filter(|m| m.is_file() && mine(m))?;
+            Some((meta.modified().ok()?, meta.len(), e.path()))
+        })
+        .collect();
+    files.sort();
+    let mut total: u64 = files.iter().map(|f| f.1).sum();
+    for (modified, len, path) in files {
+        let old = now.duration_since(modified).is_ok_and(|age| age > KEEP_MAX);
+        if !old && total <= DISK_BYTES {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total -= len;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,8 +200,23 @@ mod tests {
     }
 
     #[test]
+    fn remote_cache_drops_expired_then_oldest() {
+        let d = dir("remote");
+        let big = vec![0u8; (crate::page::remote::DISK_BYTES / 2) as usize];
+        let files = [("expired", 2 * 3600, &b"x"[..]), ("oldest", 120, &big[..]), ("older", 60, &big[..]), ("newest", 0, &big[..])];
+        for (name, age, body) in files {
+            std::fs::write(d.join(name), body).unwrap();
+            set_age(&d.join(name), Duration::from_secs(age));
+        }
+        remote(&d, SystemTime::now());
+        let left: Vec<_> = files.iter().map(|f| f.0).filter(|n| d.join(n).exists()).collect();
+        assert_eq!(left, ["older", "newest"]);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
     fn matches_only_names_mddog_makes() {
-        let uid = unsafe { libc::getuid() };
+        let uid = uid();
         for name in ["mddog-tiles-12-ab3f", "mddog-12-ab3f.html", "mddog-12-ab3f-warm.html", "mddog-12-ab3f-stdin.md", "tty-graphics-protocol-mddog-12-ab3f-q"] {
             assert!(matches!(temp_owner(name), Some(Owner::Pid(12))), "{name}");
         }
@@ -199,7 +248,7 @@ mod tests {
     fn removes_what_dead_processes_left_and_nothing_else() {
         let d = dir("temp");
         let (gone, live) = (gone_pid(), std::process::id());
-        let uid = unsafe { libc::getuid() };
+        let uid = uid();
         let tiles_gone = d.join(format!("mddog-tiles-{gone}-ab"));
         let tiles_live = d.join(format!("mddog-tiles-{live}-ab"));
         for t in [&tiles_gone, &tiles_live] {
@@ -226,6 +275,7 @@ mod tests {
         for s in [&sock_dead, &sock_live] {
             let old = libc::timeval { tv_sec: (SystemTime::now() - Duration::from_secs(60)).duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64, tv_usec: 0 };
             let c = std::ffi::CString::new(s.as_os_str().as_encoded_bytes()).unwrap();
+            // SAFETY: c is a NUL-terminated path, and the array holds the two timevals utimes reads.
             assert_eq!(unsafe { libc::utimes(c.as_ptr(), [old, old].as_ptr()) }, 0);
         }
 

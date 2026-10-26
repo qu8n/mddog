@@ -1,6 +1,6 @@
 #![expect(clippy::unwrap_used, reason = "a failed step should fail the test")]
 
-use mddog::page::{self, script};
+use mddog::page::{self, remote, script};
 use mddog::{assets, config::Mermaid, engine::Engine, render};
 use std::{path::Path, time::Duration};
 const WAIT: Duration = Duration::from_secs(30);
@@ -167,36 +167,23 @@ fn main() {
     let m = matches(&mut eng, "first para ends\n\nwith next para\n", 600.0, "ends with");
     check("no_match_across_blocks", m.is_empty());
 
-    matches(&mut eng, "x\n", 600.0, "x");
-    let cases = [
-        ("http://100.64.1.2/a.png", true),
-        ("http://100.127.255.255/a", true),
-        ("http://100.128.0.1/a", false),
-        ("http://127.0.0.1/a", true),
-        ("http://0x7f.1/a", true),
-        ("http://0.1.2.3/a", true),
-        ("http://10.9.8.7/a", true),
-        ("http://172.31.0.1/a", true),
-        ("http://172.32.0.1/a", false),
-        ("http://192.168.1.1/a", true),
-        ("http://169.254.169.254/a", true),
-        ("http://198.18.0.1/a", true),
-        ("http://224.0.0.1/a", true),
-        ("http://[::1]/a", true),
-        ("http://printer.local/a", true),
-        ("http://localhost/a", true),
-        ("https://8.8.8.8/a", false),
-        ("https://example.com/a.png", false),
-        ("docs/a.png", false),
-    ];
-    let urls: Vec<&str> = cases.iter().map(|c| c.0).collect();
-    let got: Vec<bool> = serde_json::from_str(&eng.eval(&format!("JSON.stringify({}.map(refusedByCamo))", serde_json::to_string(&urls).unwrap())).unwrap()).unwrap_or_default();
-    for ((url, want), got) in cases.iter().zip(&got) {
-        if want != got {
-            eprintln!("refusedByCamo({url}) = {got}, want {want}");
-        }
-    }
-    check("r1_private_hosts_refused", got == cases.iter().map(|c| c.1).collect::<Vec<_>>());
+    // Remote images go through the app's scheme handler, which refuses private hosts and says so in the placeholder.
+    let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    server.set_nonblocking(true).unwrap();
+    let port = server.local_addr().unwrap().port();
+    load(&mut eng, &format!("![loop](http://127.0.0.1:{port}/a.png) ![](http://localhost:{port}/b.png) ![lan](https://10.1.2.3/c.png)\n"), 600.0);
+    check("r1_remote_load_started", remote::load(&eng, Duration::from_secs(10)));
+    wait(&eng, script::REMOTE_DONE);
+    let why = eng.eval("JSON.stringify([...document.querySelectorAll('.mddog-image-missing')].map((b) => b.textContent + ':' + b.dataset.why))").unwrap();
+    check("r1_private_hosts_blocked", why == r#"["loop:blocked","image:blocked","lan:blocked"]"#);
+
+    // An image URL in the page itself skips the scheme handler, so the content rule stops it.
+    check("r2_content_rules_added", eng.content_rules());
+    let tmp = std::env::temp_dir().join(format!("mddog-search-test-rules-{}.html", std::process::id()));
+    let html = format!("<!DOCTYPE html><img src=\"http://127.0.0.1:{port}/x.png\"><img src=\"http://localhost:{port}/x.png\"><video src=\"http://127.0.0.1:{port}/x.mp4\"></video>");
+    page::load(&eng, &tmp, &html, true, WAIT).unwrap();
+    wait(&eng, "[...document.images].every((i) => i.complete) && document.querySelector('video').networkState === HTMLMediaElement.NETWORK_NO_SOURCE");
+    check("r2_private_loads_blocked", server.accept().is_err_and(|e| e.kind() == std::io::ErrorKind::WouldBlock));
 
     load(&mut eng, "[site](https://example.com/a) and https://auto.dev/x and [jump](#target) and [doc](docs/a.md) plain\n\n## Target\n", 600.0);
     check("m1_link_href", link_at(&eng, center(&eng, "a[href^='https://example']")) == r#"["https://example.com/a","https://example.com/a"]"#);

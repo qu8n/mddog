@@ -8,6 +8,11 @@ fn png_size(path: &str) -> (u32, u32) {
     (u32::from_be_bytes(b[16..20].try_into().unwrap()), u32::from_be_bytes(b[20..24].try_into().unwrap()))
 }
 
+fn term(pid: i32) {
+    // SAFETY: kill takes plain integers and touches no memory.
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+}
+
 #[test]
 fn tiles_follow_the_file() {
     let dir = std::env::temp_dir().join(format!("mddog-tiles-test-{}", std::process::id()));
@@ -38,7 +43,7 @@ fn tiles_follow_the_file() {
     assert_ne!(second["tiles"][0]["file"], third["tiles"][0]["file"]);
     let tiles_dir = std::path::Path::new(third["tiles"][0]["file"].as_str().unwrap()).parent().unwrap().to_path_buf();
     assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&tiles_dir).unwrap().permissions()) & 0o777, 0o700);
-    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    term(child.id() as i32);
     child.wait().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!tiles_dir.exists(), "the tiles folder outlived the process");
@@ -53,7 +58,7 @@ fn tiles_fit_the_herdr_storage_limit() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mdd")).args(["--headless", "200"]).arg(&file).env("MDDOG_NO_SPARE", "1").env("TERM_PROGRAM", "herdr").stdout(Stdio::piped()).spawn().unwrap();
     let line = serde_json::from_str::<serde_json::Value>(&BufReader::new(child.stdout.take().unwrap()).lines().next().unwrap().unwrap()).unwrap();
     let sizes: Vec<_> = line["tiles"].as_array().unwrap().iter().map(|t| png_size(t["file"].as_str().unwrap())).collect();
-    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    term(child.id() as i32);
     child.wait().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(line["keep"], 7);
@@ -80,15 +85,15 @@ fn the_spare_outlives_a_tree_kill() {
     assert_eq!(first_line(&mut old)["columns"], 40);
     let doomed = pids(&["-P", &old.id().to_string()]);
     for pid in doomed.iter().copied().chain([old.id() as i32]) {
-        unsafe { libc::kill(pid, libc::SIGTERM) };
+        term(pid);
     }
     old.wait().unwrap();
     let mut new = tiles("60");
     let line = first_line(&mut new);
-    unsafe { libc::kill(new.id() as i32, libc::SIGTERM) };
+    term(new.id() as i32);
     new.wait().unwrap();
     for pid in pids(&["-f", &format!("^{} --spare$", env!("CARGO_BIN_EXE_mdd"))]) {
-        unsafe { libc::kill(pid, libc::SIGTERM) };
+        term(pid);
     }
     let _ = std::fs::remove_dir_all(&dir);
     assert!(doomed.is_empty(), "the spare was a child of the headless process: {doomed:?}");

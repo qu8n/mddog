@@ -14,6 +14,8 @@ use crate::watch;
 
 const TILE_ROWS: u32 = 100;
 const LATE_WAIT: Duration = Duration::from_secs(5);
+/// Under `LATE_WAIT`, so a slow image shows as failed in the tiles rather than as a loading box.
+const REMOTE_LIMIT: Duration = Duration::from_secs(4);
 const ENCODERS: usize = 4;
 
 type FirstRender = JoinHandle<Option<(Vec<u8>, Doc)>>;
@@ -150,7 +152,7 @@ impl Renderer {
             let _ = self.engine.eval(script::START_MERMAID);
             late.push(script::MERMAID_DONE);
         }
-        if remote::load(&self.engine) {
+        if remote::load(&self.engine, REMOTE_LIMIT) {
             late.push(script::REMOTE_DONE);
         }
         self.engine.wait_js(&late.join(" && "), LATE_WAIT);

@@ -43,7 +43,7 @@ src/
   page/              shared by the viewer, headless mode, and the spare
     mod.rs           reads the source, has the style build the page, writes it, and loads it
     script.rs        calls into mddog.js and parses its replies (layout, search, press)
-    remote.rs        resolves remote image hosts and refuses private ones
+    remote.rs        fetches remote images and media for the scheme handler and refuses private hosts, with its caches
   viewer/
     mod.rs           module list
     preview.rs       the viewer: first paint, event loop, mouse, links, selection, terminal writes
@@ -130,7 +130,7 @@ The long-lived threads:
 | Walker | Lists files for the file list while it is open. |
 | Skeleton | Draws the loading skeleton until the first tiles go out. |
 
-Short side threads also pipe copies to `pbcopy`, read the macOS appearance at startup, and run the sweep.
+Short side threads also pipe copies to `pbcopy`, read the macOS appearance at startup, run the sweep, and fetch each remote image (see Remote images).
 
 Input, signals, and the watcher all feed one channel. The main thread reads it and passes each event to `app.rs`, which returns actions.
 
@@ -368,10 +368,36 @@ The main thread probes the terminal while the worker renders and WebKit starts. 
 - The first snapshot covers only the first viewport. The other tiles follow in idle time.
 - Math gets up to 1 s.
 - Pele draws its diagrams before the page finishes loading, so they are in the first paint. Obsidian-engine diagrams are not waited for (see Mermaid). The late re-send shows them once the last one is drawn.
-- Remote images are not waited for. Before they load, `remote::load` resolves each image host (up to 1 s, cached per run) and refuses hosts that resolve to a private or reserved address, or have a local name such as `.local` or no dot.
+- Remote images are not waited for (see Remote images). The page draws each as a muted box, and the late re-send shows the image.
+- `Engine::new` starts compiling the content rule (see Security). WebKit compiles it off the main thread, and it is in place within 1 ms of the page file being written, well before the load ends. Only the spare waits for it, before it serves. It compiles on every run, since that doesn't cost anything measurable.
 - Anything that finishes late is measured again, with the position kept.
 
 A side thread reads the macOS appearance at startup, because the first `config::theme()` call for a theme pair sets up NSUserDefaults, which is slow.
+
+### Remote images
+
+`markdown::render_in` moves every remote `src`, `srcset`, `poster`, and video `src` into a `data-mddog-*` attribute, so the first paint never waits on the network. After the first paint, `remote::load` calls `mddog.loadRemote`, which sets each URL back with `mddog-` in front: `https://x/a.png` becomes `mddog-https://x/a.png`. Those two schemes go to `RemoteHandler`, a `WKURLSchemeHandler` that `webview::Engine::new` registers, so the viewer, the spare, and headless mode all have it. WebKit itself never fetches a remote image (see Security).
+
+- Each request gets its own thread, which calls `remote::fetch` with ureq. A host gets at most 6 at once.
+- The thread sends each result to the main queue (`dispatch2`), which runs while the main thread spins the run loop. A task WebKit stopped leaves `TASKS` on the main thread, and later results for it are dropped, because WebKit throws on any call to a stopped task.
+- Only `image/*`, `video/*`, `audio/*`, and octet-stream bodies are passed on, up to 32 MiB, within 30 s.
+- A video reads its metadata through about 150 small range requests. The first one fetches a 2 MiB block, and the rest are answered from it, so metadata takes about 0.5 s instead of 2.6 s.
+- Responses stay in memory (64 MiB) and whole ones on disk (see Data and files) for their `max-age`, between 1 minute and 1 hour, else 5 minutes. A live reload re-requests every image on each save, so even `max-age=0` is kept a minute. `no-store` is not kept.
+- An image that fails becomes a dashed box with its alt text, and `blocked` or `failed`. The page learns which with a `HEAD` to the same URL, which the handler answers from the last outcome: 403 for blocked.
+- The viewer gives each image 15 s, under the 60 s late limit. Headless mode gives 4 s, under its 5 s wait, so a slow image is drawn as failed rather than as a box. It waits rather than rendering again when images arrive, because each render writes every tile again and the plugin redraws them all.
+- `MDDOG_TRACE` logs `remote done`, `failed`, or `blocked` for each fetch, with its time.
+
+On a 10-image document (medians of 8 runs, with the disk cache filled after the first run):
+
+| | Before (WebKit fetched) | After |
+|---|---|---|
+| Viewer cold, first paint | 206 ms | 207 ms |
+| Viewer cold, time to images | 672 ms | 297 ms |
+| Viewer warm, first paint | 30 ms | 30 ms |
+| Viewer warm, time to images | 276 ms | 152 ms |
+| Headless cold, tiles written | 413 ms | 412 ms |
+
+Without the disk cache, time to images was 470 ms cold and 286 ms warm. ureq with native TLS adds about 0.5 MB to the release binary (26.9 to 27.4 MB).
 
 ### Loading skeleton
 
@@ -538,6 +564,8 @@ There is no database. The binary reads `config.toml` and `style.css` from its co
 | Path | What it holds, and when it goes |
 |---|---|
 | `~/Library/Caches/mddog/runtime-<hash>/` | MathJax, mermaid, and Pele. Unpacked into `runtime-<hash>.tmp<pid>`, then renamed into place. Each page build that uses it sets its mtime, so the sweep can tell which folders are in use. |
+| `~/Library/Caches/mddog/content-rules/` | WebKit's compiled content rule. Each run compiles it again over the same file. |
+| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>` and a rename. The sweep removes it. |
 | `~/Library/Caches/mddog/diagram-sizes.json` | The last 512 obsidian-engine diagram sizes, oldest dropped first. Written through `diagram-sizes.tmp<pid>` and a rename. Read and write errors are ignored, since a missing size only brings back the jump. |
 | `$TMPDIR/mddog-<pid>-<hex>.html` | The page. Kept until the viewer exits, because the obsidian engine's frame loads `file:` scripts after the page loads, and WebKit refuses them once the page file is gone. |
 | `$TMPDIR/mddog-<pid>-<hex>-warm.html` | The spare's warm-up page. Removed once the warm-up ends. |
@@ -556,6 +584,7 @@ A SIGKILL or a crash skips all of that cleanup, and Claude Code SIGKILLs the plu
 - Temp files and folders whose pid is gone. Only `kill(pid, 0)` failing with ESRCH counts as gone. A pid that a new process reused keeps its entry until that process ends too, so the sweep never removes anything a live process might use.
 - Spare sockets more than 10 s old that refuse a connection. A spare binds a moment before it listens, so a newer socket may still be live.
 - `.tmp<pid>` entries in the cache whose pid is gone.
+- Remote cache files more than 1 hour old, which is the longest any is kept, then the oldest until the folder is under 64 MiB.
 - `runtime-<hash>` folders other than this build's whose mtime is over 7 days old. Another build that runs again unpacks a new copy. The sweep renames a folder to `.tmp<its own pid>` before it deletes it, so a run never sees a half-deleted folder with `.complete` still in it.
 
 `MDDOG_TRACE` logs `sweep started` and `swept`.
@@ -568,14 +597,18 @@ A SIGKILL or a crash skips all of that cleanup, and Claude Code SIGKILLs the plu
 - **Claude Code**, as host for the plugin.
 - **launchd** for the login spare. **`open`** for links. **`pbcopy`** and OSC 52 for every copy. **`$EDITOR`** for edits.
 
-Opening a file fetches only what the document names: remote images, video posters, and video metadata. A link reaches the network only when you click it. Mermaid diagrams can't load images.
+Opening a file fetches only what the document names: remote images, video posters, and video metadata. mddog fetches them itself, with ureq. A link reaches the network only when you click it. Mermaid diagrams can't load images.
 
 ## Security
 
 - Raw HTML goes through GitHub's allowlist, and cmark-gfm's tag filter turns `<script>` and similar tags into text.
 - MDX is never executed.
 - Local images and videos load only from inside a root folder: the nearest folder above the file that has `.git`, else `$HOME` when the file is under it, else the file's own folder (`/tmp`, `/Volumes`). So `../sibling/img.png` works for notes outside git. `/x` means `<root>/x`. `markdown::render_in` drops `..` segments as text first, as WebKit's URL parser does, then compares canonical paths, so a symlink or `..` can't leave the root. It refuses an encoded `/`, which is one URL segment but two folders on disk, and it drops any `src`, `poster`, or `srcset` entry that would.
-- Remote image hosts that resolve to a private or reserved address are refused (see First paint).
+- Remote images and media never reach a private or reserved address, even through a redirect to a name that resolves to one, or a DNS answer that changes between check and connect (rebinding). mddog fetches them itself (see Remote images):
+  - ureq resolves through `remote::Checked`, which refuses a local name (`.local`, `.internal`, no dot, and so on) and returns a host's addresses only when every one is public (`private_ip`). ureq connects only to the addresses it returns, so the address checked is the address used.
+  - ureq follows up to 5 redirects, and each hop resolves through `Checked` again. A proxy from the environment is ignored, since ureq would resolve the proxy instead of the host.
+  - Unit tests run a local server with a stub resolver: redirects to a name that resolves to 127.0.0.1, to a `.local` name, and to an IPv4-mapped literal are all refused before any connection, and a rebinding answer is looked up once per connection.
+- WebKit gets one content rule (`remote::content_rules`, added in `webview::Engine::new`) that blocks every `http:` and `https:` image and media load. So even a remote URL that got past `render_in`'s deferral can't make WebKit fetch it, and the handler stays the only way to the network. WebKit checks content rules on every redirect hop too. A spare whose rule fails to compile exits rather than serve.
 - The obsidian engine runs mermaid with `securityLevel` strict (labels go through its DOMPurify pass, and `click` handlers and links are off) in a hidden frame whose CSP allows only `data:` images and fonts, and shows each diagram as an `<img>`. So a diagram can't load a local file or reach a host. Pele draws in the page, which has no CSP, so `renderMermaid` mounts it with `images: false`, and it leaves out every image URL a diagram names.
 - Text the terminal draws has control characters replaced, so a file can't inject escape sequences. This covers the status row and the contents sidebar.
 - The spare socket is owner-only (mode 0700) and checked for owner before use.
@@ -586,6 +619,7 @@ Opening a file fetches only what the document names: remote images, video poster
 ### Checks
 
 - `./check.sh` is the gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. `[lints.clippy]` in `Cargo.toml` turns on some pedantic and nursery lints, `unwrap_used` among them. `clippy.toml` exempts unit tests, and each `tests/*.rs` file that needs `unwrap` has its own `#![expect]`. Outside tests, an `expect` names the invariant that holds, such as a built-in asset or a constant regex.
+- Each `unsafe` block or impl has a `// SAFETY:` comment on the line above that names the invariant it relies on, and each `unsafe fn` has a `# Safety` doc section. Clippy's `undocumented_unsafe_blocks` enforces the comment, and `unnecessary_safety_comment` flags one left on safe code. Before you add a block, check whether the objc2 binding or std already has a safe call. When the same call repeats, wrap it once in a small safe function next to its callers, as `sweep::uid` and `webview::appearance` do.
 - CI (`.github/workflows/check.yml`) runs `./check.sh` on every push and pull request. It runs on a macOS runner because the WebKit and pty tests need macOS.
 - `python3 reference/keymap-check.py` checks that every test named in docs/behavior.md ran and passed.
 - `claude plugin test plugins/claude-code` runs the plugin's tests.
@@ -638,7 +672,7 @@ Opening a file fetches only what the document names: remote images, video poster
 | Variable | Read by | Effect |
 |---|---|---|
 | `MDDOG_NO_SPARE` | mdd | No warm spare |
-| `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, and cell geometry |
+| `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, cell geometry, and remote fetches |
 | `MDDOG_DUMP_VIEW=FILE` | mdd | With `MDDOG_TRACE`, write a PNG of the viewport after each frame |
 | `MDDOG_DUMP_TILES=DIR` | mdd | Write each tile as it is sent |
 | `MDDOG_DEBUG` | mdd | Print timing marks to stderr |

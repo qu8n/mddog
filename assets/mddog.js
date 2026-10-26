@@ -607,55 +607,31 @@ window.mddogLayout = () => {
   return JSON.stringify({ top, bottom, blocks, headings });
 };
 
-const PRIVATE_NAME = /^(localhost|.+\.localhost|.+\.local|\[.*\])$/i;
-const PRIVATE_V4 = [
-  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
-  ['192.0.0.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['224.0.0.0', 4], ['240.0.0.0', 4],
-];
-
-function ipv4(host) {
-  const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  return m ? ((+m[1] * 256 + +m[2]) * 256 + +m[3]) * 256 + +m[4] : null;
-}
-
-function privateV4(host) {
-  const n = ipv4(host);
-  return n !== null && PRIVATE_V4.some(([base, bits]) => Math.floor(n / 2 ** (32 - bits)) === Math.floor(ipv4(base) / 2 ** (32 - bits)));
-}
-
-let refusedHosts = new Set();
-
-function remoteHost(u) {
+// Remote URLs go to the app's mddog-http(s) scheme, which fetches them in Rust (see remote.rs), so WebKit never
+// reaches the network for them.
+function viaApp(u) {
   try {
     const url = new URL(u, document.baseURI);
-    return /^https?:$/.test(url.protocol) ? url.hostname.replace(/\.+$/, '').toLowerCase() : null;
+    return /^https?:$/.test(url.protocol) ? 'mddog-' + url.href : u;
   } catch {
-    return null;
+    return u;
   }
 }
 
-window.mddog.remoteHosts = () => {
-  const urls = [
-    ...[...document.querySelectorAll('[data-mddog-src]')].map((el) => el.dataset.mddogSrc),
-    ...[...document.querySelectorAll('[data-mddog-poster]')].map((el) => el.dataset.mddogPoster),
-    ...[...document.querySelectorAll('[data-mddog-media]')].map((el) => el.dataset.mddogMedia),
-    ...[...document.querySelectorAll('[data-mddog-srcset]')].flatMap((el) => el.dataset.mddogSrcset.split(',').map((c) => c.trim().split(/\s+/)[0])),
-  ];
-  return JSON.stringify([...new Set(urls.map(remoteHost).filter(Boolean))]);
-};
+const viaAppSet = (set) => set.split(',').map((c) => c.trim().split(/\s+/)).map(([u, ...rest]) => [viaApp(u), ...rest].join(' ')).join(', ');
 
-function refusedByCamo(u) {
+// After a failed load, the scheme handler tells by status whether that URL was blocked (403) or just failed.
+async function blocked(u) {
+  const url = viaApp(u);
+  if (!url.startsWith('mddog-')) return false;
   try {
-    const url = new URL(u, document.baseURI);
-    const host = url.hostname.replace(/\.+$/, '');
-    return /^https?:$/.test(url.protocol) && (PRIVATE_NAME.test(host) || privateV4(host) || refusedHosts.has(host.toLowerCase()));
+    return (await fetch(url, { method: 'HEAD' })).status === 403;
   } catch {
     return false;
   }
 }
 
-window.mddog.loadRemote = (timeout, refused = []) => {
-  refusedHosts = new Set(refused);
+window.mddog.loadRemote = (timeout) => {
   const imgs = [...document.querySelectorAll('img[data-mddog-src]')];
   const posters = [...document.querySelectorAll('video[data-mddog-poster]')];
   const videos = [...document.querySelectorAll('video')].filter((v) => v.matches('[data-mddog-media]') || v.querySelector('source[data-mddog-media]'));
@@ -663,11 +639,10 @@ window.mddog.loadRemote = (timeout, refused = []) => {
   const settle = () => { if (--left <= 0) window.mddog.state.remote = true; };
   if (!left) { window.mddog.state.remote = true; return; }
   for (const video of posters) {
-    const url = video.dataset.mddogPoster;
+    const url = viaApp(video.dataset.mddogPoster);
     video.removeAttribute('data-mddog-poster');
     let done = false;
     const finish = (ok) => { if (done) return; done = true; if (ok) video.poster = url; settle(); };
-    if (refusedByCamo(url)) { finish(false); continue; }
     const probe = new Image();
     probe.onload = () => finish(true);
     probe.onerror = () => finish(false);
@@ -678,41 +653,41 @@ window.mddog.loadRemote = (timeout, refused = []) => {
     const media = [video, ...video.querySelectorAll('source[data-mddog-media]')].filter((el) => el.dataset.mddogMedia);
     let done = false;
     const finish = () => { if (done) return; done = true; settle(); };
-    if (media.some((el) => refusedByCamo(el.dataset.mddogMedia))) { finish(); continue; }
     video.addEventListener('loadedmetadata', finish, { once: true });
     video.addEventListener('error', finish, { once: true });
     setTimeout(finish, timeout);
     for (const el of media) {
-      el.src = el.dataset.mddogMedia;
+      el.src = viaApp(el.dataset.mddogMedia);
       el.removeAttribute('data-mddog-media');
     }
     video.preload = 'metadata';
     video.load();
   }
   for (const img of imgs) {
+    const src = img.dataset.mddogSrc;
     let done = false;
-    const fail = () => {
+    const fail = async () => {
       if (done) return;
       done = true;
       const box = document.createElement('span');
       box.className = 'mddog-image-missing';
       box.textContent = img.alt || 'image';
+      box.dataset.why = (await blocked(img.currentSrc || src)) ? 'blocked' : 'failed';
       img.replaceWith(box);
       settle();
     };
     const picture = img.parentElement && img.parentElement.matches('picture') ? img.parentElement : null;
     const deferred = [...(picture ? picture.querySelectorAll('source[data-mddog-srcset]') : []), img];
-    const urls = [img.dataset.mddogSrc, ...deferred.flatMap((el) => (el.dataset.mddogSrcset || '').split(',').map((c) => c.trim().split(/\s+/)[0]))];
-    if (urls.some((u) => u && refusedByCamo(u))) { fail(); continue; }
-    img.addEventListener('load', () => { if (!done) { done = true; img.decode().catch(() => 0).then(settle); } }, { once: true });
+    img.classList.add('mddog-loading');
+    img.addEventListener('load', () => { if (!done) { done = true; img.classList.remove('mddog-loading'); img.decode().catch(() => 0).then(settle); } }, { once: true });
     img.addEventListener('error', fail, { once: true });
     setTimeout(fail, timeout);
     for (const el of deferred) {
       if (!el.dataset.mddogSrcset) continue;
-      el.srcset = el.dataset.mddogSrcset;
+      el.srcset = viaAppSet(el.dataset.mddogSrcset);
       el.removeAttribute('data-mddog-srcset');
     }
-    img.src = img.dataset.mddogSrc;
+    img.src = viaApp(src);
     img.removeAttribute('data-mddog-src');
   }
 };

@@ -55,7 +55,9 @@ fn start_exe(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>
 fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>, cols: u16, cell: (u16, u16), reply: Vec<u8>, env: &[(&str, &str)], job: bool) -> Viewer {
     let (mut master, mut slave) = (0, 0);
     let mut size = libc::winsize { ws_row: 40, ws_col: cols, ws_xpixel: cols * cell.0, ws_ypixel: 40 * cell.1 };
+    // SAFETY: each pointer is a valid out-pointer or null, which openpty allows for the name and termios.
     assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) }, 0);
+    // SAFETY: openpty returned a new fd that nothing else owns.
     let slave = unsafe { OwnedFd::from_raw_fd(slave) };
     let mut cmd = Command::new(exe);
     if let Some(d) = dir {
@@ -68,6 +70,7 @@ fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::
         .stdin(Stdio::from(slave.try_clone().unwrap()))
         .stdout(Stdio::from(slave.try_clone().unwrap()))
         .stderr(Stdio::from(slave));
+    // SAFETY: the hook makes only async-signal-safe calls, and run_as_job runs in the forked child as it requires.
     unsafe {
         cmd.pre_exec(move || {
             libc::setsid();
@@ -79,6 +82,7 @@ fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::
         });
     }
     let child = cmd.spawn().unwrap();
+    // SAFETY: openpty returned a new fd that nothing else owns.
     let tty = unsafe { std::fs::File::from_raw_fd(master) };
     let out = Arc::new(Mutex::new(Vec::new()));
     let (reader, mut writer, seen) = (tty.try_clone().unwrap(), tty.try_clone().unwrap(), out.clone());
@@ -99,12 +103,29 @@ fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::
     Viewer { child, tty, out }
 }
 
+fn resize(tty: &std::fs::File, size: libc::winsize) {
+    use std::os::fd::AsRawFd;
+    // SAFETY: TIOCSWINSZ reads one winsize through the pointer, and tty is open.
+    assert_eq!(unsafe { libc::ioctl(tty.as_raw_fd(), libc::TIOCSWINSZ, &size) }, 0);
+}
+
+fn signal(pid: i32, sig: i32) {
+    // SAFETY: kill takes plain integers and touches no memory.
+    unsafe { libc::kill(pid, sig) };
+}
+
 /// Acts as a small job-control shell. The kernel drops SIGTSTP for an orphaned
 /// process group, and a session leader's group is one, so the viewer runs in
 /// its own foreground group under this process, as it does under a real shell.
 /// This process copies the viewer's stops and exit status, so the test can
 /// `waitpid` it as if it were the viewer.
+///
+/// # Safety
+///
+/// Call only from a `pre_exec` hook, in the forked child before exec. It forks again and
+/// never returns in the parent.
 unsafe fn run_as_job() {
+    // SAFETY: only async-signal-safe libc calls on plain integers and local out-pointers; the caller is a forked child.
     unsafe {
         let pid = libc::fork();
         if pid == 0 {
@@ -186,7 +207,7 @@ fn ctrl_c_in_the_editor_keeps_the_viewer() {
 fn sigint_outside_the_editor_quits() {
     let Viewer { mut child, out, .. } = open(GFM, 80, &[]);
     wait_for(&out, 0, b"a=p,");
-    unsafe { libc::kill(child.id().cast_signed(), libc::SIGINT) };
+    signal(child.id().cast_signed(), libc::SIGINT);
     let exit = exits_within(&mut child, Duration::from_secs(5));
     let _ = child.kill();
     assert!(exit.is_some(), "SIGINT didn't quit the viewer");
@@ -245,6 +266,7 @@ fn a_page_that_does_not_load_keeps_its_source() {
     std::fs::write(dir.join("mddog/config.toml"), "live_reload = false\n").unwrap();
     // WebKit waits on a FIFO with no writer, so the load event never comes.
     let fifo = std::ffi::CString::new(dir.join("stall.png").to_str().unwrap()).unwrap();
+    // SAFETY: fifo is a NUL-terminated path that outlives the call.
     assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
     let file = dir.join("a.md");
     std::fs::write(&file, "# Alpha\n\n![](stall.png)\n\n## Alpha two\n").unwrap();
@@ -292,8 +314,7 @@ fn backspace_after_a_resize_returns_to_the_same_text() {
     top_after(&trace, "key Char('5')");
     // A narrower terminal wraps the text onto more rows.
     let size = libc::winsize { ws_row: 40, ws_col: 60, ws_xpixel: 60 * 18, ws_ypixel: 40 * 38 };
-    use std::os::fd::AsRawFd;
-    assert_eq!(unsafe { libc::ioctl(tty.as_raw_fd(), libc::TIOCSWINSZ, &size) }, 0);
+    resize(&tty, size);
     top_after(&trace, "mark resize");
     std::thread::sleep(Duration::from_millis(500));
     tty.write_all(b"\x7f").unwrap();
@@ -372,8 +393,7 @@ fn a_resize_clears_the_old_status_row() {
     std::thread::sleep(Duration::from_millis(1500));
     let before = out.lock().unwrap().len();
     let size = libc::winsize { ws_row: 30, ws_col: 90, ws_xpixel: 90 * 18, ws_ypixel: 30 * 38 };
-    use std::os::fd::AsRawFd;
-    assert_eq!(unsafe { libc::ioctl(tty.as_raw_fd(), libc::TIOCSWINSZ, &size) }, 0);
+    resize(&tty, size);
     let cleared = cleared_before_placing(&out, before);
     let mut tty = tty;
     tty.write_all(b"q").unwrap();
@@ -464,12 +484,13 @@ fn suspends_and_resumes(key: &[u8]) {
     assert!(find(&out.lock().unwrap()[start..left], b"\x1b[<1u").is_some(), "the keyboard flags stayed pushed in the shell");
     let end = Instant::now() + Duration::from_secs(10);
     let mut st = 0;
+    // SAFETY: st is a valid out-pointer for the status.
     while unsafe { libc::waitpid(pid, &mut st, libc::WUNTRACED | libc::WNOHANG) } == 0 && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(20));
     }
     let stopped = libc::WIFSTOPPED(st);
     let early = find(&out.lock().unwrap()[left..], b"\x1b[?1049h").is_some();
-    unsafe { libc::kill(pid, libc::SIGCONT) };
+    signal(pid, libc::SIGCONT);
     let back = wait_for(&out, left, b"\x1b[?1049h");
     wait_for(&out, back, b"\x1b[>1u");
     wait_for(&out, back, b"a=p,");
@@ -522,14 +543,21 @@ fn a_pixel_click_in_the_list_follows_a_font_size_change() {
     }
     let mut reply = probe_reply((18, 38));
     reply.splice(0..0, *b"\x1b[?1016;2$y");
-    let Viewer { mut child, tty, out } = start_replying(env!("CARGO_BIN_EXE_mdd").as_ref(), &[dir.to_str().unwrap()], None, 80, (18, 38), reply, &[], false);
+    let trace = dir.join("trace.log");
+    let Viewer { mut child, tty, out } = start_replying(env!("CARGO_BIN_EXE_mdd").as_ref(), &[dir.to_str().unwrap()], None, 80, (18, 38), reply, &[("MDDOG_TRACE", trace.to_str().unwrap())], false);
     wait_for(&out, 0, b"\x1b[c");
     wait_for(&out, 0, b"Title 5");
     // A bigger font: the same 80 by 40 cells, 50 pixels tall.
     let before = out.lock().unwrap().len();
     let size = libc::winsize { ws_row: 40, ws_col: 80, ws_xpixel: 80 * 24, ws_ypixel: 40 * 50 };
-    use std::os::fd::AsRawFd;
-    assert_eq!(unsafe { libc::ioctl(tty.as_raw_fd(), libc::TIOCSWINSZ, &size) }, 0);
+    resize(&tty, size);
+    // The list can redraw before the debounced resize is taken, and a click then uses the old cell height.
+    // Only the trace tells the resize was taken.
+    let end = Instant::now() + Duration::from_secs(10);
+    while !std::fs::read_to_string(&trace).unwrap_or_default().contains("mark resize") {
+        assert!(Instant::now() < end, "the resize was never taken");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     wait_for(&out, before, b"Title 5");
     // Row 6 holds the third file, f2.md.
     let (x, y) = (10 * 24 + 12, 5 * 50 + 25);
