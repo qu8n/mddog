@@ -6,7 +6,7 @@ mod webview;
 
 pub use webview::{backing_scale, spin};
 
-const CALL_LIMIT: Duration = Duration::from_secs(10);
+pub const CALL_LIMIT: Duration = Duration::from_secs(10);
 
 pub struct Bitmap {
     pub width: usize,
@@ -65,6 +65,14 @@ impl Engine {
         match self {
             Engine::Local(e) => e.eval(js),
             Engine::Remote(c) => c.eval(js),
+        }
+    }
+
+    /// Like `eval`, but a reply later than `limit` marks the engine stalled.
+    pub fn eval_within(&self, js: &str, limit: Duration) -> Result<String, String> {
+        match self {
+            Engine::Local(e) => e.eval_within(js, limit),
+            Engine::Remote(c) => c.eval_within(js, limit),
         }
     }
 

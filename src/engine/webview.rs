@@ -124,8 +124,15 @@ fn start_task(task: &ProtocolObject<dyn WKURLSchemeTask>) {
         deliver(id, Event::Done);
         return;
     }
-    let fetch = std::thread::Builder::new().name("remote".into()).spawn(move || {
-        let (start, mut end) = (Instant::now(), "stopped");
+    if remote::answer_cached(&url, range.as_deref(), &mut |e| deliver(id, e)) {
+        if crate::trace::enabled() {
+            crate::trace::mark(&format!("remote done in 0 ms: {url} {}", range.unwrap_or_default()));
+        }
+        return;
+    }
+    let start = Instant::now();
+    let queued = remote::spawn(remote::host(&url), stop.clone(), move || {
+        let mut end = "stopped";
         remote::fetch(remote::agent(), &url, range.as_deref(), &stop, &mut |e| {
             end = match e {
                 Event::Done => "done",
@@ -139,7 +146,7 @@ fn start_task(task: &ProtocolObject<dyn WKURLSchemeTask>) {
             crate::trace::mark(&format!("remote {end} in {} ms: {url} {}", start.elapsed().as_millis(), range.unwrap_or_default()));
         }
     });
-    if fetch.is_err() {
+    if !queued {
         deliver(id, Event::Fail(remote::Fail::Failed));
     }
 }
@@ -318,8 +325,8 @@ impl Engine {
         unsafe { self.view.loadFileURL_allowingReadAccessToURL(&url, &root) };
     }
 
-    fn wait_for<T>(&self, out: &RefCell<Option<T>>) -> Option<T> {
-        let deadline = Instant::now() + CALL_LIMIT;
+    fn wait_for<T>(&self, out: &RefCell<Option<T>>, limit: Duration) -> Option<T> {
+        let deadline = Instant::now() + limit;
         loop {
             if let Some(r) = out.borrow_mut().take() {
                 return Some(r);
@@ -333,6 +340,11 @@ impl Engine {
     }
 
     pub fn eval(&self, js: &str) -> Result<String, String> {
+        self.eval_within(js, CALL_LIMIT)
+    }
+
+    /// Like `eval`, but a reply later than `limit` marks the engine stalled.
+    pub fn eval_within(&self, js: &str, limit: Duration) -> Result<String, String> {
         if self.stalled.get() {
             return Err("WebKit stopped responding".into());
         }
@@ -359,7 +371,7 @@ impl Engine {
         });
         // SAFETY: the block's argument types match the handler WebKit calls, and WebKit copies the block.
         unsafe { self.view.evaluateJavaScript_completionHandler(&NSString::from_str(js), Some(&block)) };
-        self.wait_for(&out).unwrap_or_else(|| Err("WebKit stopped responding".into()))
+        self.wait_for(&out, limit).unwrap_or_else(|| Err("WebKit stopped responding".into()))
     }
 
     pub fn resize(&mut self, width: f64, height: f64) {
@@ -410,7 +422,7 @@ impl Engine {
         });
         // SAFETY: the block's argument types match the handler WebKit calls, and WebKit copies the block.
         unsafe { self.view.takeSnapshotWithConfiguration_completionHandler(Some(&config), &block) };
-        let image = self.wait_for(&out)??;
+        let image = self.wait_for(&out, CALL_LIMIT)??;
         // SAFETY: a null proposed rect and nil context and hints are documented as allowed.
         let cg = unsafe { image.CGImageForProposedRect_context_hints(std::ptr::null_mut(), None, None) }?;
         if !swap_channels(&cg, width, height, dst) {

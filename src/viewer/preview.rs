@@ -23,6 +23,8 @@ use crate::theme::Theme;
 use crate::{config, editor, trace, watch};
 
 const LATE_LIMIT: Duration = Duration::from_secs(60);
+/// How long a quit waits on WebKit for the sizes the page recorded.
+const QUIT_SAVE: Duration = Duration::from_millis(20);
 /// How long a remote image may take before it shows as failed. Under `LATE_LIMIT`, so it settles before the last re-send.
 const REMOTE_LIMIT: Duration = Duration::from_secs(15);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -203,6 +205,8 @@ pub struct Preview {
     late: Option<(String, Instant)>,
     /// Read from disk at the first obsidian-engine diagram.
     sizes: Option<Sizes>,
+    /// Read from disk at the first page with remote images. The natural size of each remote image seen so far, by URL, so its loading box opens at that size.
+    image_sizes: Option<Sizes>,
     frame_due: bool,
     resize: app::Debounce,
     quit: bool,
@@ -401,6 +405,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         touched: false,
         late: None,
         sizes: None,
+        image_sizes: None,
         glide: None,
         drawn: 0,
         path: vec![],
@@ -468,6 +473,8 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     p.start_threads(leftover);
     p.event_loop();
     p.shutdown();
+    // After the terminal is back, so a slow page delays only the exit.
+    p.save_sizes(QUIT_SAVE);
     std::mem::forget(p);
     0
 }
@@ -1195,6 +1202,8 @@ impl Preview {
     }
 
     fn rerender(&mut self, read: bool) {
+        // Before the take, since `save_sizes` reads only a page that loaded.
+        self.save_sizes(engine::CALL_LIMIT);
         let bytes = read.then(|| std::fs::read(&self.file).ok()).flatten().unwrap_or_else(|| self.stamp.clone());
         let (src, doc) = match self.doc.take() {
             Some(doc) if bytes == self.stamp => (self.src.clone(), doc),
@@ -1214,6 +1223,7 @@ impl Preview {
 
     /// Returns false when the page did not load, after it put the reason in the status row.
     fn render_doc(&mut self, bytes: Vec<u8>, src: String, doc: markdown::Doc, keep: bool) -> bool {
+        self.save_sizes(engine::CALL_LIMIT);
         let anchor = if keep { self.anchor() } else { None };
         let back = if keep { self.back_anchors() } else { Vec::new() };
         let code = if keep { self.engine.eval("mddogCode.positions ? mddogCode.positions() : '[]'").unwrap_or_default() } else { String::new() };
@@ -1233,9 +1243,15 @@ impl Preview {
         let loaded = page::load(&self.engine, &self.tmp_html, &html, theme.dark, Duration::from_secs(3));
         trace::mark("page loaded");
         if doc.mermaid && config::mermaid(theme) == config::Mermaid::Obsidian {
-            let sizes = self.sizes.get_or_insert_with(Sizes::open);
+            let sizes = self.sizes.get_or_insert_with(|| Sizes::open("diagram-sizes.json"));
             if !sizes.is_empty() {
                 let _ = self.engine.eval(&format!("mddog.guess({}); ''", sizes.json()));
+            }
+        }
+        if doc.html.contains("data-mddog-src") {
+            let sizes = self.image_sizes.get_or_insert_with(|| Sizes::open("image-sizes.json"));
+            if !sizes.is_empty() {
+                let _ = self.engine.eval(&format!("mddog.guessImages({}); ''", sizes.json()));
             }
         }
         let mut late = Vec::new();
@@ -1377,6 +1393,9 @@ impl Preview {
     fn measure(&mut self) {
         self.layout = script::measure(&self.engine);
         self.doc_px = (self.layout.height * self.scale).ceil() as u32;
+        if trace::enabled() {
+            trace::mark(&format!("page height {} px", self.layout.height));
+        }
     }
 
     fn tile_height(&self) -> u32 {
@@ -1607,9 +1626,7 @@ impl Preview {
             engine::spin(2.0);
             if Instant::now() > *until || self.engine.eval(cond).as_deref() == Ok("true") {
                 self.late = None;
-                if let (Some(sizes), Ok(json)) = (&mut self.sizes, self.engine.eval("JSON.stringify(mddog.state.sizes)")) {
-                    sizes.merge(&json);
-                }
+                self.save_sizes(engine::CALL_LIMIT);
                 self.relayout();
             }
             return;
@@ -1626,6 +1643,21 @@ impl Preview {
             return None;
         }
         self.cache.prefetch(self.scroll_px(), u32::from(self.img_cols) * self.cell_w)
+    }
+
+    /// Saves the diagram and image sizes the page has recorded so far. Late content saves them when it
+    /// settles, so a quit, a reload, or another file before then calls this to keep them.
+    fn save_sizes(&mut self, limit: Duration) {
+        if self.doc.is_none() || self.engine.stalled() {
+            return;
+        }
+        for (sizes, js) in [(&mut self.sizes, "JSON.stringify(mddog.state.sizes)"), (&mut self.image_sizes, "JSON.stringify(mddog.state.images)")] {
+            if let Some(sizes) = sizes
+                && let Ok(json) = self.engine.eval_within(js, limit)
+            {
+                sizes.merge(&json);
+            }
+        }
     }
 
     fn relayout(&mut self) {
@@ -1747,6 +1779,7 @@ impl Preview {
 
     fn switch(&mut self, file: PathBuf, stdin: bool, name: String, bytes: Vec<u8>, at: Option<(position::Anchor, String)>) {
         self.base = page::base_dir(&file, stdin);
+        self.save_sizes(engine::CALL_LIMIT);
         (self.file, self.stdin, self.name) = (file, stdin, name);
         self.matches.clear();
         self.late = None;

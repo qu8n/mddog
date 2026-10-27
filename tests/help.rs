@@ -35,6 +35,11 @@ struct Viewer {
 
 const GFM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/gfm.md");
 
+/// A cache root for the app under test, so tests never write to the real one.
+fn test_cache() -> std::path::PathBuf {
+    std::env::temp_dir().join("mddog-test-cache")
+}
+
 fn open(file: &str, cols: u16, env: &[(&str, &str)]) -> Viewer {
     launch(file, cols, env, false)
 }
@@ -66,6 +71,7 @@ fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::
     cmd.args(args)
         .env("TERM_PROGRAM", "herdr")
         .env("MDDOG_NO_SPARE", "1")
+        .env("MDDOG_CACHE_DIR", test_cache())
         .envs(env.iter().copied())
         .stdin(Stdio::from(slave.try_clone().unwrap()))
         .stdout(Stdio::from(slave.try_clone().unwrap()))
@@ -455,7 +461,7 @@ fn help_follows_an_appearance_change() {
 
 #[test]
 fn help_flag_points_to_the_key_screen() {
-    let out = Command::new(env!("CARGO_BIN_EXE_mdd")).arg("--help").output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_mdd")).arg("--help").env("MDDOG_NO_SPARE", "1").env("MDDOG_CACHE_DIR", test_cache()).output().unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(out.status.success());
     assert!(text.contains("press ? to list the keys"), "{text}");

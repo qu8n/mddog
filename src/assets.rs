@@ -8,7 +8,12 @@ static FILES: Dir = include_dir!("$CARGO_MANIFEST_DIR/assets/runtime");
 /// This build's runtime folder name. Other builds keep their own, which the sweep removes after a week unused.
 pub const RUNTIME: &str = concat!("runtime-", env!("MDDOG_RUNTIME_HASH"));
 
+/// The cache root: `MDDOG_CACHE_DIR` when set, so tests keep out of the real one, else `~/Library/Caches/mddog`.
 pub fn cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("MDDOG_CACHE_DIR").filter(|d| !d.is_empty()) {
+        // Absolute, since the spare runs in `/` and its socket name hashes this path.
+        return std::path::absolute(&dir).unwrap_or_else(|_| PathBuf::from(dir));
+    }
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     home.join("Library/Caches/mddog")
 }

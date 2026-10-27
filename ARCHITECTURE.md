@@ -130,7 +130,7 @@ The long-lived threads:
 | Walker | Lists files for the file list while it is open. |
 | Skeleton | Draws the loading skeleton until the first tiles go out. |
 
-Short side threads also pipe copies to `pbcopy`, read the macOS appearance at startup, run the sweep, and fetch each remote image (see Remote images).
+Short side threads also pipe copies to `pbcopy`, read the macOS appearance at startup, and run the sweep. Up to 16 `remote` threads, started as needed and then kept, fetch remote images (see Remote images).
 
 Input, signals, and the watcher all feed one channel. The main thread reads it and passes each event to `app.rs`, which returns actions.
 
@@ -282,7 +282,7 @@ A diagram can name images (an image shape, an `<img>` in a label), and an in-pag
 **Skeleton heights.** The skeleton opens at the diagram's drawn height when mddog has seen that diagram before.
 
 - On reveal, `mddog.js` stores each diagram's viewBox in `state.sizes`, keyed by an FNV-1a hash of the source (`key`). A diagram drawn at its own size is stored with width 0, so its guess isn't scaled down.
-- When the late check settles, `tick` merges those into `Sizes` (`viewer/sizes.rs`).
+- `save_sizes` merges those, and the remote image sizes in `state.images`, into `Sizes` (`viewer/sizes.rs`). It runs when the late check settles, and also before a reload, before another file opens, and after a quit, so an early quit keeps the sizes seen so far. The quit save waits at most 20 ms (`QUIT_SAVE`) through `Engine::eval_within`, and skips a stalled engine.
 - After `READY`, `render_doc` passes them to `mddog.guess`, which sets each known box to that height at the current width.
 - The sizes live in memory for reloads and in a cache file for reopens.
 - The reveal clears the guessed height before it applies the real one, so the settled page doesn't depend on the guess. Only the viewer guesses, not headless mode.
@@ -302,7 +302,7 @@ A cold first paint takes about 200 ms, most of it AppKit and WebKit startup. A w
 
 **Finding the spare.**
 
-- The socket is in the per-user temp dir. Its name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare.
+- The socket is in the per-user temp dir. Its name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. It also hashes the cache root, so a viewer with another `MDDOG_CACHE_DIR` never reaches a spare that reads its runtime from elsewhere. The spare inherits the variable, and `--start-at-login` writes it into the launchd job.
 - The viewer connects only to a socket its own user owns, and each side talks only to a peer with its own uid (`getpeereid`). The spare ignores a connection that never sends hello.
 
 **Protocol.** The viewer drives the spare's WebView with six requests: `eval`, `load`, `resize`, `wait`, `snap`, and `render`. `load` carries the theme's mode as its third element. `render` is `["render", src, dir]`, so the spare confines media to the same root. A late or missing reply to the first render ends the connection, so the spare can't answer the main thread's next request with a stale reply.
@@ -378,11 +378,13 @@ A side thread reads the macOS appearance at startup, because the first `config::
 
 `markdown::render_in` moves every remote `src`, `srcset`, `poster`, and video `src` into a `data-mddog-*` attribute, so the first paint never waits on the network. After the first paint, `remote::load` calls `mddog.loadRemote`, which sets each URL back with `mddog-` in front: `https://x/a.png` becomes `mddog-https://x/a.png`. Those two schemes go to `RemoteHandler`, a `WKURLSchemeHandler` that `webview::Engine::new` registers, so the viewer, the spare, and headless mode all have it. WebKit itself never fetches a remote image (see Security).
 
-- Each request gets its own thread, which calls `remote::fetch` with ureq. A host gets at most 6 at once.
-- The thread sends each result to the main queue (`dispatch2`), which runs while the main thread spins the run loop. A task WebKit stopped leaves `TASKS` on the main thread, and later results for it are dropped, because WebKit throws on any call to a stopped task.
+- A request the memory cache can answer is answered on the main thread, so a live reload's images and a video's range requests never wait for a worker.
+- `remote::spawn` queues each other request for a pool of up to 16 worker threads, started as needed, which call `remote::fetch` with ureq. A worker takes the oldest request whose host has fewer than 6 running, so one busy host doesn't hold up the others. A request WebKit stopped while it waited is dropped without a fetch. A page of 300 badges peaks at 22 threads in all, where a thread per request reached 314.
+- The worker sends each result to the main queue (`dispatch2`), which runs while the main thread spins the run loop. A task WebKit stopped leaves `TASKS` on the main thread, and later results for it are dropped, because WebKit throws on any call to a stopped task.
 - Only `image/*`, `video/*`, `audio/*`, and octet-stream bodies are passed on, up to 32 MiB, within 30 s.
 - A video reads its metadata through about 150 small range requests. The first one fetches a 2 MiB block, and the rest are answered from it, so metadata takes about 0.5 s instead of 2.6 s.
 - Responses stay in memory (64 MiB) and whole ones on disk (see Data and files) for their `max-age`, between 1 minute and 1 hour, else 5 minutes. A live reload re-requests every image on each save, so even `max-age=0` is kept a minute. `no-store` is not kept.
+- An image with no `height` grows when it arrives, so the viewer remembers each one's natural size by URL (see Data and files). On the next open, before the first paint, `mddog.guessImages` gives its loading box that width (unless it has a `width`) and that aspect ratio, so `max-width` scales it as it scales the image. The box takes the image's place without a jump: on a reopen of a page with a 900×450 photo, the page is 810 px tall at first paint and after the images, where it went from 304 to 810 px without the sizes. Headless mode waits for its images, so it skips this.
 - An image that fails becomes a dashed box with its alt text, and `blocked` or `failed`. The page learns which with a `HEAD` to the same URL, which the handler answers from the last outcome: 403 for blocked.
 - The viewer gives each image 15 s, under the 60 s late limit. Headless mode gives 4 s, under its 5 s wait, so a slow image is drawn as failed rather than as a box. It waits rather than rendering again when images arrive, because each render writes every tile again and the plugin redraws them all.
 - `MDDOG_TRACE` logs `remote done`, `failed`, or `blocked` for each fetch, with its time.
@@ -559,7 +561,7 @@ Claude Code decides whether a pane is placed, not the plugin. It seats a pane th
 
 ## Data and files
 
-There is no database. The binary reads `config.toml` and `style.css` from its config folder, and writes these:
+There is no database. The binary reads `config.toml` and `style.css` from its config folder, and writes these. `MDDOG_CACHE_DIR` moves everything under `~/Library/Caches/mddog/` to another root.
 
 | Path | What it holds, and when it goes |
 |---|---|
@@ -567,6 +569,7 @@ There is no database. The binary reads `config.toml` and `style.css` from its co
 | `~/Library/Caches/mddog/content-rules/` | WebKit's compiled content rule. Each run compiles it again over the same file. |
 | `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>` and a rename. The sweep removes it. |
 | `~/Library/Caches/mddog/diagram-sizes.json` | The last 512 obsidian-engine diagram sizes, oldest dropped first. Written through `diagram-sizes.tmp<pid>` and a rename. Read and write errors are ignored, since a missing size only brings back the jump. |
+| `~/Library/Caches/mddog/image-sizes.json` | The natural sizes of the last 512 remote images with no `height`, by URL (up to 2048 characters), oldest dropped first. Read at the first page with remote images, and written like `diagram-sizes.json`. |
 | `$TMPDIR/mddog-<pid>-<hex>.html` | The page. Kept until the viewer exits, because the obsidian engine's frame loads `file:` scripts after the page loads, and WebKit refuses them once the page file is gone. |
 | `$TMPDIR/mddog-<pid>-<hex>-warm.html` | The spare's warm-up page. Removed once the warm-up ends. |
 | `$TMPDIR/mddog-<pid>-<hex>-stdin.md` | A copy of standard input. Removed when the viewer exits. |
@@ -636,7 +639,9 @@ Opening a file fetches only what the document names: remote images, video poster
 - `tests/help.rs` runs mdd in a pty as its own session leader, so Ctrl-z can't stop it there. `ctrl_z_suspends_and_resumes` passes `job: true` to `launch`, which forks a small job-control parent as a shell does: mdd runs in its own foreground group, and the parent passes its stops and exit status up to the test.
 - `tests/search.rs` keeps each page file until the next load, because WebKit fails `file://` loads once the file is gone, and the obsidian engine's frame loads its scripts after the page has loaded.
 - Every wait in `tests/search.rs` goes through `wait`, `loaded`, or `next_frame`, which allow 30 s and panic on timeout. A check that runs on a page that is not ready fails later and points at the wrong thing. Pele's ResizeObserver resets the zoom on its first callback, so press its buttons only after `next_frame`.
+- Every test that launches mdd or a WebView sets `MDDOG_CACHE_DIR` to `$TMPDIR/mddog-test-cache`, so `./check.sh` leaves `~/Library/Caches/mddog/` alone. Unit tests skip the remote disk cache.
 - macOS limits a Unix socket path to 104 bytes, so `tests/headless.rs` keeps its `TMPDIR` short.
+- Every test that launches mdd sets `MDDOG_NO_SPARE`, except `the_spare_outlives_a_tree_kill`. Its `StopSpares` guard stops the test binary's spares when the test ends, pass or fail, so no spare lives on for its 12-hour idle limit.
 - A unit test in `src/render/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
 
 ### Reference tools
@@ -672,10 +677,11 @@ Opening a file fetches only what the document names: remote images, video poster
 | Variable | Read by | Effect |
 |---|---|---|
 | `MDDOG_NO_SPARE` | mdd | No warm spare |
-| `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, cell geometry, and remote fetches |
+| `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, cell geometry, page height after each measure, and remote fetches |
 | `MDDOG_DUMP_VIEW=FILE` | mdd | With `MDDOG_TRACE`, write a PNG of the viewport after each frame |
 | `MDDOG_DUMP_TILES=DIR` | mdd | Write each tile as it is sent |
 | `MDDOG_DEBUG` | mdd | Print timing marks to stderr |
+| `MDDOG_CACHE_DIR=DIR` | mdd, the spare, the sweep | Use `DIR` as the cache root in place of `~/Library/Caches/mddog`. The integration tests set it to `$TMPDIR/mddog-test-cache`, so a test run never writes to the real cache |
 | `TERM_PROGRAM=herdr` | mdd | Use the 56 MiB storage limit, and send selection and search changes as bands (XTVERSION `libghostty` does the same) |
 | `EDITOR` | mdd | The editor for `e` |
 | `XDG_CONFIG_HOME` | mdd | Where to look for `mddog/config.toml` |

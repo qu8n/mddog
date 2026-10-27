@@ -2,7 +2,10 @@
 
 use mddog::page::{self, remote, script};
 use mddog::{assets, config::Mermaid, engine::Engine, render};
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 const WAIT: Duration = Duration::from_secs(30);
 fn wait(eng: &Engine, js: &str) {
     assert!(eng.wait_js(js, WAIT), "timed out after {WAIT:?} waiting for `{js}`");
@@ -136,6 +139,8 @@ fn hover_checks(eng: &mut Engine, check: &mut impl FnMut(&str, bool)) {
 }
 
 fn main() {
+    // SAFETY: the first line of a single-threaded main, so no other thread reads the environment.
+    unsafe { std::env::set_var("MDDOG_CACHE_DIR", std::env::temp_dir().join("mddog-test-cache")) };
     let mut eng = Engine::new(600.0);
     let mut failed = 0;
     let mut check = |name: &str, ok: bool| {
@@ -176,6 +181,25 @@ fn main() {
     wait(&eng, script::REMOTE_DONE);
     let why = eng.eval("JSON.stringify([...document.querySelectorAll('.mddog-image-missing')].map((b) => b.textContent + ':' + b.dataset.why))").unwrap();
     check("r1_private_hosts_blocked", why == r#"["loop:blocked","image:blocked","lan:blocked"]"#);
+
+    // A remembered size opens each loading box at the size the image lays out at, scaled down to the page width.
+    // data: URLs stand in for remote ones, since they load without the network.
+    load(&mut eng, "![wide](https://x.test/w.svg) ![small](https://x.test/s.svg) <img src=\"https://x.test/h.svg\" width=\"1600\" height=\"400\">\n", 600.0);
+    let svg = |w, h| format!("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}'%3E%3C/svg%3E");
+    let (wide, small, sized) = (svg(1200, 300), svg(100, 40), svg(1600, 400));
+    eng.eval(&format!("const [w, s, h] = document.querySelectorAll('img[data-mddog-src]'); w.dataset.mddogSrc = {wide:?}; s.dataset.mddogSrc = {small:?}; h.dataset.mddogSrc = {sized:?}; ''"))
+        .unwrap();
+    let sizes = serde_json::json!({ &wide: [1200, 300], &small: [100, 40] });
+    eng.eval(&format!("mddog.guessImages({sizes}); ''")).unwrap();
+    let boxes = "JSON.stringify([...document.querySelectorAll('article img')].map((i) => { const r = i.getBoundingClientRect(); return [r.width, r.height]; }))";
+    let before: Vec<[f64; 2]> = serde_json::from_str(&eng.eval(boxes).unwrap()).unwrap();
+    remote::load(&eng, Duration::from_secs(10));
+    wait(&eng, script::REMOTE_DONE);
+    let boxes: Vec<[f64; 2]> = serde_json::from_str(&eng.eval(boxes).unwrap()).unwrap();
+    check("r3_guessed_image_box_matches_image", before[..2] == boxes[..2] && boxes[0][0] < 1200.0 && boxes[0][0] == boxes[0][1] * 4.0 && boxes[1] == [100.0, 40.0]);
+    // An image with its own size keeps the renderer's scaling, which the guess never touches.
+    check("r3_sized_image_keeps_its_scaling", boxes[2][0] < 1600.0 && boxes[2][0] == boxes[2][1] * 4.0);
+    check("r3_image_sizes_recorded", serde_json::from_str::<serde_json::Value>(&eng.eval("JSON.stringify(mddog.state.images)").unwrap()).unwrap() == sizes);
 
     // An image URL in the page itself skips the scheme handler, so the content rule stops it.
     check("r2_content_rules_added", eng.content_rules());
@@ -524,6 +548,13 @@ fn main() {
     });
     mddog::engine::spare::serve_on(&mut eng, b, |src, _| Some(render(src)));
     check("spare_serves_a_viewer", viewer.join().unwrap().is_some_and(|(two, px)| two == "2" && px == local));
+
+    // A quit gives up on a busy page after its short limit, not the full call limit. It leaves the engine stalled, so it runs last.
+    eng.eval("setTimeout(() => { const t = Date.now() + 2000; while (Date.now() < t); }); ''").unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    let t = Instant::now();
+    let r = eng.eval_within("'x'", Duration::from_millis(20));
+    check("eval_within_gives_up_on_a_busy_page", r.is_err() && t.elapsed() < Duration::from_millis(500) && eng.stalled());
 
     let _ = std::fs::remove_file(std::env::temp_dir().join(format!("mddog-search-test-{}.html", std::process::id())));
     if failed > 0 {

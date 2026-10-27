@@ -128,7 +128,7 @@ fn cache(dir: &Path, current: &str, now: SystemTime) {
         }
         // A half-written runtime folder or sizes file from a run that died.
         if let Some((stem, pid)) = name.rsplit_once(".tmp") {
-            if (stem == "diagram-sizes" || runtime_name(stem)) && pid.bytes().all(|b| b.is_ascii_digit()) && pid.parse().is_ok_and(dead) {
+            if (stem == "diagram-sizes" || stem == "image-sizes" || runtime_name(stem)) && pid.bytes().all(|b| b.is_ascii_digit()) && pid.parse().is_ok_and(dead) {
                 remove(&path, &meta);
             }
             continue;
@@ -303,12 +303,14 @@ mod tests {
         let half = d.join(format!("runtime-00dd.tmp{gone}"));
         let half_live = d.join(format!("runtime-00ee.tmp{}", std::process::id()));
         let sizes = d.join(format!("diagram-sizes.tmp{gone}"));
+        let images = d.join(format!("image-sizes.tmp{gone}"));
         let other = d.join("runtime-notes");
         for f in [&old, &recent, &current, &half, &half_live, &other] {
             std::fs::create_dir(f).unwrap();
             std::fs::write(f.join(".complete"), b"").unwrap();
         }
         std::fs::write(&sizes, b"{}").unwrap();
+        std::fs::write(&images, b"{}").unwrap();
         std::fs::write(d.join("diagram-sizes.json"), b"{}").unwrap();
         for f in [&old, &current, &other] {
             set_age(f, week + Duration::from_secs(60));
@@ -317,7 +319,7 @@ mod tests {
 
         cache(&d, "runtime-00cc", SystemTime::now());
 
-        for gone in [&old, &half, &sizes] {
+        for gone in [&old, &half, &sizes, &images] {
             assert!(!gone.exists(), "{}", gone.display());
         }
         for kept in [&recent, &current, &half_live, &other, &d.join("diagram-sizes.json")] {

@@ -24,7 +24,8 @@ fn path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let meta = std::fs::metadata(&exe).ok()?;
     let mut h = DefaultHasher::new();
-    (exe, meta.len(), meta.modified().ok()).hash(&mut h);
+    // A spare serves only clients with its cache root, since it reads its runtime folder from there.
+    (exe, meta.len(), meta.modified().ok(), crate::assets::cache_dir()).hash(&mut h);
     Some(std::env::temp_dir().join(format!("mddog-{}-{:016x}.sock", crate::sweep::uid(), h.finish())))
 }
 
@@ -67,9 +68,11 @@ pub fn start_at_login() -> Result<PathBuf, String> {
     let plist = agent_plist()?;
     let esc = |p: &Path| p.to_string_lossy().replace('&', "&amp;").replace('<', "&lt;");
     let body = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{AGENT}</string><key>ProgramArguments</key><array><string>{}</string><string>--spare</string></array><key>EnvironmentVariables</key><dict><key>TMPDIR</key><string>{}</string></dict><key>RunAtLoad</key><true/></dict></plist>\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{AGENT}</string><key>ProgramArguments</key><array><string>{}</string><string>--spare</string></array><key>EnvironmentVariables</key><dict><key>TMPDIR</key><string>{}</string>{}</dict><key>RunAtLoad</key><true/></dict></plist>\n",
         esc(&exe),
-        esc(&std::env::temp_dir())
+        esc(&std::env::temp_dir()),
+        // The spare's socket name holds its cache root, so a moved root must reach it too.
+        std::env::var_os("MDDOG_CACHE_DIR").map_or_else(String::new, |_| format!("<key>MDDOG_CACHE_DIR</key><string>{}</string>", esc(&crate::assets::cache_dir())))
     );
     std::fs::create_dir_all(plist.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
     std::fs::write(&plist, body).map_err(|e| format!("{}: {e}", plist.display()))?;
@@ -108,6 +111,10 @@ pub fn spawn() {
     cmd.arg("--spare").current_dir("/").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     for k in ["MDDOG_TRACE", "MDDOG_DUMP_VIEW", "MDDOG_DUMP_TILES", "MDDOG_DEBUG"] {
         cmd.env_remove(k);
+    }
+    // The spare runs in `/`, so a relative root would resolve elsewhere there.
+    if std::env::var_os("MDDOG_CACHE_DIR").is_some() {
+        cmd.env("MDDOG_CACHE_DIR", crate::assets::cache_dir());
     }
     // SAFETY: the hook runs in the forked child, so it calls only setsid, fork, and _exit (async-signal-safe) and allocates nothing.
     unsafe {
@@ -320,11 +327,16 @@ impl Client {
     }
 
     fn call(&self, req: Value, wait: Duration) -> Option<Value> {
+        self.call_within(req, wait + CALL_LIMIT + Duration::from_secs(1))
+    }
+
+    /// A reply later than `limit` leaves the stream out of step, so it marks the spare stalled.
+    fn call_within(&self, req: Value, limit: Duration) -> Option<Value> {
         if self.stalled.get() {
             return None;
         }
         let mut s = self.stream.borrow_mut();
-        let _ = s.set_read_timeout(Some(wait + CALL_LIMIT + Duration::from_secs(1)));
+        let _ = s.set_read_timeout(Some(limit));
         let r = (|| {
             write_frame(&mut s, req.to_string().as_bytes()).ok()?;
             serde_json::from_slice::<Value>(&read_frame(&mut s).ok()?).ok()
@@ -336,7 +348,11 @@ impl Client {
     }
 
     pub fn eval(&self, js: &str) -> Result<String, String> {
-        let v = self.call(json!(["eval", js]), Duration::ZERO).ok_or("WebKit stopped responding")?;
+        self.eval_within(js, CALL_LIMIT + Duration::from_secs(1))
+    }
+
+    pub fn eval_within(&self, js: &str, limit: Duration) -> Result<String, String> {
+        let v = self.call_within(json!(["eval", js]), limit).ok_or("WebKit stopped responding")?;
         match v["ok"].as_str() {
             Some(r) => Ok(r.to_string()),
             None => Err(v["err"].as_str().unwrap_or("WebKit stopped responding").to_string()),

@@ -1,9 +1,10 @@
-//! The viewBox size of each obsidian-engine diagram drawn so far, keyed by a hash of its source, so
-//! the next load can size its skeleton to the drawn height. Kept in memory and in one small file
-//! under the cache folder. Any read or write error leaves the sizes as they were: a missing size
-//! only means the page moves when that diagram draws.
+//! Sizes seen so far, so the next load can size each placeholder to what replaces it: the viewBox
+//! of each obsidian-engine diagram, keyed by a hash of its source, and the natural size of each
+//! remote image, keyed by its URL. Kept in memory and in one small file each under the cache
+//! folder. Any read or write error leaves the sizes as they were: a missing size only means the
+//! page moves when that diagram draws or that image arrives.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 
@@ -16,9 +17,9 @@ pub struct Sizes {
 }
 
 impl Sizes {
-    pub fn open() -> Self {
-        let file = std::env::var_os("HOME").map(|h| Path::new(&h).join("Library/Caches/mddog/diagram-sizes.json"));
-        Self::at(file)
+    /// The sizes in `name` under the cache root.
+    pub fn open(name: &str) -> Self {
+        Self::at(Some(crate::assets::cache_dir().join(name)))
     }
 
     pub fn at(file: Option<PathBuf>) -> Self {

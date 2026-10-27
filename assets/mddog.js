@@ -4,7 +4,7 @@ window.mddog = (() => {
   const units = Object.keys(limits).join('|');
   const num = '-?\\d+.?\\d*?';
   const lengthMacro = RegExp(`(hskip|hspace|raise|mspace|mskip|kern|lower|above|mkern|moveleft|moveright|rule|Rule|space|Space)({${num}(${units})})+`, 'g');
-  const state = { math: false, mermaid: false, sizes: {} };
+  const state = { math: false, mermaid: false, sizes: {}, images: {} };
 
   function decode(text) {
     const d = document.implementation.createHTMLDocument('');
@@ -631,6 +631,19 @@ async function blocked(u) {
   }
 }
 
+// Sizes each remote image with no height from its last natural size, as the image itself will lay out: its width,
+// scaled down to fit by max-width, so its box doesn't jump when it arrives. loadRemote records the sizes.
+window.mddog.guessImages = (sizes) => {
+  for (const img of document.querySelectorAll('img[data-mddog-src]:not([height])')) {
+    const size = sizes[img.dataset.mddogSrc];
+    if (!size) continue;
+    if (!img.hasAttribute('width')) img.style.width = `${size[0]}px`;
+    img.style.height = 'auto';
+    img.style.aspectRatio = `${size[0]} / ${size[1]}`;
+    img.dataset.mddogGuess = '';
+  }
+};
+
 window.mddog.loadRemote = (timeout) => {
   const imgs = [...document.querySelectorAll('img[data-mddog-src]')];
   const posters = [...document.querySelectorAll('video[data-mddog-poster]')];
@@ -679,7 +692,19 @@ window.mddog.loadRemote = (timeout) => {
     const picture = img.parentElement && img.parentElement.matches('picture') ? img.parentElement : null;
     const deferred = [...(picture ? picture.querySelectorAll('source[data-mddog-srcset]') : []), img];
     img.classList.add('mddog-loading');
-    img.addEventListener('load', () => { if (!done) { done = true; img.classList.remove('mddog-loading'); img.decode().catch(() => 0).then(settle); } }, { once: true });
+    const loaded = () => {
+      if (done) return;
+      done = true;
+      if (src && !img.hasAttribute('height') && img.naturalWidth && img.naturalHeight && src.length <= 2048) window.mddog.state.images[src] = [img.naturalWidth, img.naturalHeight];
+      // Only the guess's own styles go: the renderer sets its own height on an image with a height attribute.
+      if (img.hasAttribute('data-mddog-guess')) {
+        for (const p of ['width', 'height', 'aspect-ratio']) img.style.removeProperty(p);
+        img.removeAttribute('data-mddog-guess');
+      }
+      img.classList.remove('mddog-loading');
+      img.decode().catch(() => 0).then(settle);
+    };
+    img.addEventListener('load', loaded, { once: true });
     img.addEventListener('error', fail, { once: true });
     setTimeout(fail, timeout);
     for (const el of deferred) {

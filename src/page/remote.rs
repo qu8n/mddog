@@ -1,9 +1,10 @@
 //! Fetches remote images and media for the web view, so WebKit never reaches the network for them. The page asks
 //! for `mddog-https://…` or `mddog-http://…` (see `mddog.loadRemote`), and the scheme handler in `engine::webview`
-//! calls `fetch` on a worker thread. Each connection goes only to addresses checked here, so a redirect to a name
-//! that resolves to a private address, or a DNS answer that changes between check and connect, can't reach one.
+//! calls `fetch` on `spawn`'s small pool of worker threads. Each connection goes only to addresses checked here, so
+//! a redirect to a name that resolves to a private address, or a DNS answer that changes between check and connect,
+//! can't reach one.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -154,39 +155,69 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-static HOSTS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
-static FREED: Condvar = Condvar::new();
+const WORKERS: usize = 16;
 
-/// One of `PER_HOST` connections to a host, given back on drop.
-struct Slot(String);
-
-impl Slot {
-    fn take(host: &str, stop: &AtomicBool) -> Option<Slot> {
-        let mut hosts = lock(&HOSTS);
-        loop {
-            if stop.load(Ordering::Relaxed) {
-                return None;
-            }
-            let n = hosts.get_or_insert_with(HashMap::new).entry(host.to_owned()).or_default();
-            if *n < PER_HOST {
-                *n += 1;
-                return Some(Slot(host.to_owned()));
-            }
-            hosts = FREED.wait_timeout(hosts, Duration::from_millis(100)).unwrap_or_else(PoisonError::into_inner).0;
-        }
-    }
+struct Job {
+    host: String,
+    stop: Arc<AtomicBool>,
+    run: Box<dyn FnOnce() + Send>,
 }
 
-impl Drop for Slot {
-    fn drop(&mut self) {
-        let mut hosts = lock(&HOSTS);
-        if let Some(n) = hosts.get_or_insert_with(HashMap::new).get_mut(&self.0) {
+/// The queued fetches, and how many run on each host.
+struct Pool {
+    jobs: VecDeque<Job>,
+    hosts: BTreeMap<String, usize>,
+    workers: usize,
+    idle: usize,
+}
+
+static POOL: Mutex<Pool> = Mutex::new(Pool { jobs: VecDeque::new(), hosts: BTreeMap::new(), workers: 0, idle: 0 });
+static WAKE: Condvar = Condvar::new();
+
+/// The host and port that `url` connects to, which `spawn` limits to `PER_HOST` fetches at once.
+pub fn host(url: &str) -> String {
+    url.split_once("://").map_or("", |(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default()).to_ascii_lowercase()
+}
+
+/// Runs `run` on one of `WORKERS` threads, oldest first, once fewer than `PER_HOST` jobs run on `host`. A job whose
+/// `stop` is set while it waits is dropped. Returns false when no thread could start to run it.
+pub fn spawn(host: String, stop: Arc<AtomicBool>, run: impl FnOnce() + Send + 'static) -> bool {
+    let mut pool = lock(&POOL);
+    pool.jobs.push_back(Job { host, stop, run: Box::new(run) });
+    // A woken worker counts as idle until it takes the lock, so compare against the queue, not just `idle`.
+    if pool.jobs.len() > pool.idle && pool.workers < WORKERS && std::thread::Builder::new().name("remote".into()).spawn(work).is_ok() {
+        pool.workers += 1;
+    }
+    if pool.workers == 0 {
+        pool.jobs.pop_back();
+        return false;
+    }
+    WAKE.notify_one();
+    true
+}
+
+fn work() {
+    let mut pool = lock(&POOL);
+    loop {
+        let Pool { jobs, hosts, .. } = &mut *pool;
+        jobs.retain(|j| !j.stop.load(Ordering::Relaxed));
+        let Some(job) = jobs.iter().position(|j| hosts.get(&j.host).is_none_or(|&n| n < PER_HOST)).and_then(|i| jobs.remove(i)) else {
+            pool.idle += 1;
+            pool = WAKE.wait(pool).unwrap_or_else(PoisonError::into_inner);
+            pool.idle -= 1;
+            continue;
+        };
+        *hosts.entry(job.host.clone()).or_default() += 1;
+        drop(pool);
+        // A panic in one fetch must not take the worker, or its host's count, with it.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job.run));
+        pool = lock(&POOL);
+        if let Some(n) = pool.hosts.get_mut(&job.host) {
             *n -= 1;
             if *n == 0 {
-                hosts.as_mut().map(|h| h.remove(&self.0));
+                pool.hosts.remove(&job.host);
             }
         }
-        FREED.notify_all();
     }
 }
 
@@ -355,6 +386,13 @@ fn media_type(mime: &str) -> bool {
     ["image/", "video/", "audio/"].iter().any(|p| m.starts_with(p)) || m == "application/octet-stream" || m == "binary/octet-stream"
 }
 
+/// Answers from the memory cache alone, with no disk or network, so a hit never waits for a worker: a live reload
+/// re-requests every image, and a video's range requests come from one block. Returns false on a miss.
+pub fn answer_cached(url: &str, range: Option<&str>, on: &mut dyn FnMut(Event)) -> bool {
+    let want = range.and_then(parse_range);
+    cached(url, want).map(|e| answer(&e, want, on)).is_some()
+}
+
 /// Fetches `url` (http or https) and reports its response through `on`, ending with `Done` or `Fail`. Stops
 /// early, silently, once `stop` is set. `range` is the page's `Range` header, which video playback sends; it
 /// fetches a block of at least `BLOCK` bytes, so the next small ranges come from the cache.
@@ -368,8 +406,9 @@ pub fn fetch(agent: &ureq::Agent, url: &str, range: Option<&str>, stop: &AtomicB
         answer(&e, want, on);
         return store(e);
     }
-    let host = url.split_once("://").map_or("", |(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default());
-    let Some(_slot) = Slot::take(&host.to_ascii_lowercase(), stop) else { return };
+    if stop.load(Ordering::Relaxed) {
+        return;
+    }
     let mut req = agent.get(url).header("Accept", "image/*,video/*,*/*;q=0.8");
     if let Some((a, b)) = want {
         let len = b.map_or(0, |b| (b - a).saturating_add(1)).clamp(BLOCK, MAX_BODY);
@@ -502,7 +541,7 @@ mod tests {
                 let mut r = BufReader::new(s.try_clone().unwrap());
                 r.read_line(&mut line).unwrap();
                 while r.read_line(&mut String::new()).is_ok_and(|n| n > 2) {}
-                let path = line.split(' ').nth(1).unwrap_or_default().to_owned();
+                let path = line.split(' ').nth(1).unwrap_or_default().split('?').next().unwrap_or_default().to_owned();
                 let reply = routes.iter().find(|(p, _)| *p == path).map_or("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n", |(_, r)| r);
                 let _ = s.write_all(reply.replacen("\r\n", "\r\nConnection: close\r\n", 1).as_bytes());
             }
@@ -589,6 +628,44 @@ mod tests {
         assert_eq!(LOOKUPS.load(Ordering::SeqCst), 1);
         let fresh = agent_with(test_lookup, test_allow);
         assert_eq!(get(&fresh, &format!("http://flip.test:{port}/hop.png")), (None, 0, Some(Fail::Blocked)));
+    }
+
+    #[test]
+    fn many_fetches_share_a_few_threads() {
+        let (port, _) = serve(&[("/a.png", "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 3\r\nCache-Control: no-store\r\n\r\nPNG")]);
+        static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+        let agent = AGENT.get_or_init(|| agent_with(test_lookup, |_| true));
+        let (now, most) = (Arc::new(Mutex::new(BTreeMap::<String, usize>::new())), Arc::new(Mutex::new((0, 0))));
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Stopped while it waits, so it never runs.
+        let stopped = Arc::new(AtomicBool::new(false));
+        for i in 0..301 {
+            let url = format!("http://h{}.test:{port}/a.png?{i}", i % 10);
+            let (now, most, tx) = (now.clone(), most.clone(), tx.clone());
+            if i == 300 {
+                stopped.store(true, Ordering::Relaxed);
+            }
+            let stop = if i == 300 { stopped.clone() } else { Arc::new(AtomicBool::new(false)) };
+            assert!(spawn(host(&url), stop.clone(), move || {
+                let h = host(&url);
+                {
+                    let mut now = lock(&now);
+                    *now.entry(h.clone()).or_default() += 1;
+                    let mut most = lock(&most);
+                    *most = (most.0.max(now.values().sum()), most.1.max(now[&h]));
+                }
+                let mut ok = false;
+                fetch(agent, &url, None, &stop, &mut |e| ok |= matches!(e, Event::Done));
+                *lock(&now).get_mut(&h).unwrap() -= 1;
+                tx.send(ok).unwrap();
+            }));
+        }
+        drop(tx);
+        let done: Vec<bool> = rx.iter().collect();
+        assert_eq!((done.len(), done.iter().all(|&ok| ok)), (300, true));
+        let (all, per_host) = *lock(&most);
+        assert!(all <= WORKERS && per_host <= PER_HOST, "{all} at once, {per_host} on one host");
+        assert!(lock(&POOL).workers <= WORKERS);
     }
 
     #[test]
