@@ -59,71 +59,223 @@ enum Fence {
 
 fn protect_math(src: &str) -> String {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src);
-    let delim = |line: &str| line.trim() == "$$" && !line.starts_with("    ") && !line.starts_with('\t');
+    let delim = |line: &str| {
+        let u = unquote(line).0;
+        u.trim() == "$$" && !u.starts_with("    ") && !u.starts_with('\t')
+    };
     let mut out = String::with_capacity(src.len() + 16);
-    let mut display = false;
+    let mut display: Option<usize> = None;
     let mut chunk = String::new();
-    let flush = |chunk: &mut String, out: &mut String| {
+    let flush = |chunk: &str, out: &mut String| {
+        let html = html_block(chunk);
+        out.push_str(&chunk[..html]);
+        let chunk = &chunk[html..];
+        let table = table_start(chunk);
+        let escape = |m: &str, at: usize| if at >= table { escape_math(m).replace("\\\\|", "\\|") } else { escape_math(m) };
+        let lone = chunk.trim().strip_prefix("$$").and_then(|r| r.strip_suffix("$$")).is_some_and(|m| !m.trim().is_empty() && !m.contains("$$") && !m.contains('`'));
         if chunk.starts_with("    ") || chunk.starts_with('\t') {
             out.push_str(chunk);
+        } else if lone {
+            out.push_str(&escape(chunk, 0));
         } else {
             let masked = mask_code_spans(chunk);
             let mut last = 0;
-            for (a, b) in inline_math(&masked).into_iter().filter(|&(a, b)| !chunk[a..b].contains('`')) {
+            for (a, b) in inline_math(&masked, true).into_iter().filter(|&(a, b)| !chunk[a..b].contains('`') && !chunk[a..b].contains("://") && !chunk[a..b].contains("www.")) {
                 out.push_str(&hold_dollars(&chunk[last..a], &masked[last..a]));
-                out.push_str(&escape_math(&chunk[a..b]));
+                out.push_str(&escape(&chunk[a..b], a));
                 last = b;
             }
             out.push_str(&hold_dollars(&chunk[last..], &masked[last..]));
         }
-        chunk.clear();
     };
     let lines: Vec<&str> = src.split_inclusive('\n').collect();
     let fences: Vec<Fence> = lines
         .iter()
-        .scan(None, |fence: &mut Option<(char, usize)>, line| {
-            let t = line.trim();
+        .scan(None, |fence: &mut Option<(char, usize, usize)>, line| {
+            let (u, depth) = unquote(line);
+            let t = u.trim();
+            // A fence in a block quote ends with the quote.
+            if fence.is_some_and(|f| depth < f.2) {
+                *fence = None;
+            }
             let ticks = t.chars().take_while(|c| matches!(c, '`' | '~')).count();
             let open = t.chars().next().filter(|_| ticks >= 3);
-            Some(if let Some((c, n)) = *fence {
-                if open == Some(c) && ticks >= n && t[ticks..].trim().is_empty() {
+            Some(if let Some((c, n, f_depth)) = *fence {
+                if depth == f_depth && open == Some(c) && ticks >= n && t[ticks..].trim().is_empty() {
                     *fence = None;
                 }
                 Fence::Inside
             } else if let Some(c) = open.filter(|c| *c == '~' || !t[ticks..].contains('`')) {
-                *fence = Some((c, ticks));
+                *fence = Some((c, ticks, depth));
                 Fence::Opens
             } else {
                 Fence::Outside
             })
         })
         .collect();
-    let mut closes_later = vec![false; lines.len() + 1];
+    // closes_later[i]: a `$$` line follows line i in the same block quote. A line quoted less
+    // deeply ends the quotes in between, so it hides their delimiters from the lines above.
+    let mut closes_later = vec![false; lines.len()];
+    let depths: Vec<usize> = lines.iter().map(|l| unquote(l).1).collect();
+    // below[d]: a `$$` at depth d follows with no shallower line between. It only grows on a
+    // `$$` line, by at most that line's depth, so this pass stays linear.
+    let mut below: Vec<bool> = Vec::new();
     for i in (0..lines.len()).rev() {
-        closes_later[i] = closes_later[i + 1] || (fences[i] == Fence::Outside && delim(lines[i]));
+        let d = depths[i];
+        closes_later[i] = below.get(d) == Some(&true);
+        below.truncate(d + 1);
+        if fences[i] == Fence::Outside && delim(lines[i]) {
+            below.resize(d + 1, false);
+            below[d] = true;
+        }
     }
     for (i, line) in lines.iter().enumerate() {
         match fences[i] {
             Fence::Inside => out.push_str(line),
             Fence::Opens => {
-                flush(&mut chunk, &mut out);
+                flush(&std::mem::take(&mut chunk), &mut out);
                 out.push_str(line);
             }
-            Fence::Outside if delim(line) && (display || closes_later[i + 1]) => {
-                flush(&mut chunk, &mut out);
-                display = !display;
+            Fence::Outside if delim(line) && display.map_or(closes_later[i], |d| d == depths[i]) => {
+                flush(&std::mem::take(&mut chunk), &mut out);
+                display = if display.is_some() { None } else { Some(depths[i]) };
                 out.push_str(line);
             }
-            Fence::Outside if display => out.push_str(&escape_math(line)),
+            Fence::Outside if display.is_some() => out.push_str(&escape_math(line)),
             Fence::Outside if line.trim().is_empty() => {
-                flush(&mut chunk, &mut out);
+                flush(&std::mem::take(&mut chunk), &mut out);
                 out.push_str(line);
             }
             Fence::Outside => chunk.push_str(line),
         }
     }
-    flush(&mut chunk, &mut out);
+    flush(&std::mem::take(&mut chunk), &mut out);
     out
+}
+
+/// Where the GFM table in a chunk of lines starts: its header row, the line before a delimiter
+/// row with as many cells. `chunk.len()` when there is none.
+fn table_start(chunk: &str) -> usize {
+    let cells = |line: &str| line.trim().trim_start_matches('|').trim_end_matches('|').split('|').count();
+    let delimiter = |line: &str| {
+        let t = line.trim().trim_start_matches('|').trim_end_matches('|');
+        line.contains('|')
+            && t.split('|').all(|c| {
+                let c = c.trim().trim_start_matches(':').trim_end_matches(':');
+                !c.is_empty() && c.bytes().all(|b| b == b'-')
+            })
+    };
+    let mut at = 0;
+    let mut prev: Option<(usize, &str)> = None;
+    for line in chunk.split_inclusive('\n') {
+        if let Some((start, _)) = prev.filter(|(_, h)| delimiter(line) && cells(h) == cells(line)) {
+            return start;
+        }
+        prev = Some((at, line));
+        at += line.len();
+    }
+    chunk.len()
+}
+
+/// The line without its block quote markers, and how many it had.
+fn unquote(line: &str) -> (&str, usize) {
+    let (mut s, mut depth) = (line, 0);
+    loop {
+        let t = s.trim_start_matches(' ');
+        match t.strip_prefix('>') {
+            Some(r) if s.len() - t.len() <= 3 => (s, depth) = (r.strip_prefix(' ').unwrap_or(r), depth + 1),
+            _ => return (s, depth),
+        }
+    }
+}
+
+/// The length of the HTML block a chunk of lines starts with, or 0 (CommonMark kinds 1, 2, 6,
+/// and 7). cmark does not unescape inside one, so math there is left as written.
+fn html_block(chunk: &str) -> usize {
+    const TAGS: [&str; 62] = [
+        "address",
+        "article",
+        "aside",
+        "base",
+        "basefont",
+        "blockquote",
+        "body",
+        "caption",
+        "center",
+        "col",
+        "colgroup",
+        "dd",
+        "details",
+        "dialog",
+        "dir",
+        "div",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "frame",
+        "frameset",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "head",
+        "header",
+        "hr",
+        "html",
+        "iframe",
+        "legend",
+        "li",
+        "link",
+        "main",
+        "menu",
+        "menuitem",
+        "nav",
+        "noframes",
+        "ol",
+        "optgroup",
+        "option",
+        "p",
+        "param",
+        "search",
+        "section",
+        "summary",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "title",
+        "tr",
+        "track",
+        "ul",
+    ];
+    let line = chunk.lines().next().unwrap_or_default();
+    let t = line.trim_start();
+    if line.len() - t.len() > 3 || !t.starts_with('<') {
+        return 0;
+    }
+    // Kinds 1 and 2 end on the line with their end marker, and the rest of the chunk is Markdown.
+    let through = |marker: &str| chunk.to_ascii_lowercase().find(marker).map_or(chunk.len(), |i| chunk[i..].find('\n').map_or(chunk.len(), |n| i + n + 1));
+    if t.starts_with("<!--") {
+        return through("-->");
+    }
+    let closing = t[1..].starts_with('/');
+    let rest = if closing { &t[2..] } else { &t[1..] };
+    let name = rest.bytes().take_while(u8::is_ascii_alphanumeric).count();
+    let (name, after) = (rest[..name].to_ascii_lowercase(), &rest[name..]);
+    let ends = after.is_empty() || after.starts_with(['>', ' ', '\t', '/']);
+    if !closing && ends && ["pre", "script", "style", "textarea"].contains(&name.as_str()) {
+        return through(&format!("</{name}>"));
+    }
+    let lone_tag = rest.starts_with(|c: char| c.is_ascii_alphabetic()) && ends && t.trim_end().ends_with('>') && !t[1..].contains('<');
+    if TAGS.contains(&name.as_str()) && ends || lone_tag { chunk.len() } else { 0 }
 }
 
 fn mask_code_spans(s: &str) -> String {
@@ -640,18 +792,25 @@ fn text_filters(body: &NodeRef) {
         replace(&code, &math);
     }
     for p in body.descendants().filter(|n| is(n, "p")).collect::<Vec<_>>() {
-        let kids: Vec<NodeRef> = p.children().collect();
+        let mut kids: Vec<NodeRef> = p.children().collect();
         if kids.is_empty() || !kids.iter().all(|k| k.as_text().is_some() || is(k, "br")) {
             continue;
         }
+        // GitHub keeps trailing breaks after the math.
+        let tail = kids.iter().rev().take_while(|k| is(k, "br") || k.as_text().is_some_and(|t| t.borrow().trim().is_empty())).count();
+        let rest = kids.split_off(kids.len() - tail);
         let s: String = kids.iter().filter_map(|k| k.as_text().map(|t| t.borrow().clone())).collect();
+        let s = s.trim_end();
         let Some(inner) = s.strip_prefix("$$").and_then(|r| r.strip_suffix("$$")) else { continue };
-        if inner.starts_with('\n') && inner.ends_with('\n') && !inner.contains("$$") {
+        if !inner.trim().is_empty() && !inner.contains("$$") {
             for k in kids {
                 k.detach();
             }
-            for f in fragment(&format!("<math-renderer class=\"js-display-math\" style=\"display: block\" data-run-id=\"{RUN_ID}\">{}</math-renderer>", escape(&s))) {
-                p.append(f);
+            for f in fragment(&format!("<math-renderer class=\"js-display-math\" style=\"display: block\" data-run-id=\"{RUN_ID}\">{}</math-renderer>", escape(s))) {
+                match rest.first() {
+                    Some(r) => r.insert_before(f),
+                    None => p.append(f),
+                }
             }
         }
     }
@@ -671,7 +830,7 @@ fn text_filters(body: &NodeRef) {
         }
         let mut pieces: Vec<String> = Vec::new();
         let mut last = 0;
-        for (a, b) in inline_math(&s) {
+        for (a, b) in inline_math(&s, false) {
             if a > last {
                 pieces.push(escape(&emoji::replace(&s[last..a])));
             }
@@ -697,10 +856,21 @@ fn text_filters(body: &NodeRef) {
             let t = text.borrow().replace(HELD_DOLLAR, if in_code(&node) { "\\$" } else { "$" });
             *text.borrow_mut() = t;
         }
+        if let Some(e) = node.as_element() {
+            for v in e.attributes.borrow_mut().map.values_mut().filter(|v| v.value.contains(HELD_DOLLAR)) {
+                v.value = v.value.replace(HELD_DOLLAR, "$");
+            }
+        }
     }
 }
 
-pub fn inline_math(s: &str) -> Vec<(usize, usize)> {
+/// The `$…$` and `$$…$$` spans of `s`, by GitHub's rules. An opener follows whitespace, `(`, or the
+/// start, and comes before a character that is not whitespace or `$`. The next `$` (or `$$`) ends
+/// the search. It closes the math unless it comes before a word character, sits between two of the
+/// same punctuation mark, or (for `$`) follows whitespace and comes before whitespace or the end.
+/// Math does not cross lines. `loose`, for the source pass, also takes an opener after the end of
+/// other inline markup, so it finds every span the text pass finds.
+pub fn inline_math(s: &str, loose: bool) -> Vec<(usize, usize)> {
     let b = s.as_bytes();
     if !b.contains(&b'$') {
         return Vec::new();
@@ -711,16 +881,13 @@ pub fn inline_math(s: &str) -> Vec<(usize, usize)> {
         escaped[i] = b[i - 1] == b'\\' && !escaped[i - 1];
     }
     let dollar = |j: usize| b[j] == b'$' && !escaped[j];
-    let ws_before = |j: usize| s[..j].chars().next_back().is_none_or(char::is_whitespace);
-    let after_ok = |after: usize| s[after..].chars().next().is_none_or(|c| !c.is_alphanumeric());
-    // stop[d - 1][k]: the first closer of width d at or after k that ends the search, either a
-    // match or a `$` after whitespace. Other closers are skipped, so an opener never rescans.
-    let mut stop = [vec![usize::MAX; n + 1], vec![usize::MAX; n + 1]];
+    // next[d - 1][k]: the first `$` (d = 1) or `$$` (d = 2) at or after k. line[k]: the first newline.
+    let mut next = [vec![usize::MAX; n + 1], vec![usize::MAX; n + 1]];
+    let mut line = vec![usize::MAX; n + 1];
     for j in (0..n).rev() {
-        for d in 1..=2 {
-            let closer = dollar(j) && (d == 1 || b.get(j + 1) == Some(&b'$'));
-            stop[d - 1][j] = if closer && (ws_before(j) || after_ok(j + d)) { j } else { stop[d - 1][j + 1] };
-        }
+        next[0][j] = if dollar(j) { j } else { next[0][j + 1] };
+        next[1][j] = if dollar(j) && b.get(j + 1) == Some(&b'$') { j } else { next[1][j + 1] };
+        line[j] = if b[j] == b'\n' { j } else { line[j + 1] };
     }
     let mut out = Vec::new();
     let mut i = 0;
@@ -731,18 +898,22 @@ pub fn inline_math(s: &str) -> Vec<(usize, usize)> {
         }
         let delim = if b.get(i + 1) == Some(&b'$') { 2 } else { 1 };
         let open_end = i + delim;
-        let prev_ok = !s[..i].chars().next_back().is_some_and(char::is_alphanumeric);
+        let prev = s[..i].chars().next_back();
+        let prev_ok = prev.is_none_or(|c| c.is_whitespace() || c == '(' || loose && "*_`~)]>|".contains(c));
         let next_ok = s[open_end..].chars().next().is_some_and(|c| !c.is_whitespace() && c != '$');
-        if !prev_ok || !next_ok {
+        let j = next[delim - 1][open_end];
+        let closes = j != usize::MAX && {
+            let (before, after) = (s[..j].chars().next_back(), s[j + delim..].chars().next());
+            !after.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                && !(before == after && after.is_some_and(|c| c.is_ascii_punctuation()))
+                && (delim == 2 || !before.is_some_and(char::is_whitespace) || after.is_some_and(|c| !c.is_whitespace()))
+                && line[open_end] > j
+        };
+        if prev_ok && next_ok && closes {
+            out.push((i, j + delim));
+            i = j + delim;
+        } else {
             i += delim;
-            continue;
-        }
-        match stop[delim - 1][open_end] {
-            j if j != usize::MAX && !ws_before(j) => {
-                out.push((i, j + delim));
-                i = j + delim;
-            }
-            _ => i += delim,
         }
     }
     out
@@ -888,7 +1059,7 @@ mod tests {
         let html = render("$$\n\nSome *em* and `a\\b`\n").html;
         assert!(html.contains("<em>em</em>") && html.contains("<code>a\\b</code>"), "{html}");
         let html = render("$$\n\n```\n$$\n```\n\nSome *em*\n").html;
-        assert!(html.contains("<em>em</em>"), "{html}");
+        assert!(html.contains(">em</em>"), "{html}");
         let html = render("    $$\n    a\\b\n    $$\n").html;
         assert!(html.contains("a\\b") && !html.contains("a\\\\b"), "{html}");
     }
@@ -996,10 +1167,18 @@ mod tests {
     }
 
     #[test]
+    fn a_deep_quote_takes_linear_time() {
+        let s = format!("{}$$\n{}", "> ".repeat(200_000), "x\n".repeat(200_000));
+        let t = std::time::Instant::now();
+        protect_math(&s);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+    }
+
+    #[test]
     fn openers_without_closers_take_linear_time() {
         let s = "($a$a".repeat(100_000);
         let t = std::time::Instant::now();
-        assert!(inline_math(&s).is_empty());
+        assert!(inline_math(&s, true).is_empty() && inline_math(&s, false).is_empty());
         assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
     }
 
@@ -1015,6 +1194,48 @@ mod tests {
         let html = api_html("Inline $a*b*c$ and $x_1 + y_2$\n\n$$\na_i * b_j\n$$\n");
         assert!(html.contains(">$a*b*c$</math-renderer>") && !html.contains("<em>"), "{html}");
         assert!(html.contains("$x_1 + y_2$") && html.contains("a_i * b_j"), "{html}");
+    }
+
+    #[test]
+    fn math_openers_and_closers_follow_github() {
+        let spans = |s: &str| inline_math(s, false).into_iter().map(|(a, b)| &s[a..b]).collect::<Vec<_>>().join(" ");
+        assert_eq!(spans("$a$/$b$ \"$c$\" ($d$) x$e$"), "$a$ $d$");
+        assert_eq!(spans("$a$b c$ and $f(p)$) and $x$_ and $y$1"), "");
+        assert_eq!(spans("costs $5, and is $\\alpha = 1$ off"), "$5, and is $");
+        assert_eq!(spans("c $z $ d $w $( e $v $"), "$w $");
+        assert_eq!(spans("$a +\nb$ and $$x $$ y"), "$$x $$");
+    }
+
+    #[test]
+    fn a_paragraph_of_one_line_display_math_is_display() {
+        let html = api_html("$$ \\{a_1 * b_1\\} $$\n\n$$x_2$$<br><br>\n\nText $$y$$\n");
+        assert!(html.contains("js-display-math\" style=\"display: block\" data-run-id=\"0f23d3dd37596070b592c1adaa9bf6c8\">$$ \\{a_1 * b_1\\} $$</math-renderer>"), "{html}");
+        assert!(html.contains(">$$x_2$$</math-renderer><br><br>"), "{html}");
+        assert!(html.contains(">$$y$$</math-renderer>") && html.matches("js-display-math").count() == 2, "{html}");
+    }
+
+    #[test]
+    fn math_in_tables_quotes_and_html_keeps_its_text() {
+        let html = api_html("| a |\n|---|\n| $x \\| y$ and $\\|v\\|$ |\n\n> $$\n> a_1 * b_1 \\{c\\}\n> $$\n\n<summary>Sum $x_1$ and $y_2$</summary>\n\n$\\href{https://a.org/}{\\KaTeX}$\n");
+        assert!(html.contains(">$x | y$</math-renderer>") && html.contains(">$|v|$</math-renderer>"), "{html}");
+        assert!(html.contains("a_1 * b_1 \\{c\\}"), "{html}");
+        assert!(html.contains(">$x_1$</math-renderer> and"), "{html}");
+        assert!(html.contains("{\\KaTeX}$") && !html.contains("\\\\KaTeX"), "{html}");
+    }
+
+    #[test]
+    fn the_source_pass_escapes_only_what_becomes_math() {
+        let html = api_html("costs $5\nand $\\{x\\}$\n\n$a *em*\nb$\n\n<pre>$x_1$</pre>\n\n<!-- c -->\n$a *b*$\n\n<https://example.com>\n$c *d*$\n");
+        assert!(html.contains(">$\\{x\\}$</math-renderer>") && html.contains(">em</em>"), "{html}");
+        assert!(html.contains(">$x_1$</pre>"), "{html}");
+        assert!(html.contains(">$a *b*$</math-renderer>") && html.contains(">$c *d*$</math-renderer>"), "{html}");
+        let html = api_html(">     $$\n>     a_b\n>     $$\n\n> ```\n> $$\n> c_d * e\n> $$\n> ```\n");
+        assert!(html.contains("a_b") && html.contains("c_d * e") && !html.contains("\\_"), "{html}");
+        let html = api_html("> $$\n\nplain *em*\n$$\n\n> ```\n> x\n\n$a_b * c_d$\n\n$$ `e_f` $$\n");
+        assert!(html.contains(">em</em>") && html.contains(">$a_b * c_d$</math-renderer>") && html.contains(">e_f</code>"), "{html}");
+        let html = api_html("```\n> ```\n$x_1 * y$\n```\n\n![Cost \\$5](x.png)\n\nBefore $\\|x\\|$\n| a |\n|---|\n| $x \\| y$ |\n\n$\\|z\\|$\n--- | ---\n");
+        assert!(html.contains("$x_1 * y$") && !html.contains("x\\_1") && html.contains("alt=\"Cost $5\""), "{html}");
+        assert!(html.contains(">$\\|x\\|$</math-renderer>") && html.contains(">$x | y$</math-renderer>") && html.contains(">$\\|z\\|$</math-renderer>"), "{html}");
     }
 
     #[test]

@@ -72,7 +72,7 @@ assets/
   textmate/          128 grammars from starry-night, scope-to-class map
   spike.png, mddog-themes.png  README images
 fixtures/            gfm.md, diagram.svg
-tests/               integration tests (help over a pty, search, watch, headless, textmate golden)
+tests/               integration tests (help over a pty, search, watch, headless, textmate and math goldens)
 reference/           Node and Python dev tools: CSS build, grammar export, captures, probes, e2e, bench
 docs/                behavior spec, theme guide, terminal UAT notes, archive
 plugins/
@@ -235,7 +235,13 @@ The terminal parts draw with the theme's `Palette`: the file list, the status ba
 2. `markdown.rs` notes whether the page has math or Mermaid, then calls the style's `dress`.
 3. Last, it links raw URLs and keeps source positions on top-level blocks only.
 
-Two cmark quirks need care. cmark drops a backslash before punctuation and reads `*` and `_` in math as emphasis, so math is escaped before parsing. cmark also turns `\$` into `$`, so an escaped dollar outside code is held as `HELD_DOLLAR` until the math pass. Local media is confined to a root folder (see Security).
+Two cmark quirks need care. cmark drops a backslash before punctuation and reads `*` and `_` in math as emphasis, so math is escaped before parsing. That pre-escape works line by line and knows its containers. It finds spans with `inline_math(_, loose = true)`, which finds every span the DOM pass's `inline_math(_, false)` finds and more, so it never misses math that will be typeset. It skips raw HTML blocks, code spans, spans that hold a URL, and text outside the span's block quote or table. cmark also turns `\$` into `$`, so an escaped dollar outside code is held as `HELD_DOLLAR` until the math pass, which also restores it in attributes.
+
+`inline_math` follows GitHub's rules. An opener follows whitespace, `(`, or the start of a text node. The first `$` after it closes the span unless it comes before a word character, sits between two of the same mark, or follows a space and comes before a space or the end. A span never crosses a line. Both passes take linear time.
+
+mddog differs from GitHub on purpose in a few places. Math inside italics and footnotes renders, `\$` stays a literal dollar, and five GitHub math bugs are not copied. `fixtures/math/SOURCES.md` lists the exact inputs, and `tests/math.golden` holds mddog's output.
+
+Local media is confined to a root folder (see Security).
 
 **Code.** Code is highlighted the way GitHub does it, with GitHub's `pl-*` classes. tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, and PHP. irosashi, a Rust port of vscode-textmate, covers the rest with starry-night's grammars. `tests/textmate.golden` pins the output.
 
@@ -640,6 +646,7 @@ Opening a file fetches only what the document names: remote images, video poster
 - macOS limits a Unix socket path to 104 bytes, so `tests/headless.rs` keeps its `TMPDIR` short.
 - Every test that launches mdd sets `MDDOG_NO_SPARE`, except `the_spare_outlives_a_tree_kill`. Its `StopSpares` guard stops the test binary's spares when the test ends, pass or fail, so no spare lives on for its 12-hour idle limit.
 - A unit test in `src/render/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
+- `tests/math.rs` renders `fixtures/math/` and checks its math against `tests/math.golden` in the same way. `UPDATE_GOLDEN=1 cargo test --test math` rewrites it.
 
 ### Reference tools
 
@@ -648,6 +655,7 @@ Opening a file fetches only what the document names: remote images, video poster
 | `reference/e2e/` | Drives mddog in a herdr pane inside Ghostty for editor, external change, on-screen, search, and tile checks. The on-screen and search checks capture the Ghostty window. |
 | `reference/capture.mjs` | Captures github.com's repo view of a file |
 | `reference/compare.mjs REF.frozen.html PAGE.html dark\|light` | Lays out a frozen capture and mddog's page (the `page.html` that `--headless` writes) at the same content width, and prints every block whose position or size differs and every probed element whose computed style differs |
+| `reference/math-github.sh` | Posts each `fixtures/math/` file to GitHub's Markdown API into gitignored `reference/math-github/`. `cargo test --test math -- --ignored` then writes the differences to `reference/math-github/diff.txt` |
 | `reference/build-css.mjs` | Rebuilds `assets/github.css` and the Primer block of both GitHub themes |
 | `reference/export-grammars.mjs` | Rebuilds `assets/textmate/` |
 | `reference/bench/` | The interactive viewer benchmark |

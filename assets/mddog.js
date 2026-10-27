@@ -49,7 +49,10 @@ window.mddog = (() => {
       const bad = unsupported.filter((m) => el.textContent.includes(`\\${m}`) || el.textContent.includes(`\\$${m}`) || el.textContent.includes(`\\$\{${m}`));
       if (bad.length) { flash(el, `The following macros are not allowed: ${bad.join(', ')}`); continue; }
       el.textContent = clampLengths(el.textContent);
-      const tex = decode(el.textContent).trim().replace(/^\${1,2}|\${1,2}$/g, '');
+      // Strip only the delimiters, so math that ends in `\$` keeps its dollar.
+      const src = decode(el.textContent).trim();
+      const n = src.length >= 4 && src.startsWith('$$') && src.endsWith('$$') ? 2 : 1;
+      const tex = src.slice(n, src.length - n);
       try {
         const mml = MJ.tex2mml(tex, { display: !el.classList.contains('js-inline-math') });
         const holder = document.createElement('div');

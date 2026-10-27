@@ -43,7 +43,7 @@ fn main() {
             std::process::exit(3);
         }
         match engine::spare::start_at_login() {
-            Ok(_) => println!("mdd: launchd now starts a prewarmed mdd at login, so your first preview opens in about 40 ms instead of 250 ms. Undo with: mdd --no-start-at-login"),
+            Ok(_) => println!("mdd: launchd now starts a prewarmed mdd at login, so your first preview opens in about 40 ms instead of 200 ms. Undo with: mdd --no-start-at-login"),
             Err(e) => fail(&e),
         }
         return;

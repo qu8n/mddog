@@ -1,0 +1,801 @@
+=== adv-comp-methods-ic
+In quantum‐mechanical terms, non‐radiative decay from one electronic state to another of the same spin multiplicity—i.e. internal conversion (IC)—is treated as a vibronically‐mediated transition and its rate is given by Fermi’s Golden Rule. For an excited triplet state ⟨$T_n$⟩ decaying to a lower triplet ⟨$T_m$⟩, the rate constant ⟨$k_{IC}$⟩ is
+⟦$$ k_{IC} = \frac{2\pi}{\hbar} \sum_f \bigl|\langle \Psi_f \mid \hat{H}_{\mathrm{nac}} \mid \Psi_i \rangle\bigr|^2 \,\delta(E_i - E_f)\,. $$⟧
+⟨$\Psi_i = \psi_{el}(T_n)(r;Q)\chi_{\nu_i}(Q)$⟩ is the initial vibronic wavefunction (electronic ⟨$\psi$⟩ × vibrational ⟨$\chi$⟩),
+⟨$\Psi_f = \psi_{el}(T_m)(r;Q)\chi_{\nu_f}(Q)$⟩ is the final vibronic wavefunction,
+⟨$\hat{H}_{\mathrm{nac}}$⟩ is the non‐adiabatic coupling operator (essentially the nuclear kinetic energy operator that couples the electronic states via nuclear motion),
+the delta‐function ⟨$\delta(E_i - E_f)$⟩ enforces energy conservation,
+and the sum runs over all vibrational (“final”) levels ⟨$\nu_f$⟩ of the lower‐lying state.
+In practice one rewrites the matrix element in terms of vibronic coupling constants. Introducing normal‐mode coordinates ⟨$Q_\alpha$⟩, one finds
+where ⟨$\frac{\partial \hat{H}^e}{\partial Q_\alpha}$⟩ is the electronic‐structure derivative with respect to the nuclear coordinate ⟨$Q_\alpha$⟩. The first factor is the electronic vibronic coupling and the second is the Franck–Condon overlap between vibrational states.
+Because the density of vibrational states and the Franck–Condon overlaps fall off rapidly as the energy gap between initial and final states increases, one often summarizes ⟨$k_{IC}$⟩ in a Marcus‐type expression (here for temperature ⟨$T$⟩):
+⟦$$ k_{IC} \approx \frac{2\pi}{\hbar} V^2 \,\frac{1}{4\pi \lambda k_B T}\,\exp\!\Bigl[-\frac{(\Delta G + \lambda)^2}{4\lambda k_B T}\Bigr]. $$⟧
+⟨$V$⟩ is the effective electronic‐vibronic coupling matrix element,
+⟨$\lambda$⟩ is the total reorganization energy (sum of all mode contributions),
+⟨$\Delta G = E_{T_n} - E_{T_m}$⟩ is the free‐energy (or electronic energy) gap,
+and ⟨$k_B$⟩ is Boltzmann’s constant.
+In comparing IC between states of the same character (LE→LE or CT→CT) versus mixed character (LE→CT), three key factors suppress ⟨$k_{IC}$⟩ when the lower state is CT:
+LE and CT electronic densities overlap minimally (electron and hole reside on different fragments), so ⟨$\langle \psi_{T1} \mid \frac{\partial \hat{H}}{\partial Q} \mid \psi_{T2} \rangle$⟩ is typically an order of magnitude smaller than for LE→LE.
+Reorganization Energy (⟨$\lambda$⟩):
+CT formation redistributes charge over the molecule, leading to larger nuclear reorganizations (higher ⟨$\lambda$⟩), which reduces the Franck–Condon–weighted density of states under the exponential.
+Energy Gap (⟨$\Delta G$⟩):
+CT states often lie at substantially lower energy than LE states, widening ⟨$\Delta G$⟩ and further quenching IC through the
+⟦$$ \exp\!\bigl[-\tfrac{(\Delta G+\lambda)^2}{4\lambda k_B T}\bigr] $$⟧
+A CI is the set of nuclear geometries at which two adiabatic electronic potential-energy surfaces (PESs) of the same spin multiplicity become exactly degenerate and the non-adiabatic coupling is non-zero. Locally the two PESs take on the double-cone shape sketched below, hence the name. Mathematically the degeneracy is lifted to first order along two special nuclear directions that span the branching plane (or g/h plane): the energy-gradient difference vector g and the derivative-coupling vector h. All other ⟨$3N-8$⟩ nuclear degrees of freedom (for an N-atom molecule) form the seam of the intersection. en.wikipedia.org
+Two of the coordinates can always be combined to lift the degeneracy; the remaining ⟨$3N-8$⟩ coordinates form a seam of CI points. en.wikipedia.org
+FGR is a first-order, weak-coupling perturbation theory: it assumes (i) the two electronic states are non-degenerate in the region that dominates the transition, and (ii) the electronic coupling that drives the hop can be treated as a small perturbation on top of otherwise adiabatic nuclear motion. Mathematically, the derivation expands the time-evolution operator to first order in the non-adiabatic coupling and then lets ⟨$t\to\infty$⟩ to obtain a constant rate
+⟦$$ \Gamma = 2\pi V^2 \rho(E). $$⟧
+By definition the adiabatic energy gap between the two states vanishes at the CI, so the “energy denominator” that appears in the intermediate steps of the FGR derivation also vanishes. The perturbative series diverges, signalling that the rate cannot be captured by a single constant ⟨$V$⟩ and a density of states. en.wikipedia.org
+The non-adiabatic coupling vector ⟨$d_{12}(R)$⟩ blows up like ⟨$1/\Delta E$⟩ as the gap ⟨$\Delta E\to 0$⟩. In the neighbourhood of the CI the electronic motion and nuclear motion are completely entangled (“Born–Oppenheimer breakdown”), so the basic assumption of FGR—that the electronic transition is a weak perturbation on vibrational dynamics—is invalid. pubmed.ncbi.nlm.nih.gov
+Suppose the minimum-energy point on the CI seam is, say, > 5 kcal mol⁻¹ (~0.22 eV) above the vertical excitation energy of ⟨$S_n$⟩. Now the picture changes:
+⟦$$ k_{IC} = \frac{k_B T}{h}\exp\!\bigl[-\Delta G^\ddagger/(R T)\bigr], \quad \Delta G^\ddagger = G_{CI} - G_{S_n^{eq}}. $$⟧
+Here the “transition state” is the point on the CI seam that minimizes ⟨$G_{CI}$⟩. TST’s assumptions are now satisfied: there is a well-defined dividing surface, nuclear motion is classical over this barrier, and recrossings are rare if the energy gap to the seam is large. The electronic part is absorbed into the fact that once the dividing surface is reached the hop occurs with unit probability. (TST will slightly overestimate the rate because it ignores any frustrated hops back to ⟨$S_n$⟩; variational TST can correct this.) en.wikipedia.org
+Rate-theory regimes for an ⟨$S_n\to S_{n-1}$⟩ (or ⟨$T_n\to T_{n-1}$⟩) internal-conversion channel
+The location of that seam relative to the equilibrium geometry of the upper state (⟨$S_n^{\rm eq}$⟩) determines whether weak-coupling (Fermi’s Golden Rule), activated (Eyring/TST) or strong-coupling (non-perturbative) methods are appropriate.
+Vertical distance of MECI above ⟨$S_n^{\rm eq}$⟩, gap & coupling, and best rate model
+Vertical distance of MECI above ⟨$S_n^{\rm eq}$⟩
+Large ⟨$\gtrsim 10\,k_B T$⟩ ( > 5–10 kcal mol$^{-1}$ at 298 K ≈ 0.2–0.4 eV)
+Gap between ⟨$S_n$⟩ and ⟨$S_{n-1}$⟩ remains ⟨$\gg k_B T$⟩ for essentially all classically populated geometries; non-adiabatic coupling vector ⟨$d_{n,n-1}$⟩ is finite and small.
+Perturbation theory is safe because the states never approach degeneracy and ⟨$V\equiv d\cdot Q$⟩ is a small perturbation. The resulting rate is extremely slow, as expected. livrepository.liverpool.ac.uk researchgate.net
+Intermediate ⟨$\sim2$⟩–$10,k_B T$ (≈0.1–0.2 eV)
+Transition-state theory / Eyring equation with ⟨$\Delta G^\ddagger = G_{\rm MECI} - G_{S_n^{\rm eq}}$⟩
+Small or negative (MECI at or below ⟨$S_n^{\rm eq}$⟩)
+States become degenerate along the natural relaxation path; (⟨$\mathbf d\propto1/\Delta E$⟩) diverges.
+“Too high” means the wave-packet never samples degeneracy. High here is not an absolute number but “high relative to the internal energy content of ⟨$S_n$⟩”. If the vertical excitation leaves the molecule vibrationally hot (common in large chromophores) a barrier of 0.2 eV may in practice be accessible, pushing you into the activated-CI regime instead of the golden-rule regime.
+Compute ⟨$$\Delta E_{\rm CI} = E_{\rm MECI} - E_{S_n^{\rm eq}}\,. $$⟩
+Compare ⟨$\Delta E_{\rm CI}$⟩ with vibrational energy in ⟨$S_n$⟩:
+⟨$\Delta E_{\rm CI}\gg E_{\rm vib}$⟩ → FGR.
+⟨$\Delta E_{\rm CI}\approx2$⟩–$10,k_B T$ → TST/Eyring.
+⟨$\Delta E_{\rm CI}<E_{\rm vib}$⟩ or negative → non-perturbative dynamics.
+For most organic dyes in dilute solution the photoluminescence quantum-yield (PLQY, ⟨$\Phi_{PL}$⟩) is essentially independent of the excitation wavelength, in accordance with Vavilov’s rule (a corollary of Kasha’s rule). But wavelength-dependent ⟨$\Phi_{PL}$⟩ does appear whenever excess photon energy opens, or speeds up, an additional non-radiative channel—for example by giving the hot wave-packet enough energy to climb over the barrier that leads to a conical intersection, or by populating a higher electronic state whose own decay kinetics are different.
+1 The baseline: why ⟨$\Phi_{PL}$⟩ is usually constant
+⟦$$ \Phi_{PL} = \frac{k_r}{k_r + k_{IC} + k_{ISC} + k_{\mathrm{other}}}, $$⟧
+where ⟨$k_r$⟩ is the radiative rate and ⟨$k_{IC}$⟩, ⟨$k_{ISC}$⟩ … are the non-radiative ones.
+Internal conversion ⟨$S_n \to S_1$⟩ and vibrational cooling within ⟨$S_1$⟩ are ultrafast (10–100 fs). edinst.com
+Much faster than ⟨$k_r$⟩ (ns) or ⟨$k_{IC}(S_1)$⟩ (≈108 s−1).
+No matter which photon excited the dye, the system reaches the same cold ⟨$S_1$⟩ before anything else happens.
+⟨$S_1$⟩ non-radiative paths are not strongly influenced by a few ⟨$k_B T$⟩ of vibrational excess once cooling has occurred.
+The rate constants entering ⟨$\Phi_{PL}$⟩ are therefore the same for every excitation wavelength.
+This is the physical basis of Vavilov’s rule (“$\Phi_{PL}$ is independent of the excitation wavelength”) which most aromatic dyes obey, as illustrated for anthracene.
+The invariance fails whenever any of the rate constants in the denominator becomes a function of the initial excess energy (⟨$E_{ex} = h\nu – E_{0-0}$⟩). Three common scenarios are:
+If the minimum-energy CI that funnels ⟨$S_1 \to S_0$⟩ sits ⟨$\Delta E_{CI}$⟩ above the relaxed ⟨$S_1$⟩, then
+Low-energy (near-0-0) excitation: the wave-packet cools below ⟨$\Delta E_{CI}$⟩ before it can reach the seam → ⟨$k_{IC}(\text{hot}) \approx 0$⟩ → Vavilov holds.
+High-energy (short-$\lambda$) excitation: the initial vibrational energy is already above ⟨$\Delta E_{CI}$⟩; the packet reaches the seam during cooling → an extra non-radiative channel turns on, effectively adding a term ⟨$k_{CI}(E_{ex})$⟩ to the denominator and lowering ⟨$\Phi_{PL}$⟩.
+Because the CI hop is barrier-less once the seam is reached, ⟨$k_{CI}$⟩ can be 1011–13 s−1, so even a modest population that reaches the seam can noticeably quench PL.
+If the photon is energetic enough to reach ⟨$S_{n>1}$⟩ (or ⟨$T_{n>1}$⟩) whose own non-radiative decay is faster than ⟨$S_1$⟩’s, ⟨$\Phi_{PL}$⟩ decreases. Classic example: pyrene, whose fluorescence spectrum is independent of ⟨$\lambda_{exc}$⟩ but whose ⟨$\Phi$⟩ drops at higher-energy excitation because ⟨$S_2$⟩ opens additional IC channels.
+⟦$$ \Phi_{PL}(\nu) = \frac{k_r}{k_r + k_{nr}^0 + k_{CI}\,\Theta(E_{ex}-\Delta E_{CI})} $$⟧
+with ⟨$\Theta(x)$⟩ the Heaviside step function. Provided ⟨$k_{CI}\gg k_r$⟩, the quantum yield drops abruptly once ⟨$h\nu$⟩ exceeds ⟨$E_{0-0} + \Delta E_{CI}$⟩, mirroring many experimental “kinks” seen in excitation-dependent PL measurements of flexible push–pull dyes and AIE/TADF molecules. Continuous (Arrhenius-type) dependences appear when reaching the seam requires tunnelling or a distribution of barrier heights.
+Verify Vavilov first. Measure ⟨$\Phi_{PL}(\lambda_{exc})$⟩ with an integrating sphere; a flat response confirms that only relaxed ⟨$S_1$⟩ kinetics matter.
+If a drop is observed at high energy, map the dependence against temperature; an activated slope that matches ⟨$\Delta E_{CI}/k_B T$⟩ is a signature of the CI-barrier mechanism discussed above.
+Device relevance. OLEDs and bio-imaging probes excited electrically or by two-photon NIR pumping create excitations close to the ⟨$S_1$⟩ minimum, so a dye that loses ⟨$\Phi$⟩ at short-wave optical excitation may still perform well in devices.
+Vavilov’s rule is the norm, but it is not inviolable. If extra photon energy lets the excited molecule reach a low-lying conical intersection or a higher electronic state with faster non-radiative decay, the PLQY becomes excitation-energy dependent. The direction of the effect is unambiguous: shorter, higher-energy wavelengths lower ⟨$\Phi_{PL}$⟩, whereas longer wavelengths leave it at its intrinsic value. Understanding the height and accessibility of the relevant CI seams is therefore essential for predicting—and engineering—excitation-dependent photoluminescence.
+=== ai-whys-dl
+⟦$$ \hat{Y} = X * W $$⟧
+⟦$$ L = \frac{1}{2n}||Y - \hat{Y}||^2=\frac{1}{2n}\sum_{i=0}^{n-1}(Y_i-\hat{Y_i})^2=\frac{1}{2n}\sum_{i=0}^{n-1}(Y_i-X_i*W)^2 $$⟧
+⟦$$ \frac{\partial L}{\partial W_j} = -\frac{1}{n}\sum_{i=0}^{n-1}X_{ij} (Y_i-X_i*W) $$⟧
+⟦$$ W_j^{(t+1)}= W_j^{(t)} - \alpha\frac{\partial L}{\partial W_j}\Big|_{W^{(t)}} = W_j^{(t)} + \frac{\alpha}{n}\sum_{i=0}^{n-1}X_{ij} (Y_i-X_i*W^{(t)}) $$⟧
+⟦$$ W_j^{(t+1)}= W_j^{(t)} + \alpha X_{ij} (Y_i-X_i*W^{(t)}) $$⟧
+⟦$$ W_j^{(t+1)}= W_j^{(t)} + \frac{\alpha}{|B|}\sum_{i \in B} X_{ij} (Y_i-X_i*W^{(t)}) \\ \text{where B is a random mini-batch from } [0,n) $$⟧
+上标 ⟨$(t)$⟩ 是迭代轮次，求和里的 ⟨$W^{(t)}$⟩ 表示用当前这一轮的权重计算预测值。
+⟦$$ Softmax(j) = \frac{exp(x_j)}{\sum_{i=0}^{k-1}exp(x_i)} $$⟧
+⟦$$ \hat{Y} = Softmax(X * W) $$⟧
+⟦$$ L = -\frac{1}{n}\sum_{i=0}^{n-1} log \hat{Y_{ij}} \\ \text{j is the argmax index of the one hot encoding of the }Y_i $$⟧
+⟦$$ min \space l(W,B) \\ subject \space to \space ||W||^2 ≤ \theta $$⟧
+⟦$$ min \space l(W,B)+\frac{\lambda}{2}||W||^2 $$⟧
+⟦$$ \frac{\partial}{\partial W} (l(W,B)+\frac{\lambda}{2}||W||^2) = \frac{\partial l(W,B)}{\partial W}+\lambda W $$⟧
+⟦$$ W_{t+1}=(1-η\lambda)W_t-η\frac{\partial l(W_t,B_t)}{\partial W_t} $$⟧
+⟦$$ E(X') = X $$⟧
+⟦$$ x_i' = \begin{cases} 0,& \text{with probability p} \\ \frac{x_i}{1-p} , & \text{otherwise}\end{cases} $$⟧
+⟦$$ E[H_i^t] = 0 \\ Var[H_i^t] = a $$⟧
+⟦$$ E[\frac{\partial l}{\partial H_i^t}] =0 \\ Var[\frac{\partial l}{\partial H_i^t}] =b $$⟧
+⟦$$ 1.W_{i,j}^t 独立同分布(i.i.d)，那么E[W_{i,j}^t]=0,Var[W_{i,j}^t]=\gamma_t \\ 2.H_j^{t-1}独立于W_{i,j}^t $$⟧
+⟦$$ H^t = W^tH^{t-1} $$⟧
+⟦$$ E[H_i^t] = E[\sum_j W_{i,j}^tH_j^{t-1}] = \sum_j E[W_{i,j}^t]E[H_j^{t-1}] = 0 $$⟧
+⟦$$ Var[H_i^t] = E[(H_i^t)^2]-E[H_i^t]^2 = E[(\sum_j W_{i,j}^tH_j^{t-1})^2] = E[\sum_j (W_{i,j}^t)^2(H_j^{t-1})^2+\sum_{j≠k}W_{i,j}^tW_{i,k}^tH_{j}^{t-1}H_{k}^{t-1}]=\sum_jE[(W_{i,j}^t)^2]E[(H_j^{t-1})^2]=\sum_j Var[W_{i,j}^t]Var[H_j^{t-1}]=n_{t-1}\gamma_t Var[H_j^{t-1}] $$⟧
+⟦$$ n_{t-1}\gamma_t=1 $$⟧
+⟦$$ \frac{\partial l}{\partial H^{t-1}} = W^t\frac{\partial l}{\partial H^t} $$⟧
+⟦$$ E[\frac{\partial l}{\partial H^{t-1}}] = 0 \\ Var[\frac{\partial l}{\partial H^{t-1}}] = n_t\gamma_tVar[\frac{\partial l}{\partial H_j^t}] $$⟧
+⟦$$ n_t\gamma_t = 1 $$⟧
+⟦$$ n_{t-1}\gamma_t=1 \text{ and } n_t\gamma_t = 1 $$⟧
+⟦$$ \gamma_t(n_{t-1}+n_t)/2 =1 $$⟧
+⟦$$ \gamma_t = 2/(n_{t-1}+n_t) $$⟧
+⟦$$ N(0,\sqrt{2/(n_{t-1}+n_t)}) \\ U(-\sqrt{6/(n_{t-1}+n_t)},\sqrt{6/(n_{t-1}+n_t)}) $$⟧
+⟦$$ H_{i,j} = \sum_{k,l} W_{i,j,k,l}*X_{k,l} + bias $$⟧
+⟦$$ H_{i,j} = \sum_{a,b} V_{i,j,a,b}*X_{i+a,j+b} + bias $$⟧
+⟦$$ V_{i,j,a,b} = V_{a,b} $$⟧
+⟦$$ H_{i,j} = \sum_{a=-\Delta}^{\Delta} \sum_{b=-\Delta}^{\Delta} V_{a,b}*X_{i+a,j+b} + bias $$⟧
+⟦$$ \lfloor (n_h-k_h+p_h+s_h)/s_h \rfloor × \lfloor (n_w-k_w+p_w+s_w)/s_w \rfloor $$⟧
+注意这里的 ⟨$p_h$⟩ 是两侧填充的总行数（大约一半在顶部、一半在底部），对应 PyTorch 里 `padding` 参数（单侧）的 2 倍。用 PyTorch 的单侧记法 ⟨$P$⟩ 写就是 ⟨$\lfloor{}(n+2P-K)/S{}\rfloor{}+{}1$⟩ ，两者等价，不要混用。
+⟦$$ X : c_i × n_h × n_w \\ W : c_i × k_h × k_w \\ b : \text{scalar} \\ Y ：m_h × m_w \\ Y = \sum_{i=1}^{c_i} (X_{i,,} ※ W_{i,,}) + b \\ \text{where ※ is the convolution} $$⟧
+⟦$$ X : c_i × n_h × n_w \\ W : c_o × c_i × k_h × k_w \\ b : c_o \\ Y ：c_o × m_h × m_w \\ Y_{j,,} = \sum_{i=1}^{c_i} (X_{i,,} ※ W_{j,i,,}) + b_j \\ \text{where ※ is the convolution, } j = 1, \dots, c_o $$⟧
+偏置的维度是 ⟨$c_o$⟩ ——每个输出通道一个标量偏置 ⟨$b_j$⟩ ，广播加到该通道整个 ⟨$m_h{}×{}m_w$⟩ 的输出上。单输出通道时偏置就退化成一个标量 ⟨$b$⟩ 。
+⟦$$ (n_h×n_w,c_i)为输入的，权重参数为(c_o,c_i)的Linear(c_i,c_o)层 $$⟧
+⟦$$ k_h × k_w $$⟧
+⟦$$ c_i × k_h × k_w $$⟧
+⟦$$ c_o × c_i × k_h × k_w $$⟧
+⟦$$ m_h × m_w $$⟧
+⟦$$ c_o × c_i × k_h × k_w × m_h × m_w $$⟧
+⟦$$ m_h × m_w $$⟧
+⟦$$ c_o $$⟧
+⟦$$ m_h × m_w × c_o $$⟧
+⟦$$ (c_i-1) × m_h × m_w $$⟧
+⟦$$ c_o $$⟧
+⟦$$ c_o ×(c_i-1)× m_h × m_w $$⟧
+⟦$$ k_h × k_w -1 $$⟧
+⟦$$ c_o × m_h × m_w $$⟧
+⟦$$ c_i × c_o × m_h × m_w $$⟧
+⟦$$ c_i ×c_o × m_h × m_w × (k_h × k_w -1) $$⟧
+⟦$$ c_o × c_i × k_h × k_w × m_h × m_w + m_h × m_w × c_o + c_o ×(c_i-1)× m_h × m_w + c_i ×c_o × m_h × m_w × (k_h × k_w -1) = 2 × c_o × c_i × k_h × k_w × m_h × m_w $$⟧
+⟦$$ O(c_o × c_i × k_h × k_w × m_h × m_w) $$⟧
+⟦$$ \mu_B = \frac{1}{|B|}\sum_{i∈B} x_i \text{ and } \sigma_B^2 = \frac{1}{|B|}\sum_{i∈B} (x_i-\mu_B)^2 + \epsilon $$⟧
+⟦$$ x_{i+1} = \gamma \frac{x_i-\mu_B}{\sigma_B} + \beta $$⟧
+⟦$$ y = f(x) \\ w = w - \alpha \frac{\partial y}{\partial w} $$⟧
+⟦$$ y' = g(f(x)) \\ \frac{\partial y'}{\partial w} = \frac{\partial y'}{\partial y} \frac{\partial y}{\partial w} \\ \text{often the }\frac{\partial y'}{\partial y} \text{ is very small} $$⟧
+⟦$$ y'' = f(x) + g(f(x)) = y + y' \\ \frac{\partial y''}{\partial w} = \frac{\partial y}{\partial w} +\frac{\partial y'}{\partial w} = (1+ \frac{\partial y'}{\partial y} )\frac{\partial y}{\partial w} \\ \text{often the 1+}\frac{\partial y'}{\partial y} \text{ is stable enough} $$⟧
+音乐、语言、文本和视频都是连续的，即在时间t观察到 ⟨$x_t$⟩ ，那么得到T个不独立的随机变量:
+⟦$$ (x_1,...,x_T) $$⟧
+⟦$$ p(\textbf{x}) = p(x_1)p(x2|x1)p(x3|x1,x2)...p(x_T)(x_1,...,x_{T-1}) $$⟧
+⟦$$ p(\textbf{x}) = p(x_T)p(x_{T-1}|x_T)p(x_{T-2}|x_{T-1},x_T)...p(x_1|x_2,...,x_T) $$⟧
+⟦$$ p(x_t|x_1,...,x_{t-1}) = p(x_t|f(x_1,..,x_{t-1})) \\ \text{f是对见过的数据建模，也称自回归模型} $$⟧
+⟦$$ p(x_t|x_1,...,x_{t-1}) = p(x_t|x_{t-\tau},...,x_{t-1}) = p(x_t|f(x_{t-\tau},...,x_{t-1})) $$⟧
+2.潜变量模型：引入潜变量 ⟨$h_t$⟩ 来表示过去信息:
+⟦$$ h_t = f(x_1,...,x_{t-1}) $$⟧
+⟦$$ x_t = p(x_t|h_t,x_{t-1}) $$⟧
+⟦$$ x_1,...,x_T $$⟧
+⟦$$ p(x_1,...,x_T) $$⟧
+⟦$$ p(x,x') = p(x)p(x'|x) = \frac{n(x)}{n} \frac{n(x,x')}{n(x)} $$⟧
+⟦$$ p(x,x',x'') = p(x)p(x'|x)p(x''|x,x') =p(x)p(x'|x)p(x''|x,x') =\frac{n(x)}{n} \frac{n(x,x')}{n(x)} \frac{n(x,x',x'')}{n(x,x')} $$⟧
+⟦$$ n(x_1,...,x_T) ≤ 1 $$⟧
+⟦$$ p(x_1,x_2,x_3,x_4) = p(x_1)p(x_2)p(x_3)p(x_4) = \frac{n(x_1)}{n}\frac{n(x_2)}{n}\frac{n(x_3)}{n}\frac{n(x_4)}{n} $$⟧
+⟦$$ p(x_1,x_2,x_3,x_4) = p(x_1)p(x_2|x_1)p(x_3|x_2)p(x_4|x_3) = \frac{n(x_1)}{n}\frac{n(x_1,x_2)}{n(x_1)}\frac{n(x_2,x_3)}{n(x_2)}\frac{n(x_3,x_4)}{n(x_3)} $$⟧
+⟦$$ p(x_1,x_2,x_3,x_4) = p(x_1)p(x_2|x_1)p(x_3|x_1,x_2)p(x_4|x_2,x_3) $$⟧
+⟨$H_t$⟩ 或 ⟨$H_{t-1}$⟩ 为形状为(batch_size,hidden_size)的张量，代表状态。
+⟨$W_{hh}$⟩ 为形状为(hidden_size,hidden_size)的张量。
+X为形状为(num_steps,batch_size,vocab_size)的张量。 ⟨$X_t$⟩ 为形状为(batch_size,vocab_size)的张量。
+⟨$W_{xh}$⟩ 为形状为(vocab_size,hidden_size)的张量。
+⟨$B_h$⟩ 为形状为(1,hidden_size)的张量，公式里通过广播和其他张量相加。
+⟨$W_{ho}$⟩ 为形状为(hidden_size,vocab_size)的张量。
+⟨$B_o$⟩ 为形状为(1,vocab_size)的张量，公式里通过广播和其他张量相加。
+⟦$$ H_t = f(H_{t-1}W_{hh}+X_tW_{xh}+B_h) $$⟧
+⟦$$ O_t = H_tW_{ho}+B_o $$⟧
+⟨$O_t$⟩ 为 logits，经 softmax 后才是概率；实际计算中 softmax并入交叉熵损失。
+⟦$$ \pi = \frac{1}{n}\sum_{t=1}^{n}-logp(x_t|x_{t-1},...) $$⟧
+p是语言模型的预测概率， ⟨$x_t$⟩ 是真实词。
+⟦$$ perplexity = exp(\pi) $$⟧
+⟦$$ g ← min(1,\frac{\theta}{||g||})\mathbf{g} $$⟧
+⟨$W_{xr}$⟩ 或 ⟨$W_{xz}$⟩ 或 ⟨$W_{xh}$⟩ 为形状为(vocab_size,hidden_size)的张量。
+⟨$W_{hr}$⟩ 或 ⟨$W_{hz}$⟩ 或 ⟨$W_{hh}$⟩ 为形状为(hidden_size,hidden_size)的张量。
+⟨$B_r$⟩ 或 ⟨$B_z$⟩ 或 ⟨$B_h$⟩ 为形状为(1,hidden_size)的张量，公式里通过广播和其他张量相加。
+X为形状为(num_steps,batch_size,vocab_size)的张量。 ⟨$X_t$⟩ 为形状为(batch_size,vocab_size)的张量。
+⟨$H_t$⟩ 或 ⟨$H_{t-1}$⟩ 或 ⟨$R_t$⟩ 或 ⟨$Z_t$⟩ 或 ⟨$\tilde{H_t}$⟩ 为形状为(batch_size,hidden_size)的张量。
+⟦$$ R_t = \sigma(X_tW_{xr}+H_{t-1}W_{hr}+B_r) \\ Z_t = \sigma(X_tW_{xz}+H_{t-1}W_{hz}+B_z) \\ \tilde{H_t} = tanh(X_tW_{xh}+(R_t \odot H_{t-1})W_{hh}+B_h) \\ H_t = Z_t \odot H_{t-1} + (1-Z_t) \odot \tilde{H_t} $$⟧
+⟦$$ I_t = \sigma(X_tW_{xi}+H_{t-1}W_{hi}+B_i) \\ F_t = \sigma(X_tW_{xf}+H_{t-1}W_{hf}+B_f) \\ O_t = \sigma(X_tW_{xo}+H_{t-1}W_{ho}+B_o) \\ \tilde{C_t} = tanh(X_tW_{xc}+H_{t-1}W_{hc}+B_c) \\ C_t = F_t \odot C_{t-1} + I_t \odot \tilde{C_t} \\ H_t = O_t \odot tanh(C_t) $$⟧
+⟦$$ H_t^{(1)} = f^{(1)}(H_{t-1}^{(1)},X_t^{(0)}) \\ H_t^{(2)} = f^{(2)}(H_{t-1}^{(2)},H_t^{(1)})\\ ...\\ H_t^{(j)} = f^{(j)}(H_{t-1}^{(j)},H_t^{(j-1)})\\ O_t = g(H_t^{(L)}) $$⟧
+⟦$$ \overrightarrow{H_t}= f(X_tW_{xh}^{(f)}+\overrightarrow{H}_{t-1}W_{hh}^{(f)}+B_h^{(f)}) \\ \overleftarrow{H_t}= f(X_tW_{xh}^{(b)}+\overleftarrow{H}_{t+1}W_{hh}^{(b)}+B_h^{(b)}) \\ H_t = [\overrightarrow{H}_t,\overleftarrow{H}_t] \\ O_t = H_tW_{hq}+b_q $$⟧
+假设 ⟨$P_n$⟩ 是预测中所有n-gram的精度，BLEU的定义为：
+⟦$$ BLEU = exp(min(0,1-\frac{len_{label}}{len_{pred}}))\prod_{n=1}^{k}p_n^{1/2^n} $$⟧
+如果输出字典大小为n,序列最长为T，那么我们需要考察 ⟨$n^T$⟩ 个序列，
+⟨$n^T=10^{40}$⟩
+⟦$$ \frac{1}{L^{\alpha}}log p(y_1,...,y_L) = \frac{1}{L^{\alpha}}\sum_{t'=1}^{L}logp(y_{t'}|y_1,....,y_{t'-1}) $$⟧
+⟦$$ (x_i,y_i),i=1,...,n $$⟧
+⟦$$ f(x) = \frac{1}{n}\sum_i y_i $$⟧
+⟦$$ f(x) = \sum_{i=1}^{n}\frac{K(x-x_i)}{\sum_{j=1}^{n}K(x-x_j)}y_i \\ \text{where the Query is }x\\ \text{ the Key is }x_i\\ \text{ the Value is }y_i\\ \text{ the Attention Weights is }\frac{K(x-x_i)}{\sum_{j=1}^{n}K(x-x_j)}\\ \text{ the Output is }f(x)\\ $$⟧
+⟦$$ K(u) = \frac{1}{\sqrt{2\pi}}exp(-\frac{u^2}{2}) $$⟧
+⟦$$ f(x) = \sum_{i=1}^{n}\frac{exp(-\frac{1}{2}(x-x_i)^2)}{\sum_{j=1}^{n}exp(-\frac{1}{2}(x-x_j)^2)}y_i \\ = \sum_{i=1}^nsoftmax(-\frac{1}{2}(x-x_i)^2)y_i $$⟧
+⟦$$ f(x) = \sum_{i=1}^nsoftmax(-\frac{1}{2}((x-x_i)w)^2)y_i $$⟧
+⟦$$ f(x) = \sum_i \alpha(x,x_i)y_i \\ \text{where }\alpha(x,x_i)\text{ is the attention weight} $$⟧
+⟦$$ \text{one query }q ∈ R^q \\ \text{m对 } key-value (k_1,v_1),(k_2,v_2),...,(k_m,v_m) \\ k_i ∈ R^k,v_i ∈ R^v $$⟧
+⟦$$ f(q,(k_1,v_1),...,(k_m,v_m)) = \sum_{i=1}^{m}\alpha(q,k_i)v_i ∈ R^v \\ \alpha(q,k_i) = softmax(a(q,k_i)) ∈ R $$⟧
+⟦$$ W_k ∈ R^{h×k},W_q ∈ R^{h×q},v ∈ R^h \\ a(k,q) = v^T tanh(W_kk+w_qq) $$⟧
+⟦$$ q,k_i ∈ R^d $$⟧
+⟦$$ a(q,k_i) = <q,k_i>/\sqrt{d} $$⟧
+⟦$$ Q ∈ R^{n×d},K ∈ R^{m×d}, ∈ R^{m×v} \\ a(Q,K) = QK^T/\sqrt{d} ∈ R^{n×m} \\ f = softmax(a(Q,K))V ∈ R^{n×v} $$⟧
+给定序列 ⟨$x_1,...,x_n$⟩ ，任意 ⟨$x_i∈R^d$⟩ ，自注意力池化层将 ⟨$x_i$⟩ 当做key, value，query来对序列抽取特征得到 ⟨$y_1,...,y_n$⟩ ，这里
+⟦$$ y_i = f(x_i,(x_1,x_1),...,(x_n,x_n)) ∈ R^d $$⟧
+⟨$O(knd^2)$⟩
+⟨$O(nd^2)$⟩
+⟨$O(n^2d)$⟩
+⟨$O(n)$⟩
+⟨$O(1)$⟩
+⟨$O(n)$⟩
+⟨$O(n/k)$⟩
+⟨$O(n)$⟩
+⟨$O(1)$⟩
+⟦$$ X ∈ R^{n×d} $$⟧
+⟦$$ P ∈ R^{n×d} $$⟧
+⟦$$ P_{i,2j} = sin(\frac{i}{10000^{2j/d}}) \\ P_{i,2j+1} = cos(\frac{i}{10000^{2j/d}}) $$⟧
+=== ai-whys-rl
+⟦$$ Q^{\ast}(S_t,A)=R_{t+1}+\gamma\max_{A}Q^{\ast}(S_{t+1},A) $$⟧
+带 ⟨$\alpha$⟩ 的 q-learning 更新公式：
+⟦$$ Q_{t+1}(S_t,A_t) = Q_t(S_t,A_t)+\alpha[R_{t+1}+\gamma\max_{A}Q_t(S_{t+1},A)-Q_t(S_t,A_t)] \\ = (1-\alpha)Q_t+\alpha[R_{t+1}+\gamma\max Q_t(S_{t+1})] $$⟧
+⟦$$ e_t = Q_t - Q^{\ast} $$⟧
+我们的目标是看 ⟨$e_{t+1}$⟩ 和 ⟨$e_t$⟩ 的关系。
+⟦$$ Q_{t+1}-Q^{\ast} = (1-\alpha)Q_t+\alpha[R_{t+1}+\gamma\max Q_t(S_{t+1})] - Q^{\ast} \\ = (1-\alpha)(Q_t-Q^{\ast})+\alpha[R_{t+1}+\gamma\max Q_t(S_{t+1})-Q^{\ast}] $$⟧
+⟦$$ e_{t+1} = (1-\alpha)e_t + \alpha[R_{t+1}+\gamma\max Q_t(S_{t+1})-(R_{t+1}+\gamma\max Q^{\ast}(S_{t+1}))] \\ e_{t+1} = (1-\alpha)e_t+\alpha\gamma[\max Q_t(S_{t+1})-\max Q^{\ast}(S_{t+1})] $$⟧
+⟦$$ |\max Q_t - \max Q^{\ast}| \leq \max|Q_t - Q^{\ast}| = |e_t| $$⟧
+⟦$$ |e_{t+1}| \leq (1-\alpha)|e_t| + \alpha\gamma |e_t| $$⟧
+⟦$$ |e_{t+1}| \leq (1-\alpha + \alpha\gamma )|e_t| $$⟧
+⟦$$ \alpha \in (0,1],\ \gamma \in [0,1) $$⟧
+⟦$$ (1-\alpha+\alpha\gamma) < 1 $$⟧
+⟦$$ J(\theta) = \mathbb{E}_{\pi_\theta}[G_t] $$⟧
+⟦$$ \nabla_\theta J(\theta) $$⟧
+⟦$$ J(\theta) = \sum_{\tau} P(\tau|\theta) G(\tau) $$⟧
+这里 ⟨$P(\tau|\theta)$⟩ 是这条轨迹发生的概率，它由三部分相乘构成：
+⟦$$ P(\tau|\theta) = \underbrace{\rho_0(S_0)}_{\text{初始状态概率}} \cdot \prod_{t=0}^{T} \underbrace{P(S_{t+1}|S_t, A_t)}_{\text{环境状态转移概率}} \cdot \prod_{t=0}^{T} \underbrace{\pi_\theta(A_t|S_t)}_{\text{策略网络概率}} $$⟧
+我们要求 ⟨$\nabla_\theta{}J(\theta)$⟩ ：
+⟦$$ \nabla_\theta J(\theta) = \nabla_\theta \sum_{\tau} P(\tau|\theta) G(\tau) = \sum_{\tau} \nabla_\theta P(\tau|\theta) G(\tau) $$⟧
+⟦$$ \nabla_\theta P = P \cdot \nabla_\theta \log P $$⟧
+⟦$$ \nabla_\theta J(\theta) = \sum_{\tau} P(\tau|\theta) \cdot \nabla_\theta \log P(\tau|\theta) \cdot G(\tau) $$⟧
+⟦$$ \nabla_\theta J(\theta) = \mathbb{E}_{\tau \sim P(\cdot|\theta)} [ \nabla_\theta \log P(\tau|\theta) \cdot G(\tau) ] $$⟧
+我们对刚才那个长长的 ⟨$P(\tau|\theta)$⟩ 取 ⟨$log$⟩ （连乘变连加）：
+⟦$$ \log P(\tau|\theta) = \log \rho_0(S_0) + \sum_{t=0}^{T} \log P(S_{t+1}|S_t, A_t) + \sum_{t=0}^{T} \log \pi_\theta(A_t|S_t) $$⟧
+现在，对 ⟨$\theta$⟩ 求梯度 ⟨$\nabla_\theta$⟩ ：
+⟦$$ \nabla_\theta \log \rho_0(S_0) = 0 $$⟧
+⟦$$ \nabla_\theta \log P(S_{t+1}|S_t, A_t) = 0 $$⟧
+⟦$$ \nabla_\theta \log \pi_\theta(A_t|S_t) $$⟧
+⟦$$ \nabla_\theta \log P(\tau|\theta) = \sum_{t=0}^{T} \nabla_\theta \log \pi_\theta(A_t|S_t) $$⟧
+⟦$$ \nabla_\theta J(\theta) = \mathbb{E}_{\tau} \left[ \left( \sum_{t=0}^{T} \nabla_\theta \log \pi_\theta(A_t|S_t) \right) \cdot G(\tau) \right] $$⟧
+⟦$$ \nabla_\theta J(\theta) = \mathbb{E}_{\pi_\theta} [ \sum_{t=0}^T\nabla_\theta \log \pi_\theta(A_t|S_t) \cdot G_t ] $$⟧
+下标的替换是因为：策略 ⟨$\pi_\theta$⟩ 是决定轨迹分布 ⟨$P(\tau|\theta)$⟩ 中唯一包含参数 ⟨$\theta$⟩ 的部分（环境转移 ⟨$P(S'|S,A)$⟩ 和初始状态 ⟨$\rho_0$⟩ 都不依赖 ⟨$\theta$⟩ ）。所以，对轨迹分布求期望 ⟨$\mathbb E_{\tau{}\sim{}P(\cdot|\theta)}[\dots]$⟩ ，在数学上就完全等价于对策略 ⟨$\pi_\theta$⟩ 求期望 ⟨$\mathbb E_{\pi_\theta}[\dots]$⟩ 。这两个符号指代的是同一个东西。
+⟦$$ \nabla_\theta J(\theta) \approx \sum_{t=0}^T\nabla_\theta \log \pi_\theta(A_t|S_t) \cdot G_t $$⟧
+⟦$$ \text{Loss} = - \sum_{t=0}^T \log \pi_\theta(A_t|S_t) \cdot G_t $$⟧
+⟦$$ \theta = \theta + \alpha \sum_{t=0}^T\nabla_\theta \log \pi_\theta(A_t|S_t) \cdot G_t $$⟧
+⟦$$ \text{Loss} = - \log \pi_\theta(A_t|S_t) \cdot G_t $$⟧
+这里的 ⟨$G_t$⟩ 是一条完整轨迹跑出来的真实回报（蒙特卡洛）。
+高方差：如果这一步动作是对的，但后面运气不好拿了负分， ⟨$G_t$⟩ 是负的，你的网络就会惩罚这个“正确”的动作。
+必须跑完一局：必须跑到 `done=True` 才能算出 ⟨$G_t$⟩ 去更新。
+我们之前在第一节推导过一个绝佳的替代品——优势函数 ⟨$A_t$⟩ ：
+⟦$$ A_\pi(S_t, A_t) = Q_\pi(S_t, A_t) - V_\pi(S_t) $$⟧
+⟦$$ A_\pi(S_t, A_t) \approx R_{t+1} + \gamma V_\pi(S_{t+1}) - V_\pi(S_t) $$⟧
+⟨$A_t$⟩ 的物理意义是：“当前动作比平均水平 ⟨$V$⟩ 好多少”。它比 ⟨$G_t$⟩ 的方差小得多。
+既然 ⟨$G_t$⟩ 换成了 ⟨$A_t$⟩ ，我们就需要两个网络：
+Actor（策略网络 ⟨$\pi_\theta$⟩ ）：负责选动作。它的 Loss 变成了：
+⟦$$ \text{Loss}_{actor} = - \log \pi_\theta(A_t|S_t) \cdot \text{detach}(A_t) $$⟧
+(注：必须 detach ⟨$A_t$⟩ ，阻断梯度流入 Critic，否则计算图会爆炸)
+Critic（价值网络 ⟨$V_w$⟩ ）：负责估计 ⟨$V_\pi(S)$⟩ 。它的 Loss 就是标准的监督学习（均方误差）：
+⟦$$ \text{Loss}_{critic} = \text{MSE}(V_w(S_t), \underbrace{R_{t+1} + \gamma \text{detach}(V_w(S_{t+1}))}_{\text{TD Target}}) $$⟧
+(注：必须 detach ⟨$V_w(S_{t+1})$⟩ ，阻断梯度流入 Actor，否则计算图会爆炸)
+不行。 因为只要你的策略 ⟨$\pi_\theta$⟩ 更新了一点点，这条轨迹的数据分布就“过期”了，在数学上 ⟨$\mathbb E_{\pi_\theta}$⟩ 就不再服从旧的数据分布，强行用会算错梯度。
+第一步（Importance Sampling）：在更新时，乘以一个比值 ⟨$r_t(\theta){}={}\frac{\pi_\theta(a_t|s_t)}{\pi_{old}(a_t|s_t)}$⟩ 。这个比值相当于在数学上“强行纠正”过期数据的分布偏差。这样，你就能用旧数据 ⟨$\pi_{old}$⟩ 跑出来的轨迹，反复更新当前的 ⟨$\pi_\theta$⟩ 。
+第二步（Clip）：但比值 ⟨$r_t$⟩ 不能太大，否则梯度会爆炸。所以 PPO 加了一个强制约束：
+⟦$$ \text{Actor Loss} = - \min \left( r_t(\theta) A_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) A_t \right) $$⟧
+首先，为什么 AC 的 Loss 里有 ⟨$\log{}\pi_\theta$⟩ ？
+因为我们要最大化目标 ⟨$J(\theta)$⟩ ，对策略参数 ⟨$\theta$⟩ 求梯度后，根据策略梯度定理，得到：
+⟦$$ \nabla_\theta J(\theta) = \mathbb{E}[\nabla_\theta \log \pi_\theta(A_t|S_t) \cdot A_t] $$⟧
+⟦$$ \text{Loss}_{actor} = - \log \pi_\theta(A_t|S_t) \cdot \text{detach}(A_t) $$⟧
+当 PyTorch 执行 `loss.backward()` 时，它会对 ⟨$\log{}\pi_\theta$⟩ 求导，刚好得到 ⟨$\nabla_\theta{}\log{}\pi_\theta$⟩ ，完美对应数学目标。
+那 PPO 是怎么把 ⟨$\log{}\pi_\theta$⟩ “藏起来”的？
+PPO 为了能用旧策略 ⟨$\pi_{old}$⟩ 的数据，引入了重要性采样比值：
+⟦$$ r_t(\theta) = \frac{\pi_\theta(A_t|S_t)}{\pi_{old}(A_t|S_t)} $$⟧
+我们对 ⟨$r_t(\theta)$⟩ 取对数：
+⟦$$ \log r_t(\theta) = \log \pi_\theta - \log \pi_{old} $$⟧
+现在，我们对 ⟨$\theta$⟩ 求梯度（注意， ⟨$\pi_{old}$⟩ 是旧策略，里面没有 ⟨$\theta$⟩，所以它是常数）：
+⟦$$ \nabla_\theta \log r_t(\theta) = \nabla_\theta \log \pi_\theta - 0 = \nabla_\theta \log \pi_\theta $$⟧
+（看！ ⟨$\log{}\pi_\theta$⟩ 的梯度，就是 ⟨$r_t(\theta)$⟩ 的对数梯度。）
+利用初中代数的链式法则（ ⟨$\nabla{}f{}={}f{}\cdot{}\nabla{}\log{}f$⟩ ），我们可以推出一个极其漂亮的等式：
+⟦$$ \nabla_\theta r_t(\theta) = r_t(\theta) \cdot \nabla_\theta \log r_t(\theta) = r_t(\theta) \cdot \nabla_\theta \log \pi_\theta $$⟧
+⟦$$ \mathbb{E} \left[ \frac{\pi_\theta}{\pi_{old}} \nabla_\theta \log \pi_\theta \cdot A_t \right] $$⟧
+把 ⟨$\frac{\pi_\theta}{\pi_{old}}$⟩ 替换成 ⟨$r_t(\theta)$⟩ ：
+⟦$$ \mathbb{E} \left[ r_t(\theta) \nabla_\theta \log \pi_\theta \cdot A_t \right] $$⟧
+把上面推导的等式代进去（ ⟨$r_t(\theta){}\nabla_\theta{}\log{}\pi_\theta{}={}\nabla_\theta{}r_t(\theta)$⟩ ）：
+⟦$$ \mathbb{E} \left[ \nabla_\theta r_t(\theta) \cdot A_t \right] $$⟧
+反推 Loss，因为我们在数学上要算的梯度变成了 ⟨$\mathbb{E}[\nabla_\theta{}r_t(\theta){}\cdot{}A_t]$⟩ ，所以我们只需要在代码里拼凑出这样的 Loss：
+⟦$$ \text{Loss}_{actor} = - r_t(\theta) \cdot \text{detach}(A_t) $$⟧
+这就是看到的 PPO Loss 里没有 ⟨$\log{}\pi_\theta$⟩ 的原因。
+为了防止 ⟨$r_t(\theta)$⟩ 太大（策略更新步子太猛），PPO 在 Loss 外面套了一个 `min` 和 `clip`：
+⟦$$ \text{Actor Loss} = - \min \left( r_t(\theta) A_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) A_t \right) $$⟧
+Critic（价值网络 ⟨$V_w$⟩ ）的唯一使命是尽可能准确地拟合真实的 ⟨$V^\pi(S_t)$⟩ 。它的 Loss 是标准的监督学习（均方误差）：
+⟦$$ \text{Loss}_{critic} = \text{MSE}(V_w(S_t), \text{Target}) $$⟧
+在 PPO 中，这个 ⟨$\text{Target}$⟩ 到底怎么算？
+⟦$$ A_t = Q_t - V_t $$⟧
+⟦$$ Q_t = V_t + A_t $$⟧
+在 PPO 中，我们把这里的 ⟨$V_t$⟩ 替换为更新前的旧价值网络 ⟨$V_{old}(S_t)$⟩ ，把 ⟨$A_t$⟩ 替换为广义优势估计 ⟨$\hat{A}_t^{GAE}$⟩ 。于是，PPO 的 Critic Target 定义为：
+⟦$$ \text{Target}_{PPO} = V_{old}(S_t) + \hat{A}_t^{GAE} $$⟧
+我们算优势 ⟨$A_t$⟩ 有两种极端做法：
+极端一（高方差，无偏）：蒙特卡洛（REINFORCE）。 ⟨$A_t{}={}G_t{}-{}V(S_t)$⟩ 。依靠完整的真实回报 ⟨$G_t$⟩ ，随机性大。
+极端二（低方差，有偏）：单步 TD Error（Actor-Critic）。 ⟨$A_t{}={}R_{t+1}{}+{}\gamma{}V(S_{t+1}){}-{}V(S_t)$⟩ 。依靠下一状态的估计，平稳但存在偏差。
+GAE(广义优势估计) 的本质就是通过引入系数 ⟨$\lambda{}\in{}[0,1]$⟩ ，在两者之间做平滑的代数插值。
+⟦$$ \delta_t = R_{t+1} + \gamma V(S_{t+1}) - V(S_t) $$⟧
+GAE 的定义是将当前步和未来所有步的 ⟨$\delta$⟩ 加权求和，权重为 ⟨$(\gamma{}\lambda)^l$⟩ ：
+⟦$$ \hat{A}_t^{GAE} = \sum_{l=0}^{\infty} (\gamma \lambda)^l \delta_{t+l} = \delta_t + (\gamma \lambda) \delta_{t+1} + (\gamma \lambda)^2 \delta_{t+2} + \dots $$⟧
+当 ⟨$\lambda{}={}0$⟩ 时： ⟨$\hat{A}_t^{GAE}{}={}\delta_t$⟩ ，退化为单步 AC 的优势。
+当 ⟨$\lambda{}={}1$⟩ 时：展开式子，中间的 ⟨$V$⟩ 项会互相抵消（多米诺骨牌），最终得 ⟨$\hat{A}_t^{GAE}{}={}G_t{}-{}V_t$⟩ ，退化为 REINFORCE 的蒙特卡洛优势。
+⟦$$ \hat{A}_t^{GAE} = \delta_t + \gamma \lambda \hat{A}_{t+1}^{GAE} $$⟧
+当把 ⟨$\hat{A}_t^{GAE}$⟩ 代回 Target 公式时，我们来看看它的本质：
+如果 ⟨$\lambda=1$⟩ ，代入后 ⟨$V_{old}$⟩ 抵消：
+⟦$$ \text{Target} = V_{old}(S_t) + (G_t - V_{old}(S_t)) = G_t $$⟧
+在实际 PPO 里 ⟨$\lambda$⟩ 通常取 0.95，这个 Target 就是“被 ⟨$V$⟩ 估计平滑过的多步回报”，完美平衡了偏差与方差。
+Actor（策略网络 ⟨$\pi_\theta$⟩ ）：负责选动作。它的 Loss 变成了：
+⟦$$ r_t(\theta) = \frac{\pi_\theta(A_t|S_t)}{\text{detach}(\pi_{old}(A_t|S_t))} \quad \text{（或代码实现形式：} \exp(\log \pi_\theta - \text{detach}(\log \pi_{old})) \text{）} $$⟧
+⟦$$ \text{Loss}_{actor} = - \min \left( r_t(\theta) \cdot \text{detach}(\hat{A}_t^{GAE}), \ \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \cdot \text{detach}(\hat{A}_t^{GAE}) \right) $$⟧
+(注1：必须 detach ⟨$\hat{A}_t^{GAE}$⟩ ，阻断优势函数的梯度流入 Critic，否则计算图会爆炸)
+(注2：计算比值 ⟨$r_t(\theta)$⟩ 时，分母 ⟨$\pi_{old}$⟩ 产生的 log_prob 也必须 detach，因为它属于旧策略，不参与当前梯度的回流)
+Critic（价值网络 ⟨$V_w$⟩ ）：负责估计 ⟨$V_\pi(S)$⟩ 。它的 Loss 就是标准的监督学习（均方误差）：
+⟦$$ \text{Loss}_{critic} = \text{MSE}(V_w(S_t), \underbrace{\text{detach}(\hat{A}_t^{GAE}) + \text{detach}(V_w(S_t))}_{\text{PPO Target (Returns)}}) $$⟧
+(注：在计算 Critic Target 时，优势函数 ⟨$\hat{A}_t^{GAE}$⟩ 和旧价值 ⟨$V_w(S_t)$⟩ 都必须 detach，阻断梯度流入 Actor，否则计算图会爆炸——这能防止 Critic 陷入“自己预测自己”的追尾巴死循环)
+=== case-studies-07
+The first step in computing the analytic signal is to compute the Hilbert transform. We begin with some notation. Define ⟨$x$⟩ as a narrowband signal (i.e., a signal with most of its energy concentrated in a narrow frequency range note, e.g., the low- or high-frequency band filtered signals we've created). Then the Hilbert transform of ⟨$x$⟩, let’s call it ⟨$y$⟩, is
+⟦$$ y = H(x). $$⟧
+It’s perhaps more intuitive to consider the effect of the Hilbert Transform on the frequencies ⟨$f$⟩ of ⟨$x$⟩,
+⟦$$ \begin{equation} H(x)= \begin{cases} -\pi/2 & \text{ phase shift if } f>0 \\ 0 & \text{ phase shift if } f=0 \\ \pi/2 & \text{ phase shift if } f<0 \\ \end{cases} \end{equation} $$⟧
+To summarize: The Hilbert transform ⟨$H(x)$⟩ of the signal ⟨$x$⟩ produces a phase shift of ⟨$\pm 90$⟩ degrees for ⟨$\mp$⟩ frequencies of ⟨$x$⟩.
+The Hilbert Transform can also be described in the time domain, although its representation is hardly intuitive (see this Appendix for more details). Then the analytic signal ⟨$z$⟩ is
+⟦$$ z = x + i y = x + i H(x). $$⟧
+The effect of the Hilbert transform is to remove negative frequencies from ⟨$z$⟩. As it stands, this is not obvious. To get a sense for why this is so, let’s consider a simple example.
+Let ⟨$x_0$⟩ be a sinusoid at frequency ⟨$f_0$⟩,
+⟦$$ x_0 = 2 \cos(2 \pi f_0 t) = 2 \cos(\omega_0 t), $$⟧
+where to simplify notation we have defined ⟨$\omega_0 = 2 \pi f_0$⟩. We know from Euler’s formula that
+⟦$$ x_0 = e^{i \omega_0 t} + e^{-i \omega_0 t}. $$⟧
+The real variable ⟨$x_0$⟩ possesses both a positive and a negative frequency component (i.e., ⟨$\omega_0$⟩ and ⟨$-\omega_0$⟩). So, the spectrum has two peaks:
+For real signals, which include nearly all recordings of brain activity, the negative frequency component is redundant, and we usually ignore it. However, the negative frequency component still remains. By definition, the effect of the Hilbert transform is to induce a phase shift. For positive frequencies, the phase shift is ⟨$-\pi/2$⟩. We can produce this phase shift by multiplying the positive frequency part of the signal by ⟨$-i$⟩.
+Q: Why does a phase shift of ⟨$-\pi/2$⟩ correspond to multiplication by ⟨$-i$⟩?
+A: Consider the complex exponential ⟨$e^{i \omega_0 t}$⟩, which consists of only a positive frequency component (⟨$\omega_0$⟩). This signal shifted in phase by ⟨$-\pi/2$⟩ corresponds to the new signal ⟨$e^{i (\omega_0 t - \pi / 2)}$⟩, which simplifies to
+⟦$$ e^{i \omega_0 t} e^{-i\pi/2} = e^{i\omega_0 t}\big(\cos(\pi/2) - i \sin(\pi/2)\big) = e^{i\omega_0 t} (-i). $$⟧
+Notice the result simplifies to the original complex exponential ⟨$e^{i\omega_0 t}$⟩ multiplied by ⟨$-i$⟩. This shows that the ⟨$-\pi/2$⟩ phase shift corresponds to multiplication of the positive frequency component ⟨$(e^{i\omega_0 t})$⟩ by ⟨$-i$⟩.
+Q. Can you show that a ⟨$\pi / 2$⟩ phase shift corresponds to multiplication by ⟨$i$⟩?
+This analysis shows that we can represent the Hilbert transform of ⟨$x$⟩ at frequency ⟨$f$⟩ as
+⟦$$ H(x) = \left\{\begin{array}{r} -ix \mbox{ if } f > 0, \\ 0 \mbox{ if } f = 0, \\ ix \mbox{ if } f < 0. \end{array}\right. $$⟧
+Therefore, the Hilbert transform of ⟨$x_0 = e ^ {i \omega_0 t} + e ^ {-i \omega_0 t}$⟩ becomes
+⟦$$ y_0 = H(x_0) = -i e ^ {i \omega_0 t} + i e ^ {-i \omega_0 t}. $$⟧
+In this equation, we multiply the positive frequency part of ⟨$x_0$⟩ (i.e., ⟨$e ^ {-i \omega_0 t}$⟩) by ⟨$i$⟩. Simplifying this expression using Euler's formula, we find
+⟦$$ y_0 = 2 \sin( \omega_0 t ). $$⟧
+Q. Can you perform this simplification? In other words, can you show that ⟨$-i e ^ {i \omega_0 t} + i e ^ {-i \omega_0 t} = 2 \sin( \omega_0 t )$⟩?
+The Hilbert transform of ⟨$x_0$⟩ (a cosine function) is a sine function. We could perhaps have guessed this: sine is a 90-degree (⟨$\pi / 2$⟩) phase shift of cosine.
+We are now ready to define the analytic signal ⟨$(z_0)$⟩ for this example. Using the expressions for ⟨$x_0$⟩ and ⟨$y_0$⟩ and Euler's formula, we find
+⟦$$ z_0 = x_0 + i y_0 = 2 \cos( \omega_0 t ) + i 2 \sin(\omega_0 t ) = 2 e ^ {i \omega_0 t}. $$⟧
+Notice that this analytic signal ⟨$z_0$⟩ contains no negative frequencies; as mentioned, the effect of the Hilbert transform is to eliminate the negative frequencies from ⟨$x$⟩. The spectrum of this signal consists of a single peak at ⟨$\omega_0$⟩, compared to the two peaks at ⟨$\pm \omega_0$⟩ in the original signal ⟨$x$⟩. In this sense, the analytic signal (⟨$z_0$⟩) is simpler than the original signal ⟨$x_0$⟩. To express the original signal ⟨$x_0$⟩ required two complex exponential functions,
+⟦$$ x_0 = e^{i \omega_0 t} + e^{-i \omega_0 t}, $$⟧
+compared to only one complex exponential required to express the corresponding analytic signal ⟨$z_0$⟩. There's an interesting geometrical interpretation of this. Consider plotting ⟨$x_0$⟩ in the complex plane:
+Because ⟨$x_0$⟩ is real, this quantity evolves in time along the real axis (red in the figure). To keep ⟨$x_0$⟩ on the real axis, the two complex exponentials (orange in the figure) that define ⟨$x_0$⟩ (i.e., ⟨$e^{i \omega_0 t}$⟩ and ⟨$e^{-i \omega_0 t}$⟩) rotate in opposite directions along the unit circle (blue in the figure). By doing so, the imaginary components of these two vectors cancel, and we're left with a purely real quantity ⟨$x_0$⟩.
+Q. The phase of a complex quantity is the angle with respect to the real axis in the complex plain. What is the angle of ⟨$x_0$⟩ in the figure above?
+Alert! The command `hilbert(x)` returns the analytic signal of ⟨$x$⟩, not the Hilbert transform of ⟨$x$⟩.
+⟦$$ \left( \begin{array}{cc} \phi(1) & A(1) \\ \phi(2) & A(2) \\ \phi(3) & A(3) \\ \vdots & \vdots \\ \end{array}\right), $$⟧
+where ⟨$\phi(i)$⟩ is the phase of the low-frequency band activity at time index ⟨$i$⟩, and ⟨$A(i)$⟩ is the amplitude of the high-frequency band activity at time index ⟨$i$⟩. In other words, each row defines the instantaneous phase and amplitude of the low- and high-frequency filtered data, respectively.
+We now use this two-column vector to assess whether the phase and amplitude envelope are related. Let's begin by plotting the average amplitude versus phase. We divide the phase interval into bins of size 0.1 beginning at ⟨$-\pi$⟩ and ending at ⟨$\pi.$⟩ the choice of bin size is somewhat arbitrary; this choice will work fine, but you might consider the impact of other choices.
+As a basic statistic to capture the extent of this relation, we compute the difference between the maximum and minimum of the average amplitude envelope over phases. Let's assign this difference the label ⟨$h$⟩. In Python,
+We find a value of ⟨$h = 0.126$⟩. This value, on its own, is difficult to interpret. Is it bigger or smaller than we expect? To assess the significance of ⟨$h$⟩, let's generate a surrogate phase-amplitude vector by resampling without replacement the amplitude time series (i.e., the second column of the phase-amplitude vector). Resampling is a powerful technique that we have applied in our analysis of other case study data (see, for example, The Event-Related Potential). By performing this resampling, we reassign each phase an amplitude chosen randomly from the entire 100 s LFP recording. We expect that if CFC does exist in these data, then the timing of the phase and amplitude vectors will be important; for CFC to occur, the amplitude and phase must coordinate in time. By disrupting this timing in the resampling procedure, we expect to eliminate the coordination between amplitude and phase necessary to produce CFC.
+For each surrogate phase-amplitude vector, we compute the statistic ⟨$h$⟩. To generate a distribution of ⟨$h$⟩ values, let’s repeat 1,000 times this process of creating surrogate data through resampling and computing ⟨$h$⟩.
+In this code, we first define the number of surrogates (variable `n_surrogates`) and a vector to store the statistic ⟨$h$⟩ computed for each surrogate phase-amplitude vector (variable `hS`). Then, for each surrogate, we use the Python function `randint` to randomly permute the amplitude vector without replacement. We then use this permuted amplitude vector (variable `ampS`) and the original phase vector (variable `phi`) to compute ⟨$h$⟩; this last step utilizes the Python code developed earlier to compute `h` for the original (unpermuted) data.
+The value of ⟨$h$⟩ computed from the original data (`h`) lies far outside the distribution of surrogate ⟨$h$⟩ values (`hS`). To compute a ⟨$p$⟩-value, we determine the proportion of surrogate ⟨$h$⟩ values greater than the observed ⟨$h$⟩ value:
+We find a ⟨$p$⟩-value that is very small; there are no surrogate values of ⟨$h$⟩ that exceed the observed value of ⟨$h$⟩. We therefore conclude that in this case the observed value of ⟨$h$⟩ is significant. As a statistician would say, we reject the null hypothesis of no CFC between the phase of the 5-7 Hz low-frequency band and the amplitude of the 80-120 Hz high frequency band.
+⟦$$ H(x) = \left\{ \begin{array}{rl} -ix & \mbox{for positive frequencies of }x \\ 0 & \mbox{for 0 frequency of }x \\ ix & \mbox{for negative frequencies of }x \\ \end{array}\right\} = x(f)\big( -i\mbox{sgn}(f)\big), $$⟧
+where we have written ⟨$x(f)$⟩ to make the frequency dependence of ⟨$x$⟩ explicit, and the sgn (pronounced "sign") function is defined as
+⟦$$ \mbox{sgn}(f) = \left\{ \begin{array}{rl} 1 & \mbox{if }f > 0, \\ 0 & \mbox{if }f = 0, \\ -1 & \mbox{if }f < 0, \\ \end{array}\right. $$⟧
+In the frequency domain, we perform the Hilbert Transform by multiplying the signal ⟨$x(f)$⟩ by a constant (either ⟨$i$⟩ or ⟨$-i$⟩ depending on the frequency ⟨$f$⟩ of ⟨$x$⟩).
+To convert the Hilbert transform in the frequency domain to the Hilbert Transform in the time domain, we take the inverse Fourier transform. Looking up the inverse Fourier transform of ⟨$-i\mbox{sgn}(f)$⟩, we find
+⟦$$ \mbox{Inverse Fourier transform}\{-i\mbox{sgn}(f)\} = \frac{1}{\pi t}. $$⟧
+Let's represent the inverse Fourier transform of ⟨$x(f)$⟩ as ⟨$x(t)$⟩.
+Now, let's make use of an important fact. Multiplication of two quantities in the frequency domain corresponds to convolution of these two quantities in the time domain (see notebook 04). The convolution of two signals ⟨$x$⟩ and ⟨$y$⟩ is
+⟦$$ x * y = \int_{-\infty}^{\infty}x(\tau)y(t-\tau)d\tau. $$⟧
+⟦$$ H(x) = x(t) * \frac{1}{\pi t} = \frac{1}{\pi}\int_{-\infty}^{\infty}\frac{x(\tau)}{t-\tau}d\tau. $$⟧
+=== cmsc426-sfm
+Perspective-$$n$$-points
+The fundamental matrix, denoted by ⟨$$F$$⟩, is a ⟨$$3\times 3$$⟩ (rank 2) matrix that relates the corresponding set of points in two images from different views (or stereo images). But in order to understand what fundamental matrix actually is, we need to understand what epipolar geometry is! The epipolar geometry is the intrinsic projective geometry between two views. It only depends on the cameras' internal parameters (⟨$$K$$⟩ matrix) and the relative pose i.e. it is independent of the scene structure.
+Let's say a point ⟨$$\mathbf{X}$$⟩ in the 3D-space (viewed in two images) is captured as ⟨$$\mathbf{x}$$⟩ in the first image and ⟨$$\mathbf{x'}$$⟩ in the second. Can you think how to formulate the relation between the corresponding image points ⟨$$\mathbf{x}$$⟩ and ⟨$$\mathbf{x'}$$⟩? Consider Fig. 2. Let ⟨$$\mathbf{C}$$⟩ and ⟨$$\mathbf{C'}$$⟩ be the respective camera centers which forms the baseline for the stereo system. Clearly, the points ⟨$$\mathbf{x}$$⟩, ⟨$$\mathbf{x'}$$⟩ and ⟨$$\mathbf{X}$$⟩ (or ⟨$$\mathbf{C}$$⟩, ⟨$$\mathbf{C'}$$⟩ and ⟨$$\mathbf{X}$$⟩) are coplanar i.e. ⟨$$\mathbf{\overrightarrow{Cx}}\cdot \left(\mathbf{\overrightarrow{CC'}}\times\mathbf{\overrightarrow{C'x'}}\right)=0$$⟩ and the plane formed can be denoted by ⟨$$\pi$$⟩. Since these points are coplanar, the rays back-projected from ⟨$$\mathbf{x}$$⟩ and ⟨$$\mathbf{x'}$$⟩ intersect at ⟨$$\mathbf{X}$$⟩. This is the most significant property in searching for a correspondence.
+Now, let us say that only ⟨$$\mathbf{x}$$⟩ is known, not ⟨$$\mathbf{x'}$$⟩. We know that the point ⟨$$\mathbf{x'}$$⟩ lies in the plane ⟨$$\pi$$⟩ which is governed by the camera baseline ⟨$$\mathbf{CC'}$$⟩ and ⟨$$\mathbf{\overrightarrow{Cx}}$$⟩. Hence the point ⟨$$\mathbf{x'}$$⟩ lies on the line of intersetion of ⟨$$\mathbf{l'}$$⟩ of ⟨$$\pi$$⟩ with the second image plane. The line ⟨$$\mathbf{l'}$$⟩ is the image in the second view of the ray back-projected from ⟨$$\mathbf{x}$$⟩. This line ⟨$$\mathbf{l'}$$⟩ is called the epipolar line corresponding to ⟨$$\mathbf{x}$$⟩. The benifit is that you don't need to search for the point corresponding to ⟨$$\mathbf{x}$$⟩ in the entire image plane as it can be restricted to the ⟨$$\mathbf{l'}$$⟩.
+Epipole is the point of intersection of the line joining the camera centers with the image plane. (see ⟨$$\mathbf{e}$$⟩ and ⟨$$\mathbf{e'}$$⟩ in the Fig. 2(a))
+1.3 The Fundamental Matrix ⟨$$\mathbf{F}$$⟩:
+The ⟨$$\mathbf{F}$$⟩ matrix is only an algebraic representation of epipolar geometry and can both geometrically (contructing the epipolar line) and arithematically. (See derivation) (Fundamental Matrix Song) As a result, we obtain: ⟨$$\mathbf{x}_i'^{\ \mathbf{T}}\mathbf{F} \mathbf{x}_i = 0$$⟩ where ⟨$$i=1,2,....,m.$$⟩ This is known as epipolar constraint or correspondance condition (or Longuet-Higgins equation). Since, ⟨$$\mathbf{F}$$⟩ is a ⟨$$3\times3$$⟩ matrix, we can set up a homogenrous linear system with 9 unknowns:
+⟦$$\begin{bmatrix} x'_i & y'_i & 1 \end{bmatrix} \begin{bmatrix}f_{11} & f_{12} & f_{13} \\ f_{21} & f_{22} & f_{23} \\ f_{31} & f_{32} & f_{33} \end{bmatrix} \begin{bmatrix} x_i \\ y_i \\ 1 \end{bmatrix} = 0$$⟧
+⟦$$\begin{equation}x_i x'_i f_{11} + x_i y'_i f_{21} + x_i f_{31} + y_i x'_i f_{12} + y_i y'_i f_{22} + y_i f_{32} + x'_i f_{13} + y'_i f_{23} + f_{33}=0\end{equation}$$⟧
+Simplifying for ⟨$$m$$⟩ correspondences,
+⟦$$\begin{bmatrix} x_1 x'_1 & x_1 y'_1 & x_1 & y_1 x'_1 & y_1 y'_1 & y_1 & x'_1 & y'_1 & 1 \\ \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots \\ x_m x'_m & x_m y'_m & x_m & y_m x'_m & y_m y'_m & y_m & x'_m & y'_m & 1 \end{bmatrix}\begin{bmatrix} f_{11} \\ f_{21} \\ f_{31} \\ f_{12} \\ f_{22} \\ f_{32} \\ f_{13} \\f_{23} \\ f_{33}\end{bmatrix} = 0$$⟧
+How many points do we need to solve the above equation? Think! Twice! Remember homography, where each point correspondence contributes two constraints? Unlike homography, in ⟨$$\mathbf{F}$$⟩ matrix estimation, each point only contributes one constraints as the epipolar constraint is a scalar equation. Thus, we require at least 8 points to solve the above homogenous system. That is why it is known as Eight-point algorithm.
+With ⟨$$N \geq 8$$⟩ correspondences between two images, the fundamental matrix, ⟨$$F$$⟩ can be obtained as: By stacking the above equation in a matrix ⟨$$A$$⟩, the equation ⟨$$Ax=0$$⟩ is obtained. This system of equation can be answered by solving the linear least squares using Singular Value Decomposition (SVD) as explained in the Math module. When applying SVD to matrix ⟨$$\mathbf{A}$$⟩, the decomposition ⟨$$\mathbf{USV^T}$$⟩ would be obtained with ⟨$$\mathbf{U}$$⟩ and ⟨$$\mathbf{V}$$⟩ orthonormal matrices and a diagonal matrix ⟨$$\mathbf{S}$$⟩ that contains the singular values. The singular values ⟨$$\sigma_i$$⟩ where ⟨$$i\in[1,9], i\in\mathbb{Z}$$⟩, are positive and are in decreasing order with ⟨$$\sigma_9=0$$⟩ since we have 8 equations for 9 unknowns. Thus, the last column of ⟨$$\mathbf{V}$$⟩ is the true solution given that ⟨$$\sigma_i\neq 0 \ \forall i\in[1,8], i\in\mathbb{Z}$$⟩. However, due to noise in the correspondences, the estimated ⟨$$\mathbf{F}$$⟩ matrix can be of rank 3 i.e. ⟨$$\sigma_9\neq0$$⟩. So, to enfore the rank 2 constraint, the last singular value of the estimated ⟨$$\mathbf{F}$$⟩ must be set to zero. If ⟨$$F$$⟩ has a full rank then it will have an empty null-space i.e. it won't have any point that is on entire set of lines. Thus, there wouldn't be any epipoles. See Fig. 3 for full rank comparisons for ⟨$$F$$⟩ matrices.
+In MATLAB, you can use `svd` to solve ⟨$$\mathbf{x}$$⟩ from ⟨$$\mathbf{Ax}=0$$⟩
+Since the point correspondences are computed using SIFT or some other feature descriptors, the data is bound to be noisy and (in general) contains several outliers. Thus, to remove these outliers, we use RANSAC algorithm (Yes! The same as used in Panorama stitching!) to obtain a better estimate of the fundamental matrix. So, out of all possibilities, the ⟨$$\mathbf{F}$$⟩ matrix with maximum number of inliers is chosen. Below is the pseduo-code that returns the ⟨$$\mathbf{F}$$⟩ matrix for a set of matching corresponding points (computed using SIFT) which maximizes the number of inliers.
+Since we have computed the ⟨$$\mathbf{F}$$⟩ using epipolar constrains, we can find the relative camera poses between the two images. This can be computed using the Essential Matrix, ⟨$$\mathbf{E}$$⟩. Essential matrix is another ⟨$$3\times3$$⟩ matrix, but with some additional properties that relates the corresponding points assuming that the cameras obeys the pinhole model (unlike ⟨$$\mathbf{F}$$⟩). More specifically, ⟨$$\mathbf{E}$$⟩ = ⟨$$\mathbf{K^TFK}$$⟩ where ⟨$$\mathbf{K}$$⟩ is the camera calibration matrix or camera intrinsic matrix. Clearly, the essential matrix can be extracted from ⟨$$\mathbf{F}$$⟩ and ⟨$$\mathbf{K}$$⟩. As in the case of ⟨$$\mathbf{F}$$⟩ matrix computation, the singular values of ⟨$$\mathbf{E}$$⟩ are not necessarily ⟨$$(1,1,0)$$⟩ due to the noise in ⟨$$\mathbf{K}$$⟩. This can be corrected by reconstructing it with ⟨$$(1,1,0)$$⟩ singular values, i.e. ⟨$$\mathbf{E}=U\begin{bmatrix}1 & 0 & 0 \\ 0 & 1 & 0 \\ 0 & 0 & 0 \end{bmatrix}V^T$$⟩
+It is important to note that the ⟨$$\mathbf{F}$$⟩ is defined in the original image space (i.e. pixel coordinates) whereas ⟨$$\mathbf{E}$$⟩ is in the normalized image coordinates. Normalized image coordinates have the origin at the optical center of the image. Also, relative camera poses between two views can be computed using ⟨$$\mathbf{E}$$⟩ matrix. Moreover, ⟨$$\mathbf{F}$$⟩ has 7 degrees of freedom while ⟨$$\mathbf{E}$$⟩ has 5 as it takes camera parameters in account. (5-Point Motion Estimation Made Easy)
+The camera pose consists of 6 degrees-of-freedom (DOF) Rotation (Roll, Pitch, Yaw) and Translation (X, Y, Z) of the camera with respect to the world. Since the ⟨$$\mathbf{E}$$⟩ matrix is identified, the four camera pose configurations: ⟨$$(C_1, R_1), (C_2, R_2), (C_3, R_3)$$⟩ and ⟨$$(C_4, R4)$$⟩ where ⟨$$\ C\in\mathbb{R}^3$$⟩ is the camera center and ⟨$$R\in SO(3)$$⟩ is the rotation matrix, can be computed. Thus, the camera pose can be written as: ⟨$$P = KR\begin{bmatrix}I_{3\times3} & -C\end{bmatrix}$$⟩ These four pose configurations can be computed from ⟨$$\mathbf{E}$$⟩ matrix. Let ⟨$$\mathbf{E}=UDV^T$$⟩ and ⟨$$W=\begin{bmatrix}0 & -1 & 0\\ 1 & 0 & 0\\ 0 & 0 & 1\end{bmatrix}$$⟩. The four configurations can be written as:
+⟨$$C_1=U(:, 3)$$⟩ and ⟨$$R_1=UWV^T$$⟩
+⟨$$C_2=-U(:, 3)$$⟩ and ⟨$$R_2=UWV^T$$⟩
+⟨$$C_3=U(:, 3)$$⟩ and ⟨$$R_3=UW^TV^T$$⟩
+⟨$$C_4=-U(:, 3)$$⟩ and ⟨$$R_4=UW^TV^T$$⟩
+It is important to note that the ⟨$$\ det(R)=1$$⟩. If ⟨$$det(R)=-1$$⟩, the camera pose must be corrected i.e. ⟨$$C=-C$$⟩ and ⟨$$R=-R$$⟩.
+In the previous section, we computed four different possible camera poses for a pair of images using essential matrix. Though, in order to find the correct unique camera pose, we need to remove the disambiguity. This can be accomplish by checking the cheirality condition i.e. the reconstructed points must be in front of the cameras. To check the cheirality condition, triangulate the 3D points (given two camera poses) using linear least squares to check the sign of the depth ⟨$$Z$$⟩ in the camera coordinate system w.r.t. camera center. A 3D point ⟨$$X$$⟩ is in front of the camera iff: ⟨$$r_3\mathbf{(X-C)} > 0$$⟩ where ⟨$$r_3$$⟩ is the third row of the rotation matrix (z-axis of the camera). Not all triangulated points satisfy this coniditon due of the presence of correspondence noise. The best camera configuration, ⟨$$(C, R, X)$$⟩ is the one that produces the maximum number of points satisfying the cheirality condition.
+Given two camera poses and linearly triangulated points, ⟨$$X$$⟩, the locations of the 3D points that minimizes the reprojection error (Recall Project 2) can be refined. The linear triangulation minimizes the algebraic error. Though, the reprojection error is geometrically meaningful error and can be computed by measuring error between measurement and projected 3D point: ⟨$$\underset{x}{\operatorname{min}}$$⟩ ⟨$$\sum_{j=1,2}\left(u^j - \frac{P_1^{jT}\widetilde{\phi}}{P_3^{jT}{X}}\right)^2 + \left(v^j - \frac{P_2^{jT}\widetilde{\phi}}{P_3^{jT}{X}}\right)^2$$⟩
+Here, ⟨$$j$$⟩ is the index of each camera, ⟨$$\widetilde{X}$$⟩ is the hoomogeneous representation of ⟨$$X$$⟩. ⟨$$P_i^T$$⟩ is each row of camera projection matrix, ⟨$$P$$⟩. This minimization is highly nonlinear due to the divisions. The initial guess of the solution, ⟨$$X_0$$⟩, is estimated via the linear triangulation to minimize the cost function. This minimization can be solved using nonlinear optimization toolbox such as `fminunc` or `lsqnonlin` in MATLAB.
+5. Perspective-$$n$$-Points:
+Now, since we have a set of ⟨$$n$$⟩ 3D points in the world, their ⟨$$2D$$⟩ projections in the image and the intrinsic parameter; the 6 DOF camera pose can be estimated using linear least squares. This fundamental problem, in general is known as Persepective-$$n$$-Point (PnP). For there to exist a solution, ⟨$$n\geq 3$$⟩. There are multiple methods to solve the P$$n$$P problem and have an assumptions in most of them that the camera is calibrated. Methods such as Unified P$$n$$P (or UPnP) do not abide with the said assumption as they estimate both intrinsic and extrinsic parameters.
+P$$n$$P is prone to error as there are outliers in the given set of point correspondences. To overcome this error, we can use RANSAC (yes, again!) to make our camera pose more robust to outliers. The alogrithm below depicts the solution with RANSAC.
+⟨$$\underset{C,R}{\operatorname{min}} \sum_{i=1,J} \left(u^j - \frac{P_1^{jT}\widetilde{X_j}}{P_3^{jT}{\widetilde{X_j}}}\right)^2 + \left(v^j - \frac{P_2^{jT}\widetilde{X_j}}{P_3^{jT}{X_j}}\right)^2$$⟩
+⟨$$\underset{\{C_i, q_i\}_{i=1}^i,\{X\}_{j=1}^J}{\operatorname{min}}\sum_{i=1}^I\sum_{j=1}^J V_{ij}\left(\left(u^j - \dfrac{P_1^{jT}\tilde{\phi}}{P_3^{jT}\tilde{X}}\right)^2 + \left(v^j - \dfrac{P_2^{jT}\tilde{\phi}}{P_3^{jT}\tilde{X}}\right)^2\right)$$⟩ where ⟨$$V_{ij}$$⟩ is the visibility matrix. (Don't scratch your head yet!)
+Visibility matrix signifies the relationship between the camera and a point. ⟨$$V_{ij}$$⟩ is one if ⟨$$j^{th}$$⟩ point is visible from the ⟨$$i^{th}$$⟩ camera and zero otherwise. One can use a nonlinear optimization toolbox such as `fminunc` or `lsqnonlin` in MATLAB but is extremely slow as the number of parameters are large. The Sparse Bundle Adjustment toolbox is designed to solve such optimization problem by exploiting sparsity of visibility matrix, ⟨$$V$$⟩.
+=== edge-cases
+The loss is ⟨$L = \sum_i (y_i - \hat{y}_i)^2$⟩ over all samples, with ⟨$\alpha_t$⟩ and ⟨$\beta_t$⟩ fixed.
+Emphasis next to math: about ⟨$x_1$⟩ and ⟨$y^*$⟩ here and ⟨$z_2$⟩.
+Stars in math: ⟨$a * b * c$⟩ and ⟨$x^* + y^*$⟩ and ⟨$\mathbf{x}_i^*$⟩.
+Underscores across math: ⟨$a_1$⟩ and ⟨$b_2$⟩ and ⟨$c_3$⟩ on one line.
+Braces and spaces: ⟨$\{x \mid x > 0\}$⟩, ⟨$\left\{ a \right\}$⟩, ⟨$a\ b$⟩, ⟨$a\;b\!c$⟩.
+Backslash punctuation: ⟨$\#$⟩, ⟨$\%$⟩, ⟨$\&$⟩, ⟨$\_$⟩, ⟨$\$$⟩, ⟨$\|x\|$⟩, ⟨$a\\b$⟩.
+Dollar next to digits: $5 and $10, but ⟨$n$⟩ items cost ⟨$3n$⟩ dollars.
+Money then math: it costs $5. The value is ⟨$x$⟩.
+Escaped dollars: $5 and $10, with ⟨$x$⟩ math and $ alone.
+Escaped dollar in math: ⟨$\$x$⟩ and ⟨$a \$ b$⟩.
+Math after a word: x$y$ and $y$x and (⟨$z$⟩) and [$w$].
+Dollar pairs with spaces: $ x $ and $x $ and $ x$.
+Code span math: ⟨$\sqrt{2}$⟩ and ⟨$a_1 * b_2$⟩ and `$x$` stays code.
+Math with HTML-like text: ⟨$a<b$⟩ and ⟨$a < b > c$⟩ and ⟨$x < y$⟩.
+Math across lines: $a + b$ ends here.
+Inline display: ⟨$$x^2$$⟩ in a sentence, and ⟨$$a_1 * b_2$$⟩.
+Hard break at the end of math: ⟨$x$⟩ next line.
+Link next to math: the paper shows ⟨$x_1$⟩, and $y_2$.
+Math in a link title-ish: see $\alpha$-stable.
+URL in text next to math: https://example.com/a_b ⟨$x_1$⟩.
+⟦$$ \begin{aligned} f(x) &= x^2 + 2x + 1 \\ &= (x+1)^2 \end{aligned} $$⟧
+⟦$$ a_1 * b_1 + a_2 * b_2 $$⟧
+⟦$$ x = \frac{-b \pm \sqrt{b^2-4ac}}{2a} $$⟧
+⟦$$\int_0^1 f(x)\,dx$$⟧
+Text before $$ y = mx + b $$ text after.
+⟦$$ \text{cost} = \$5 $$⟧
+⟦$$\mathbf{A}_{ij} = \sum_k B_{ik} C_{kj}$$⟧
+⟦$$\left\{ x \in \mathbb{R} \mid x > 0 \right\}$$⟧
+Item with ⟨$x_1$⟩ math
+⟦$$ y_1 * y_2 $$⟧
+Item with ⟨$a_b$⟩ code math
+Nested ⟨$\alpha_i$⟩ item
+Quoted ⟨$E = mc^2$⟩ math.
+⟦$$ \nabla \cdot \mathbf{E} = \frac{\rho}{\varepsilon_0} $$⟧
+Alert with ⟨$p_i * q_i$⟩ math.
+⟨$\alpha_1$⟩
+⟨$\beta_*$⟩
+momentum ⟨$\in [0, 1)$⟩
+⟨$a | b$⟩
+$5
+The ⟨$L_2$⟩ norm
+Summary ⟨$x_1$⟩
+Hidden ⟨$y_2$⟩ math.
+Term ⟨$t_1$⟩
+The bound ⟨$O(n \log n)$⟩ holds for ⟨$n_1 > 0$⟩. ↩
+=== factorion-math
+⟦$$n? = \frac{n(n+1)}{2}$$⟧
+⟦$$n?_k = k \left\lfloor\frac{n}{k}\right\rfloor? + \left\lceil\frac{n}{k}\right\rceil (n \mod k)$$⟧
+⟦$$\begin{aligned} !0 &= 1 \\ !n &= n \cdot !(n-1)+(-1)^n \end{aligned}$$⟧
+⟦$$n! \approx \sqrt{2 \pi n} \cdot A(n) \cdot \left(\frac{n}{e}\right)^n$$⟧
+⟦$$\begin{aligned} n! &\approx \sqrt{2 \pi n} \cdot A(n) \cdot \left(\frac{n}{e}\right)^n \text{ | Stirling's Approximation (A(n) only contains negative powers of n, not in exponents)} \\ &\approx \sqrt{2 \pi n} \cdot A(n) \cdot \left(\frac{n}{e}\right)^m \cdot 10^k \text{ | factoring out the 10 exponent (k)} \\ &\approx \sqrt{2 \pi n} \cdot A(n) \cdot \left(\frac{n}{e}\right)^{m + \frac{ln(10)}{ln\left(\frac{n}{e}\right)} k} \text{ | factoring it back in (to calculate it)} \\ \\ n &= m + log_{\frac{n}{e}}(10) \cdot k \text{ | got out of exponents} \\ n &\approx log_{\frac{n}{e}}(10) \cdot k \text{ | m should be small} \\ k &= \left\lfloor n / log_{\frac{n}{e}}(10) \right\rfloor \text{ | calculate k which is an integer (floor because otherwise m < 0)} \\ m &= n - log_{\frac{n}{e}}(10) \cdot k \text{ | calculate the exponent for the calculation} \end{aligned}$$⟧
+⟦$$\begin{aligned} z!_k &= k^{\frac{z}{k}} \cdot \frac{z}{k}! \cdot T_k(z) \text{ | we already have implementations for z! and T\_k(z)} \\ \\ k^{\frac{z}{k}} &= k^m \cdot 10^n \ 10^{log_{10}(k) \cdot \frac{z}{k}} &= 10^{log_{10}(k) \cdot m} \cdot 10^n \text{ | log\_{10}} \\ log_{10}(k) \cdot \frac{z}{k} &= log_{10}(k) \cdot m + n \text{ | n should be as large as possible} \\ \\ n &= \left\lfloor log_{10}(k) \cdot \frac{z}{k} \right\rfloor \\ m \cdot log_{10}(k) &= log_{10}(k) \cdot \frac{z}{k} - n | \div log_{10}(k) \\ m &= \frac{z}{k} - \frac{n}{log_{10}(k)} \end{aligned}$$⟧
+⟦$$n?_k \approx \frac{n(n+k)}{2k}$$⟧
+⟦$$\begin{aligned} n?_k &\approx \frac{n(n+k)}{2k} \\ \\ m &= \left\lfloor log_{10}(n) \right\rfloor \\ \\ n?_k &\approx k \frac{l}{2k} 10^{2m} \\ n?_k &\approx k 10^m \cdot l \frac{10^m}{2k} \\ \\ k 10^m &\approx n \\ k &\approx \frac{n}{10^m} \\ l &= \frac{n+k}{10^m} \\ \end{aligned}$$⟧
+⟦$$!n = \left\lfloor \frac{n!+1}{e} \right\rfloor \approx \left\lfloor \frac{n!}{e} \right\rfloor$$⟧
+⟦$$n! \approx \sqrt{2 \pi n} \cdot A(n) \cdot (\frac{n}{e})^n$$⟧
+⟦$$\begin{aligned} log_{10}(n!) &\approx log_{10}(\sqrt{2 \pi n} \cdot \left(\frac{n}{e})^n\right) \text{ | Stirling's Approximation} \\ &\approx \frac{1}{2} log_{10}(2 \pi n) + n \cdot log_{10}\left(\frac{n}{e}\right) \text{ | splitting up, taking exponents out} \\ &\approx \frac{1}{2} log_{10}(2 \pi) + \frac{1}{2} log_{10}(n) + n \cdot log_{10}(n) - n \cdot log_{10}(e) \text{ | splitting further} \\ \text{digits} &\approx \left\lfloor \left(\frac{1}{2}+n\right) log_{10}(n) + \frac{1}{2} log_{10}(2 \pi) - \frac{n}{ln(10)} \right\rfloor +1 \text{ | combining log\_10(n) and turning into number of digits} \end{aligned}$$⟧
+⟦$$n?_k \approx \frac{n(n+k)}{2k}$$⟧
+⟦$$\begin{aligned} log_{10}(n?_k) &= log_{10}\left(\frac{n(n+k)}{2k}\right) \\ &= log_{10}\left(n^2+nk\right) - log_{10}(2k) \text{ | drop inconsequential n} \\ &\approx 2 log_{10}(n) - log_{10}(2k) \end{aligned}$$⟧
+⟦$$x! = \Gamma(x+1)$$⟧
+⟦$$\begin{aligned} x!_k &= T_k(x) \cdot k^{\frac{x}{k}} \cdot (\frac{x}{k})! \\ \text{where} \\ T_k(x) &= \prod^k_{j=1}\left(k^{-\frac{j}{k}} j \cdot \left(\frac{j}{k}\right)!^{-1}\right)^{E_{k,j}(x)} \\ \text{where} \\ E_{k,j}(x) &= \frac{1}{k} \sum^k_{l=1}\left(cos(2 \pi l \frac{x-j}{k}\right) \end{aligned}$$⟧
+⟦$$E_{k,j}(x) = \frac{\prod^{k-1}_{l=0}\left(1 - cos\left(\frac{2}{k} \pi (x-l)\right) \cdot (l \neq j)\right)}{\prod^{k-1}_{l=0}\left(1 - cos\left(-\frac{2}{k} \pi l\right)\right)}$$⟧
+⟦$$n? = \frac{n(n+1)}{2}$$⟧
+=== html-in-math
+Inline: ⟨$a<b$⟩ and $xz$ and $
+$$ ac $$
+After the HTML: ⟨$x_1$⟩ should still be math.
+=== ibl-atlas-readme
+The method consists of computing streamlines between a bottom and top surface around a brain region by solving Laplace's partial differential equation ⟨$\Delta u = 0$⟩ inside the brain region, with a combination of Dirichlet and Neumann boundary conditions on the surfaces, and integrating the gradient field ⟨$\nabla u$⟩ to link every voxel of the bottom surface to a corresponding voxel at the top surface of the volume.
+The 1-norm of a vector ⟨$\mathbf p=(x,y,z)$⟩ is ⟨$\lVert\mathbf p\rVert_1 = |x|+|y|+|z|$⟩.
+The Euclidean norm of a vector ⟨$\mathbf p=(x,y,z)$⟩ is ⟨$\lVert\mathbf p\rVert_2 = \sqrt{x^2+y^2+z^2}$⟩.
+The gradient of a scalar field ⟨$u$⟩ is ⟨$\displaystyle\nabla u =\left(\frac{\partial u}{\partial x}, \frac{\partial u}{\partial y}, \frac{\partial u}{\partial z}\right)$⟩.
+The Laplacian of a scalar field ⟨$u$⟩ is ⟨$\displaystyle\Delta u =\frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} + \frac{\partial^2 u}{\partial z^2}$⟩.
+⟨$\Omega = \left[0, N\right] \times \left[0, M\right] \times \left[0, P\right]$⟩ is the 3D volume containing the brain atlas.
+⟨$\mathcal V \subset \Omega$⟩ is the brain region to flatten
+⟨$\mathcal S = \partial\mathcal V \subset \Omega$⟩ is the boundary surface of the volume
+⟨$\mathcal S_T \subset \mathcal S$⟩ is the top (outer) surface of the brain region ⟨$\mathcal V$⟩
+⟨$\mathcal S_B \subset \mathcal S$⟩ is the bottom (inner) surface of the brain region ⟨$\mathcal V$⟩
+⟨$\mathcal S_E \subset \mathcal S$⟩ is the edge surface of the brain region ⟨$\mathcal V$⟩
+⟦$$\mathcal S = \partial\mathcal V = \mathcal S_T \sqcup \mathcal S_B \sqcup \mathcal S_E$$⟧
+⟨$p = (i, j, k) \in \Omega$⟩ is a voxel in the volume
+⟨$p_x^- = (i-1, j, k) \in \Omega$⟩ is the neighbor voxel in front of ⟨$p$⟩
+⟨$p_x^+ = (i+1, j, k) \in \Omega$⟩ is the neighbor voxel behind ⟨$p$⟩
+⟨$p_y^- = (i, j-1, k) \in \Omega$⟩ is the neighbor voxel on top of ⟨$p$⟩
+⟨$p_y^+ = (i, j+1, k) \in \Omega$⟩ is the neighbor voxel below ⟨$p$⟩
+⟨$p_z^- = (i, j, k-1) \in \Omega$⟩ is the neighbor voxel to the left of ⟨$p$⟩
+⟨$p_z^+ = (i, j, k+1) \in \Omega$⟩ is the neighbor voxel to the right of ⟨$p$⟩
+For each subset ⟨$\mathcal A \subset \Omega$⟩, we define its indicator function ⟨$\chi_{\mathcal A} : \Omega \longrightarrow \\{0, 1\\}$⟩ as:
+⟦$$ \forall p \in \Omega, \quad \chi_{\mathcal A}(p) = \begin{cases} 1 & \textrm{if} \quad p \in \mathcal A \\ 0 & \textrm{otherwise} \end{cases} $$⟧
+The mask ⟨$\mu$⟩ is defined as the function ⟨$\Omega \longrightarrow \\{ 0,1,2,3,4 \\}$⟩ that maps every voxel of the volume ⟨$\Omega$⟩ to:
+⟦$$ \forall p \in \Omega, \quad \mu(p) = \begin{cases} 0 & \textrm{if} \quad p \not\in \mathcal V \cup \mathcal S \\ v_t = 1 & \textrm{if} \quad p \in \mathcal S_T \\ v_v = 2 & \textrm{if} \quad p \in \mathcal V \\ v_b = 3 & \textrm{if} \quad p \in \mathcal S_B \\ v_e = 4 & \textrm{if} \quad p \in \mathcal S_E \\ \end{cases} $$⟧
+Implementation notes: The mask ⟨$\mu$⟩ is stored in `mask.npy` that is computed in the first step below, from the input nrrd files. This file is a 3D array with shape `(N, M, P)` and data type `uint8`.
+We can make a first estimation of the surface normals thanks to the ⟨$\chi_{\mathcal V}$⟩ indicator function of the brain region:
+⟦$$ \forall p \in \mathcal S, \quad \nu^0(p) = \begin{pmatrix} \chi_{\mathcal V}(p_x^+) - \chi_{\mathcal V}(p_x^-) \\ \chi_{\mathcal V}(p_y^+) - \chi_{\mathcal V}(p_y^-) \\ \chi_{\mathcal V}(p_z^+) - \chi_{\mathcal V}(p_z^-) \\ \end{pmatrix} \in \\{ -1, 0, +1 \\}^3 $$⟧
+On each axis, the component of the vector ⟨$\nu^0(p)$⟩ is +1 if the positive neighbor voxel on that axis belongs to the brain region ⟨$\mathcal V$⟩ and the negative neighbor does not, or -1 if that's the reverse, or 0 if neither or both of these neighbors belong to the brain region.
+⟦$$\forall \sigma > 0, \\, \forall q \in \mathbb R^3, \quad g_\sigma(q) = \lambda \exp \left(- \frac{\lVert q\rVert_2^2}{\sigma^2}\right) \quad \textrm{where $\lambda$ is defined such as} \quad \int_{\mathbb R^3} g(q) dq=1.$$⟧
+⟦$$ \forall p \in \mathcal S, \quad \widetilde \nu(p) = \frac{\displaystyle\int_{\mathcal S} \nu^0(q) g(p-q) dq}{\displaystyle\int_{\mathcal S} g(p-q)dq} $$⟧
+⟦$$ \forall p \in \mathcal S, \quad \nu(p) = \begin{cases} \displaystyle \frac{\widetilde \nu(p)}{\lVert \widetilde \nu(p) \rVert_2} & \textrm{if} \quad {\lVert \widetilde \nu(p) \rVert_2} > 0\\ 0 & \textrm{otherwise} \end{cases} $$⟧
+Step 2 is the most complex and computationally intensive step of the process. It requires a GPU to be tractable on the 10 ⟨$\mu\textrm{m}$⟩ atlas.
+⟦$$ \begin{align*} \Delta u &= 0 & \textrm{on} \quad & \mathcal V\\ u &= 0 & \textrm{on} \quad & \mathcal S_T\\ \nabla u \cdot \nu &= 1 & \textrm{on} \quad & \mathcal S_B\\ \nabla u \cdot \nu &= 0 & \textrm{on} \quad & \mathcal S_E\\ \end{align*} $$⟧
+We start from ⟨$u_0(p) = \chi_{\mathcal S_B}(p)$⟩, equal to 1 on the bottom surface ⟨$\mathcal S_B$⟩, and 0 elsewhere. Then, for ⟨$n \geq 0$⟩, we iteratively apply a numerical scheme to converge to a solution of the PDE. There are two steps:
+Update ⟨$u^{n+1}$⟩ on ⟨$\mathcal V$⟩.
+Update ⟨$u^{n+1}$⟩ on ⟨$\mathcal S$⟩.
+On ⟨$\mathcal V$⟩, we use the following equation:
+⟦$$\forall p \in \mathcal V, \quad u^{n+1}(p) = \frac{u^n(p_x^+) + u^n(p_x^-) + u^n(p_y^+) + u^n(p_y^-) + u^n(p_z^+) + u^n(p_z^-)}{6}$$⟧
+On ⟨$\mathcal S$⟩, we need to take into account the boundary conditions.
+On ⟨$\mathcal S_T$⟩, we just use the following equation for the Dirichlet boundary condition:
+⟦$$\forall p \in \mathcal S_T, \quad u^{n+1}(p) = 0$$⟧
+On ⟨$\mathcal S_B$⟩ and ⟨$\mathcal S_E$⟩, we need to implement the Neuman boundary conditions as explained below.
+We use central, forward, or backward finite difference schemes for ⟨$\nabla u(p)$⟩ depending on the value of each ⟨$x$⟩, ⟨$y$⟩, ⟨$z$⟩ component of the crude normal vector ⟨$\nu^0(p)$⟩.
+We note ⟨$k=1$⟩ for ⟨$\mathcal S_B$⟩, and ⟨$k=0$⟩ for ⟨$\mathcal S_E$⟩. We also define:
+⟦$$ \forall p \in \mathcal S, \quad u_x^{n+1}(p)= \begin{cases} u^{n+1}(p_x^+) & \textrm{if} \quad \nu^0_x(p)=+1\\ u^{n+1}(p_x^-) & \textrm{if} \quad \nu^0_x(p)=-1\\ 0 & \textrm{if} \quad \nu^0_x(p)=0\\ \end{cases} $$⟧
+and similarly for the other components, ⟨$u_y^{n+1}$⟩ and ⟨$u_z^{n+1}$⟩.
+⟦$$ \forall p \in \mathcal S_B \cup \mathcal S_E, \quad u^{n+1}(p) = \begin{cases} \displaystyle\frac{u_x^{n+1}(p) \\, |\nu_x(p)| + u_y^{n+1}(p) \\, |\nu_y(p)| + u_z^{n+1}(p) \\, |\nu_z(p)| + k}{|\nu_x(p)| + |\nu_y(p)| + |\nu_z(p)| + k} & \textrm{if} \quad \lVert\nu^0(p)\rVert_1 \geq 1\\ 0 & \textrm{otherwise} \end{cases} $$⟧
+We use two CUDA kernels: one for the numerical scheme in the brain region ⟨$\mathcal V$⟩, another for the one on the surfaces ⟨$\mathcal S_B$⟩ and ⟨$\mathcal S_E$⟩ (Neumann conditions). Every iteration involves a call to both kernels.
+We use two 3D arrays for the solution to Laplace's equation, `U_1` and `U_2`. The CUDA kernels use one array to read the old values (⟨$u^n$⟩), another one to write the new values (⟨$u^{n+1}$⟩). At each iteration, we swap `U_1` and `U_2`.
+To avoid using too much GPU memory (there are wide empty spaces around a given brain region ⟨$\mathcal V$⟩), we compute the axis boundaries of the mask array and we pad each side with a few voxels.
+We use central, forward, or backward differences for the numerical scheme of the derivative of ⟨$u$⟩ depending on whether the voxel is inside the volume or on the surface, and depending on the relative position of the voxel compared to the volume (which is encoded in $\nu^0(p)$).
+⟦$$ \forall p \in \mathcal V \cup \mathcal S, \quad \widetilde{\nabla u}_x(p) = \begin{cases} \displaystyle \frac{u(p_x^+) + u(p_x^-)}{2} & \textrm{if} \quad p \in \mathcal V\\ u(p_x^+) - u(p) & \textrm{if} \quad p \in \mathcal S, \\, \nu^0(p)=+1\\ u(p) - u(p_x^-) & \textrm{if} \quad p \in \mathcal S, \\, \nu^0(p)=-1\\ 0 & \textrm{if} \quad p \in \mathcal S, \\, \nu^0(p)=0\\ \end{cases} $$⟧
+and similarly for ⟨$\widetilde{\nabla u}_y(p)$⟩ and ⟨$\widetilde{\nabla u}_z(p)$⟩.
+⟦$$ \forall p \in \mathcal V \cup \mathcal S, \quad \nabla u(p) = \begin{cases} \displaystyle \frac{\widetilde{\nabla u}(p)}{\lVert \widetilde{\nabla u}(p) \rVert_2} & \textrm{if} \quad {\lVert \widetilde{\nabla u}(p) \rVert_2} > 0\\ 0 & \textrm{otherwise} \end{cases} $$⟧
+To compute streamlines, we start from voxels in the bottom surface ⟨$\mathcal S_B$⟩ and we integrate the Laplace's equation's solution's gradient.
+⟦$$ \forall p \in \mathcal S_B, \quad \phi_p : \mathbb R_+ \longrightarrow \Omega $$⟧
+⟦$$ \forall t \geq 0, \\, \forall p \in \mathcal S_B, \quad \phi'_p(t) = \nabla u \left( \phi_p(t) \right) $$⟧
+⟦$$ \forall p \in \mathcal S_B, \quad \begin{cases} \phi_p(0) &= p\\ \phi'_p(0) &= \nabla u(p)\\ \end{cases} $$⟧
+We also stop the integration for streamlines that go beyond the volume ⟨$\mathcal V$⟩.
+=== kamui-readme
+Kamui views the data as a graph ⟨$G = (V, E)$⟩, with the wrapped phase ⟨$\psi_v \in [-\pi, \pi)$⟩ at each vertex ⟨$v$⟩. Along each edge ⟨$e = (u, v)$⟩, the wrapped phase difference is
+⟦$$x_e = \mathcal{W}(\psi_v - \psi_u), \qquad \mathcal{W}(\theta) = \theta - 2\pi \left\lfloor \frac{\theta + \pi}{2\pi} \right\rfloor \in [-\pi, \pi).$$⟧
+The unwrapped phase ⟨$\phi$⟩ differs from ⟨$\psi$⟩ by whole multiples of ⟨$2\pi$⟩, so its differences are ⟨$\phi_v - \phi_u = x_e + 2\pi k_e$⟩, for an integer ambiguity ⟨$k_e$⟩ on each edge. True phase differences are irrotational: they sum to zero around every elementary cycle of the graph, such as a grid cell or a mesh triangle. Kamui picks the cheapest ambiguities that satisfy this by solving the integer linear program (ILP)
+⟦$$\min_{k \in \mathbb{Z}^{M}} \; \sum_{e \in E} w_e \lvert k_e \rvert \quad \text{s.t.} \quad A k = -\frac{1}{2\pi} A x .$$⟧
+⟨$M = \lvert E \rvert$⟩ is the number of edges, and ⟨$w \in \mathbb{R}_{\ge 0}^{M}$⟩ are the edge weights.
+⟨$A \in \{-1, 0, 1\}^{N \times M}$⟩ is the incidence matrix of the ⟨$N$⟩ elementary cycles. ⟨$A_{ce} = 1$⟩ if cycle ⟨$c$⟩ traverses edge ⟨$e$⟩ from ⟨$u$⟩ to ⟨$v$⟩, ⟨$-1$⟩ if it traverses it from ⟨$v$⟩ to ⟨$u$⟩, and ⟨$0$⟩ if ⟨$e$⟩ is not on ⟨$c$⟩.
+The right-hand side is integral: ⟨$\frac{1}{2\pi} (A x)_c$⟩ is the residue of cycle ⟨$c$⟩, the number of whole turns that the wrapped differences around it add up to.
+Kamui then integrates ⟨$x + 2\pi k$⟩ along a spanning tree from the reference vertex to recover ⟨$\phi$⟩. This is the general form of the network programming approach proposed in the paper "A novel phase unwrapping method based on network programming". With `period=T`, replace ⟨$2\pi$⟩ by ⟨$T$⟩ throughout.
+On 2-D grids and planar meshes, every edge lies on at most two cycles. Kamui orients the cycles so that they traverse each shared edge in opposite directions, reversing any that do not; reversing a cycle negates both sides of its constraint, so the program does not change. ⟨$A$⟩ is then the incidence matrix of the dual graph, which has one node per cycle and one more for the outside, and the program is a min-cost flow: the residues are the supplies and ⟨$k_e$⟩ is the flow across edge ⟨$e$⟩. Kamui solves these programs with the network simplex of the LEMON graph library, which is many times faster than a general LP solver. LEMON needs integer weights; see Weights.
+Otherwise, as on 3-D grids or with fractional weights, Kamui first solves the linear programming (LP) relaxation, with ⟨$k \in \mathbb{R}^{M}$⟩, using HiGHS. For 2-D grids and planar meshes, ⟨$A$⟩ is totally unimodular, so the LP optimum is already integral. The same is true of 3-D grids without a cyclical axis. Other inputs fall back to the integer program. Large inputs are still computationally heavy; see Performance and memory.
+`unwrap_arbitrary` takes per-edge weights and uses them exactly as given. Up to version 0.2, `unwrap_dimensional` rescaled the per-pixel weights linearly to ⟨$[0.1, 1]$⟩ before merging them. `kamui.prepare_weights` still does that, so pass its result to `unwrap_arbitrary` to keep that behaviour:
+Minimizes a ⟨$p$⟩-norm energy (options `p`, `max_jump`, and optional non-negative `weights`). Uses graph cuts; slower than the single-pass ILP/LEMON solvers on grids (#26). GPL; see Installation.
+The edgelist ILP needs no cycles, because it optimizes vertex offsets ⟨$m \in \mathbb{Z}^{\lvert V \rvert}$⟩ directly, with ⟨$\phi = \psi + 2\pi m$⟩:
+⟦$$\min_{m \in \mathbb{Z}^{\lvert V \rvert}} \; \sum_{e = (u, v) \in E} w_e \left\lvert m_v - m_u + \text{round}\left( \frac{\psi_v - \psi_u}{2\pi} \right) \right\rvert .$$⟧
+The term inside the absolute value is the edge ambiguity ⟨$k_e$⟩. This is therefore the cost of the simplex ILP, optimized over offsets instead of ambiguities. The two optima agree whenever the cycles cover every loop of the graph, as grid cells and mesh triangles do.
+Its LP dual is a min-cost circulation on the graph itself, with a flow ⟨$y_e \in [-w_e, w_e]$⟩ along each edge that maximizes ⟨$\sum_e y_e \, \text{round}\left( (\psi_v - \psi_u) / 2\pi \right)$⟩. LEMON solves that circulation, and its node potentials are an optimal ⟨$m$⟩.
+PUMA instead uses graph cuts to minimize the weighted ⟨$p$⟩-norm of the unwrapped differences:
+⟦$$\min_{m \in \mathbb{Z}^{\lvert V \rvert}} \; \sum_{e = (u, v) \in E} w_e \lvert \phi_v - \phi_u \rvert^{p}, \qquad \phi = \psi + 2\pi m .$$⟧
+=== meltcalc-theory
+⟦$$ \text{print settings} \;\rightarrow\; Q_\text{target} \qquad \text{hotend} + \text{material} \;\rightarrow\; Q_\text{max} $$⟧
+and the comparison is ⟨$Q_\text{max}$⟩ against ⟨$Q_\text{target}$⟩. The majority of the model rests on one empirical constant. Everything else is either a textbook property of the polymer or a geometric bookkeeping decision about what counts as melt zone.
+This is intrinsically a very reductive approach relative to most models in the academic literature or real FEA analysis. However, this is an intentional and inevitable limitation given the limited data available and the intended general application of this tool. The primary goals are to provide a uniform comparison of hotends without marketing copy layered on top, and to provide approximate directional and magnitude comparisons between different hotends and different filaments, so that a consumer has more complete information to answer the questions "is hotend B worth $20 more to me than hotend A?" and "if I switch my purchasing decisions from PETG to ABS filament, how much faster roughly will I be able to print?"
+⟦$$E = \rho \left( c_p \, \Delta T + h_f \right)$$⟧
+with ⟨$\rho$⟩ the solid density, ⟨$c_p$⟩ the specific heat capacity averaged over the interval, and ⟨$h_f$⟩ the heat of fusion.
+Why ⟨$h_f$⟩ at all. For crystalline and semi-crystalline materials it is not a rounding error. For polyethylene it is comparable to the entire sensible-heat term, which is why HDPE is cheap to warm and expensive to melt; for polycarbonate it is zero and the whole cost is sensible heat. A model that dropped fusion would rank the two backwards.
+For amorphous polymers ⟨$h_f = 0$⟩: there is no crystal lattice to dissociate, only a glass transition that requires nothing beyond ⟨$c_p$⟩. The database records fusion enthalpies already scaled by typical crystallinity, not the fully-crystalline textbook values. Consumer spools for printing are typically low crystallinity, given the very rapid cooling that occurs in a filament extrusion line.
+⟨$E$⟩ is split in two, and the split is the single most consequential modelling decision:
+⟦$$E_\text{melt} = \rho\left(c_p (T_m - T_0) + h_f\right) \qquad E_\text{set} = E_\text{melt} + \rho\, c_p (T_\text{set} - T_m)$$⟧
+⟨$T_0$⟩ is the temperature the filament enters at, e.g. ambient, chamber, or dryer temperature.
+⟨$E_\text{melt}$⟩ is the first concern, reaching ⟨$T_m$⟩, though higher nominal block temperatures are required for low viscosity and to achieve acceptable maximum flow. Running the nozzle 40 °C hotter does not require a longer hotend.
+⟨$E_\text{set}$⟩ is the additional energy required to achieve typical printing and extrusion temperatures above ⟨$T_m$⟩. The polymer is allowed to drop below this total energy budget at maximum flow rate, as it is assumed that at high flows the polymer will still be above ⟨$T_m$⟩ but below ⟨$T_\text{set}$⟩. This may be responsible for some of the progressive weakening over a large flow regime described above, as the molten thermopolymer exits the nozzle at progressively lower temperature and layer bonding becomes incomplete due to insufficient remelting of the surface of the previous layer.
+⟦$$Q_\text{max} = \frac{q \, L}{E_\text{melt}}$$⟧
+for effective melt zone length ⟨$L$⟩ and specific power ⟨$q$⟩, the heat a millimetre of melt zone can couple into the filament, in W/mm.
+The dimensional argument is trivial; ⟨$\mathrm{W/mm} \times \mathrm{mm} \div \mathrm{J/mm^3} = \mathrm{mm^3/s}$⟩
+3.1 Why there is no closed form for ⟨$q$⟩
+The honest answer to "what is ⟨$q$⟩" is a conjugate heat-transfer problem: conduction through a filament-sized channel of a material with thermal conductivity around ⟨$0.2\ \mathrm{W/m\cdot K}$⟩, roughly that of wood, with a moving boundary at the melt front, an annular melt film whose thickness varies down the channel, and a geometry that differs for every hotend on the market. Solving it properly requires the internal geometry of each block, which is not public for most of them.
+So ⟨$q$⟩ is not derived. It is calibrated on a reference condition:
+A standard nozzle running PLA sustains about ⟨$1.2\ \mathrm{mm^3/s}$⟩ for every millimetre of melt zone.
+⟦$$q = \left(\frac{Q}{L}\right)_\text{ref} \times E_\text{melt,\,ref}$$⟧
+which currently gives ⟨$q \approx 0.43\ \mathrm{W/mm}$⟩ in a copper block.
+Block conductivity enters as a multiplicative derate on ⟨$q$⟩, not on ⟨$L$⟩:
+⟨$q$⟩
+⟨$q$⟩
+⟨$0.80\,q$⟩
+⟨$0.70\,q$⟩
+An attentive reader will note the divergence from the fold changes in nominal thermal conductivity between copper, aluminium and brass (roughly 385, 205 and 110 ⟨$\mathrm{W\,m^{-1}\,K^{-1}}$⟩ respectively). This is not unexpected, given that the low thermal conductivity of the polymer dominates, since polymer, melt zone and heater are in series.
+Conduction into the filament scales with the temperature difference driving it. The setpoint is not that difference; the excess over the melting point is. So ⟨$q$⟩ carries a multiplier, to model the experimentally observed increase in flow at higher ⟨$T_\text{set}$⟩:
+⟦$$f(T_\text{set}) = \min\!\left[ \left( \frac{\Delta T_\text{set}}{\Delta T_\text{ref}} \right)^{\!n},\; f_\text{max} \right] \qquad \Delta T_\text{set} = T_\text{set} - T_m \qquad \Delta T_\text{ref} = T_\text{ref} - T_m$$⟧
+where ⟨$T_\text{ref}$⟩ is the material's own recommended setpoint, ⟨$f_\text{max} = 2$⟩ (which is the theoretical value), and
+⟦$$n = \log_2 1.5 \approx 0.585$$⟧
+⟨$f = 0$⟩ at the melting point. No driving temperature difference, no flow.
+⟨$f = 1$⟩ at the material's normal setpoint. The calibration is anchored there, so anything else would mean the reference condition disagreed with itself.
+⟨$f$⟩ is less than proportional above it. A hotter nozzle buys less than linear gain, because the extra heat still has to cross the same badly-conducting polymer, the melt film nearest the wall thins and takes more of the temperature drop, and viscosity falls faster than the melt front advances.
+No straight line satisfies all three. A line through ⟨$(0,0)$⟩ and ⟨$(1,1)$⟩ is forced to give ⟨$2\times$⟩ at twice the superheat, which is condition 3 violated. A power law through the same two points has a free exponent, and ⟨$n$⟩ is set by choosing the damping directly: twice the superheat is worth 1.5× the flow, hence ⟨$n = \log_2 1.5$⟩.
+The cap at ⟨$f_\text{max}=2$⟩ is reached at about ⟨$3.3\times$⟩ normal superheat. Above that the model has no business extrapolating: the polymer is degrading and nozzle pressure, which this model does not represent at all, is the real limit.
+⟨$\Delta T_\text{ref}$⟩ is each material's own recommended setpoint window, what a polymer is typically printed at. That makes ⟨$f$⟩ exactly 1 at defaults, which is the property the calibration needs. But the recommended setpoint is an editorial number in a CSV, not a property of the polymer, and it appears in the denominator, so it sets the sensitivity of every material to a temperature override.
+⟨$T_m$⟩
+⟨$T_\text{ref}$⟩
+There is a second-order symptom. Narrow-window materials collapse abruptly as the setpoint approaches ⟨$T_m$⟩, because ⟨$\Delta T_\text{set} \to 0$⟩ while ⟨$\Delta T_\text{ref}$⟩ stays small:
+⟨$T_\text{set}$⟩ (LCP)
+⟨$f$⟩
+⟨$Q_\text{max}$⟩, V6
+Zero at ⟨$T_m$⟩ is defensible, since the polymer is not melting, but it arrives 20 °C below a normal setpoint.
+Fixed temperature scale. ⟨$f = \left(1 + (T_\text{set} - T_\text{ref})/K\right)^n$⟩ for a global ⟨$K$⟩ in kelvin. Still unity at defaults, but +20 °C is worth the same everywhere, and there is no zero.
+Floor the denominator. ⟨$\Delta T_\text{ref} \leftarrow \max(\Delta T_\text{ref}, 40)$⟩. A one-line change that removes the hypersensitivity of narrow-window materials and leaves everything else alone.
+⟨$L$⟩ is not a measurement with a ruler. It is the length that behaves like melt zone, and the database stores it separately from the physical heated channel because for some hotends the two genuinely differ.
+⟦$$L = \underbrace{L_\text{eff}}_{\text{database}} + \underbrace{\ell_\text{mze}}_{8.5\ \text{mm}} + \underbrace{\ell_\text{hf}}_{8.5\ \text{mm}} - \underbrace{\ell_\text{taper}}_{3.5\ \text{mm}}$$⟧
+⟨$L_\text{eff}$⟩ represents the portion of the filament path thermally coupled to the heater (e.g. parts of the block, nozzle, and heatbreak threads) that are not part of the thermal isolation structure (e.g. the heatbreak tube).
+A block with ⟨$k$⟩ filament paths carries ⟨$k$⟩ times the wall area and melts ⟨$k$⟩ times the plastic, so its stored ⟨$L_\text{eff}$⟩ is the total across bores. The single-bore physical length is stored separately for display. This is why a dual-path hotend reports a melt zone far longer than anything you could measure on it, and it is correct for flow: the figure is the whole hotend's capacity.
+Residence time then resolves correctly by construction, because both ⟨$L$⟩ and ⟨$Q$⟩ carry the factor of ⟨$k$⟩ and it cancels, see §7.
+It applies to ⟨$L$⟩ alone and not to the physical channel, which is why the table reports the two columns separately. A hotend with such geometry built in carries the equivalence in its stored ⟨$L_\text{eff}$⟩ rather than as a fitted option.
+A flat 3.5 mm is deducted from ⟨$L$⟩.
+⟦$$P = \frac{Q \, E_\text{set}}{\eta}, \qquad \eta = 32.5\,\%$$⟧
+Note ⟨$E_\text{set}$⟩, not ⟨$E_\text{melt}$⟩: unlike the melt zone, the heater does pay for the superheat.
+⟨$\eta$⟩ is the share of a cartridge's rated output that ends up in the plastic. The rest holds the block at temperature and leaks into the mount, the nozzle and the moving air. It is a fixed constant rather than a setting because it is not something a user knows about their machine, and because it varies far less between hotends than the melt zone lengths this app is actually about.
+⟨$P$⟩ is reported, not imposed. The model does not constrain ⟨$Q$⟩ by heater power; the cartridge is assumed to be sized for the hotend. This is a deliberate scoping decision, since an undersized heater is a fixable problem and a short melt zone is not, but it means the flow figures assume you have fitted the wattage the tool recommends.
+The recommendation snaps to a stocked cartridge size and then takes one size past the smallest that covers the requirement. Everything feeding ⟨$P$⟩ is steady-state: it pays for plastic and nothing else. A real cartridge also has to bring the block up from cold, hold setpoint against the part fan, and recover when a cold length of filament arrives. Skipping a size buys the reserve for all of it.
+⟦$$t = \frac{A \, L}{Q}$$⟧
+with ⟨$A$⟩ the feedstock cross-section, ⟨$\approx 2.405\ \mathrm{mm^2}$⟩ at 1.75 mm.
+This is the time the hotend has to get heat from the wall into the middle of the filament, and it falls as ⟨$1/Q$⟩. It is the reason fast printing needs a longer melt zone rather than merely a hotter one: above a certain speed no temperature gets heat to the core in the time available, and the extrudate leaves with a solid thread down its centre.
+Larger feedstock raises ⟨$A$⟩ and lowers feed velocity in proportion, so at fixed ⟨$Q$⟩ residence time scales with ⟨$A$⟩. On a multi-bore block both ⟨$L$⟩ and ⟨$Q$⟩ carry the bore count, so ⟨$t$⟩ resolves to what a single path sees, the physically meaningful quantity, since each strand is heated independently.
+⟦$$Q_\text{boundary}(\text{material}) = Q_\text{boundary,\,PLA} \times \frac{q\,f / E_\text{melt}}{(Q/L)_\text{ref}}$$⟧
+⟦$$\hat{Q}(p) = a + b \ln p$$⟧
+Against ⟨$\ln p$⟩ rather than ⟨$p$⟩ because prices span two and a half orders of magnitude; a fit on raw dollars would be set almost entirely by the handful of four-figure hotends and would say nothing about the twenty people actually cross-shop.
+⟦$$V = \frac{Q_\text{max}}{\hat{Q}(p)}$$⟧
+⟨$V = 1$⟩ is the going rate, ⟨$V = 0.8$⟩ is a fifth less flow than the money usually buys. Normalising this way is what lets a $12 hotend and a $370 one be compared at all: both are asked the same question, so their answers can share a box plot.
+=== quantum-logic-mre
+This matches the standard fact that a qubit in the maximally mixed state has the highest von Neumann entropy ⟨$S = \log 2$⟩ of any two-level system — here derived constructively from the 8-twist algebra and the Hermitian-pair closure rule.
+Let ⟨$\mathcal{T}$⟩ be the pre-closure possibility tree generated by unresolved twists. The prior ⟨$p$⟩ is the uniform distribution over the ⟨$N$⟩ admissible branches at the current causal horizon.
+A 1/2-spin ZFA closure forms a Hermitian pair ⟨$(t, t^\dagger)$⟩ and partitions ⟨$\mathcal{T}$⟩ into two equally-sized sub-trees, with ⟨$|\mathcal{T}_+| = |\mathcal{T}_-| = N/2$⟩:
+⟦$$\mathcal{T} = \mathcal{T}_+ \cup \mathcal{T}_-$$⟧
+The posterior ⟨$q$⟩ after the closure is uniform over the realized sub-tree (say ⟨$\mathcal{T}_+$⟩) and zero elsewhere. The information gain is the KL divergence from posterior to prior:
+⟦$$D_{\text{KL}}(q \mathbin{\Vert} p) = \sum_{x \in \mathcal{T}_+} q(x) \ln \frac{q(x)}{p(x)} = \ln \frac{2/N}{1/N} = \log 2$$⟧
+(Note the direction: ⟨$D_{\text{KL}}(q \mathbin{\Vert} p)$⟩, not ⟨$D_{\text{KL}}(p \mathbin{\Vert} q)$⟩ — the latter would diverge because ⟨$q$⟩ is zero on ⟨$\mathcal{T}_-$⟩ while ⟨$p$⟩ is not. Equivalently, ⟨$\log 2$⟩ is the surprise ⟨$-\log p(\text{realized branch}) = -\log(1/2)$⟩.)
+Any partition into unequal pieces of sizes ⟨$\alpha N$⟩ and ⟨$(1-\alpha) N$⟩ with ⟨$\alpha \neq 1/2$⟩ yields strictly smaller information gain on average:
+⟦$$\mathbb{E}[D_{\text{KL}}] = H(\alpha) = -\alpha \log \alpha - (1-\alpha) \log(1-\alpha) \leq \log 2$$⟧
+with equality only at ⟨$\alpha = 1/2$⟩. The 50/50 binary closure is the unique shape that saturates per-event information gain under the ZFA Hermitian-pair constraint.
+Statistical-mechanics lineage. The functional ⟨$H(\alpha) = -\sum_i p_i \log p_i$⟩ maximized here is Gibbs' entropy ⟨$S = -k_B \sum_i p_i \ln p_i$⟩ (1902) — equivalently Shannon's ⟨$H$⟩ up to the log base and the unit ⟨$k_B$⟩. Its uniform-ensemble special case is Boltzmann's ⟨$S = k_B \ln W$⟩ (the prior ⟨$p = 1/N$⟩ over ⟨$W = N$⟩ admissible branches). So the QLF claim "the ZFA closure maximizes relative entropy per fold" is the constructive, observer-relative refinement of the classical maximum-entropy principle (Jaynes 1957): Boltzmann/Gibbs maximize entropy over an ensemble of microstates; QLF maximizes the KL information gain of a single closure over the admissible-branch ensemble, and the ZFA Hermitian-pair constraint forces the maximizer to the 50/50 binary atom. See Entropy.md §1 for the ⟨$S = k_B \ln W$⟩ ↔ multiplicity bridge and Relative_Entropy.md for the observer-relative ensemble.
+⟨$\sigma_y \cdot (-\sigma_y) = -I$⟩
+⟨$-\sigma_x \cdot \sigma_x = -I$⟩
+⟨$\sigma_z \cdot (-\sigma_z) = -I$⟩
+⟨$I \cdot (-I) = -I$⟩
+Each is a 2-twist length-2 ZFA-closed admissible sequence. Each is structurally a bra-ket pair (count-balanced, the abelian face of half-spin closure) AND folds to ⟨$-I$⟩ in the Pauli scalar group (the non-abelian SU(2)-scalar-return face). It folds to ⟨$-I$⟩ because it is a half-spin closure — the count-balance and Pauli-closure readings are not independent witnesses, they are two algebraic faces of the same structure (see Experimental_Consistency.md §2.1 and HALF-SPIN-ZFA-EMBEDDING.md §3a). The longer 4-twist orthogonal loops `^<v>`, `<^>v`, `^/v\`, etc. — also half-spin-closed in both faces — are composite 1/2-spin atoms (two binary closures composed in parallel).
+⟦$$\text{ZFA}_{1/2} \equiv \text{fluxoid}(t, t^\dagger) \quad \mapsto \quad \rho \to \tfrac{1}{2} I$$⟧
+where ⟨$\rho$⟩ is the reduced density matrix after the minimal loop. The maximally mixed ⟨$\rho = I/2$⟩ has von Neumann entropy ⟨$S(\rho) = -\mathrm{Tr}(\rho \ln \rho) = \log 2$⟩.
+The embedding ⟨$H_{\text{QLF}} \longrightarrow H_{\text{ZFA}}$⟩ labels each irreducible spin-1/2 carrier by a single 1/2-spin atom.
+SU(2) is the double cover of SO(3): a 360° rotation in SO(3) corresponds to a 720° loop in SU(2). A single 1/2-spin ZFA atom realizes one half-turn of that double cover — folding to ⟨$-I$⟩ rather than ⟨$+I$⟩ in the Pauli group, exactly the ⟨$-1$⟩ phase a spin-1/2 fermion picks up under 360° rotation. (Two atoms composed in parallel fold to ⟨$+I$⟩, restoring the original frame at 720°.)
+Irreducibility: every Pauli-closed history of length ⟨$\geq 2$⟩ decomposes into 1/2-spin atoms by associativity of the matrix product (`decoherence_impossibility`).
+§2.1 says the realized history "selects one of ⟨$\binom{2k}{k}$⟩ symmetric strings." Read as a process, that selection is the heart of information synthesis: a ZFA closure takes the random signal of the possibility stream — every admissible history, generated unbiased — and closes on an OR condition. The closure fires as soon as some candidate passes the ⟨$O(n)$⟩ balance check, and the Boolean OR over the stream is exactly a `List.any`:
+⟦$$ \text{closes}(2k) \;=\; \bigvee_{s \,\in\, \text{generated}(2k)} \text{verify}(s) $$⟧
+`disjunct_count_eq_central_binomial` — the OR has exactly ⟨$\binom{2k}{k}$⟩ satisfying disjuncts (the verify-filter length, reusing `realized_count_eq_central_binomial` from `QLF_PvsNP`). The closure is massively degenerate: it is reached by ⟨$\sim 4^k/\sqrt{\pi k}$⟩ alternative histories, not a unique match.
+`closure_always_fires` — ⟨$\binom{2k}{k} \ge 1$⟩, so the disjunction is always satisfiable: a random signal always closes, synthesis never stalls.
+Why this is the MRE event, not just a count. The OR is satisfied by many disjuncts, but MRE selects the maximally relevant one — the half-spin (⟨$k=1$⟩) closure that resolves the most debt per event, exactly ⟨$\log 2$⟩ nats (`binary_kl_delta_uniform`, `lean/QLF_FreeEnergy.lean`). So the full picture is: a random signal closing on a degenerate OR, with MRE picking the disjunct that synthesizes the most information — one bit per closure. This is the same generate-then-verify asymmetry of `P_vs_NP_QLF.md`, read as information synthesis, and it is the Boole/harmonic-logic reading made literal: the universe synthesizing order from noise by disjunctive logic (see `GodCreatedTheIntegers.md`).
+The one subtlety — boundary-OR, not erasure. A naive logical OR is lossy (you cannot recover which disjunct fired — Landauer erasure, ⟨$+\log 2$⟩), which would clash with the unitarity of ZFA closure. The resolution is holographic: the OR acts at the screened blanket boundary — which interior microstate balanced is coarse-grained away from the exterior — while the bulk retains it (the quantum-error-correction / holographic picture, `Holographic.md`). So it is a boundary-OR (synthesis as seen from outside), with conservation intact in the bulk; the ⟨$\log 2$⟩ is synthesized at the boundary, not erased.
+Matches the variational principle in Lagrangian_Formulation.md: ⟨$\mathcal{L} = 0$⟩ selects histories that maximize information gain per event under the ZFA constraint.
+The 720° spinor statistics of fermions correspond to the ⟨$-I$⟩ fold of a single 1/2-spin ZFA atom: a fermion picks up a ⟨$-1$⟩ phase under 360° rotation, restored only after 720°.
+Lean 4: `lean/QLF_QuCalc.lean` and `lean/QLF_Spectral.lean` already contain ZFA symmetry and Hermitian modes. The path to a Lean-verified `max_relative_entropy` lemma is to formalize the binary-partition information-gain bound: given an admissible Hermitian closure of length ⟨$2k$⟩, the realized history selects one of ⟨$\binom{2k}{k}$⟩ symmetric strings; the KL divergence from posterior to prior is ⟨$\log \binom{2k}{k}$⟩, with equality across all Pauli-closed histories at the same length (because each is equally probable under the uniform prior). The 1/2-spin atom is the ⟨$k=1$⟩ case, where ⟨$\binom{2}{1} = 2$⟩ and ⟨$D_\text{KL} = \log 2$⟩.
+Python: `path_integral.py` and `constants_mapper.py` already enumerate ZFA-closed histories; extending them to compute KL divergence on each 1/2-spin closure is a few lines. `pauli_fold` from `twist_core.py` confirms each candidate atom folds to ⟨$\pm I$⟩.
+Lagrangian_Formulation.md — Σ₈ algebra, ⟨$\mathcal{L} = 0$⟩ variational principle
+Add a Lean theorem `max_relative_entropy_at_half_spin` capturing ⟨$D_\text{KL} = \log 2$⟩ saturation at ⟨$k = 1$⟩ under uniform prior over symmetric strings. Status: both halves Lean-verified in `lean/QLF_FreeEnergy.lean` — `binary_kl_delta_uniform` (the saturation: delta-on-uniform = ⟨$\log 2$⟩) and `binary_kl_uniform_lt_log_two` (the strict-inequality bound: every non-delta Bernoulli(q) recognition density under the uniform binary prior achieves strictly less than ⟨$\log 2$⟩). Together they say the half-spin ZFA closure event uniquely maximises per-event information at exactly ⟨$\log 2$⟩ nats. The remaining open piece is the generalisation to composite ⟨$k > 1$⟩ atoms — showing that larger atoms have strictly lower per-event information than the ⟨$k = 1$⟩ case.
+See also: Hierarchical_Control.md — uses the ⟨$\log 2$⟩-per-atom result here as the per-event quantum of free-energy minimization in deriving Friston's free energy principle from ZFA; ReverseMathematics.md §4 — uses the §2.1 binary-partition saturation as the RCA₀-statable principle that structurally motivates the WKL₀ bridge axiom in the QLF↔ζ Riemann reduction; Active_Inference_Mathematics.md — reads the §2.1 log 2 quantum as the single rule of a mathematical system with active inference built into its foundation; Information_Energy_Equivalence.md — pairs the per-event ⟨$\log 2$⟩ information quantum with the per-event ⟨$\hbar\omega$⟩ energy quantum to derive the Wheeler-Fields equivalence ⟨$\hbar\omega$⟩ = 1 bit at frequency ⟨$\omega$⟩ from QLF first principles; VacuumEnergy.md §6 — promotes the per-event ⟨$\log 2$⟩ to the alignment quantum of the vacuum-alignment TOE-completing principle, with ZFA as the alignment condition and active inference as the alignment dynamics.
+=== reduced-containers
+A list item with ⟨$x_1 + x_2$⟩ inline
+⟦$$ \sum_{k=0}^{n} \binom{n}{k} = 2^n $$⟧
+Nested ordered item with ⟨$\alpha * \beta$⟩
+⟦$$e^{i\pi} + 1 = 0$$⟧
+A quote with ⟨$a^2 + b^2 = c^2$⟩ inline.
+⟦$$ \int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi} $$⟧
+Nested quote with ⟨$\gamma$⟩ and a fence:
+⟦$$\zeta(s) = \sum_{n=1}^\infty n^{-s}$$⟧
+⟨$\pi$⟩
+⟨$3.14159$⟩
+⟨$a_i | b_i$⟩
+⟨$x_{i} * y_{i}$⟩
+⟨$\phi$⟩
+⟨$\frac{1+\sqrt5}{2}$⟩
+costs $5
+and $10
+=== reduced-escapes-and-breaks
+Escaped dollars: $x$ is not math, but ⟨$a \$ b$⟩ keeps a dollar sign inside math, and $5 is money.
+Braces in a set: ⟨$S = \{1, 2, 3\}$⟩ and ⟨$\{x \mid x > 0\}$⟩.
+Underscores and stars: ⟨$a_i * b_i = c_{ij}^*$⟩ and ⟨$x_1 + x_2 + \dots + x_n$⟩ with ⟨$f*g$⟩ and ⟨$*$⟩ stars in a sentence: emphasis and more emphasis outside, a_b_c and 234 outside.
+Two math spans on a line: ⟨$a_1$⟩ and ⟨$b_2$⟩, then emphasis between ⟨$c_3$⟩ and ⟨$d_4$⟩ spans.
+⟦$$ \begin{aligned} f(x) &= (x+1)^2 \\ &= x^2 + 2x + 1 \\ \end{aligned} $$⟧
+⟦$$ \begin{pmatrix} a & b \\ c & d \end{pmatrix} $$⟧
+Display on one line: ⟨$$E = mc^2$$⟩ inside a paragraph, and ⟨$$\sum_{i=1}^n i = \frac{n(n+1)}{2}$$⟩ again.
+⟦$$ \int_0^1 x^2\,dx = \tfrac13 $$⟧
+Code-span math: ⟨$\sqrt{2}$⟩ and ⟨$a_1 * b_2$⟩, plus `$`x`$` and an actual `$x$` code span.
+⟦$$\left\{ \begin{array}{ll} 1 & x > 0 \\ 0 & x \le 0 \end{array} \right.$$⟧
+=== reduced-footnotes
+The sample mean ⟨$\bar{X}_n$⟩ of ⟨$n$⟩ independent draws converges in distribution.1 The rate depends on the variance ⟨$\sigma^2$⟩.2
+For i.i.d. ⟨$X_i$⟩ with mean ⟨$\mu$⟩ and variance ⟨$\sigma^2 < \infty$⟩,
+⟨$$\sqrt{n},(\bar{X}_n - \mu) \xrightarrow{d} \mathcal{N}(0, \sigma^2).$$⟩ ↩ ↩2
+The Berry-Esseen bound gives ⟨$\sup_x |F_n(x) - \Phi(x)| \le \frac{C \rho}{\sigma^3 \sqrt{n}}$⟩ with ⟨$C < 0.48$⟩, where ⟨$\rho = E|X - \mu|^3$⟩. ↩
+=== reduced-money
+A coffee costs $5 and a sandwich costs $10, so lunch is $15 in total.
+The budget is $5 and $10 for two people, and the sum $5 + $10 is not math.
+Prices like ⟨$1,200.50 or 3$⟩ are also just text. Mixed: the fee is $20, but ⟨$x + y = 20$⟩ is math.
+A tricky one: it costs ⟨$5, and the discount is $⟩\alpha = 0.1$ off.
+Trailing: we paid $ 5 and then $ 6 later.
+Escaped: it costs $5 and $10, and `$5 and $10` in code stays literal.
+=== ros-ch18
+This section of the book considers causal inference, which concerns what would happen to an outcome ⟨$y$⟩ as a result of a treatment, intervention, or exposure ⟨$z$⟩, given pre-treatment information ⟨$x$⟩. This chapter introduces the notation and ideas of causal inference in the context of randomized experiments, which allow clean inference for average causal effects and serve as a starting point for understanding the tools and challenges of causal estimation. (p. 339, emphasis in the original)
+⟨$z = 0$⟩ denotes “no fish oil supplements ingested”
+⟨$z = 1$⟩ denotes “3 grams per day of fish oil supplements ingested”
+⟨$y_i^0$⟩: the blood pressure that would result if the person had no supplement
+⟨$y_i^1$⟩: the blood pressure that would result if the person had received the prescribed supplement
+The causal effect of the supplement is ⟨$\tau_i = y_i^1 - y_i^0$⟩.
+“The problem inherent in determining the effect for any given individual, however, is that we can never observe both potential outcomes ⟨$y_i^0$⟩ and ⟨$y_i^1$⟩” (p. 340).
+Because of potential history effects, you cannot simply substitute someone’s pre-treatment measure of the criterion for what their post measure would have been had they not been in the treatment condition. Say we’re talking about the $j$th participant. Maybe ⟨$y_j^\text{before} = y_j^0$⟩, or maybe ⟨$y_j^\text{before} \neq y_j^0$⟩. Even if you do some kind of ABA design, this is only valid if the treatment in B has short-term effects. Sometimes you can overcome this with a washout period, ABCA. Randomizing large numbers of people to treatment conditions helps, some.
+“In experiments in which only one treatment is applied to each individual, it will not be possible to estimate individual-level causal effects, ⟨$y_i^1 - y_i^0$⟩” (p. 342).
+If we actually had this information, we could compute ⟨$\tau_i = y_i^1 - y_i^0$⟩, the individual treatment effect for all ⟨$i$⟩ cases. Thus, here are the ⟨$\tau_i$⟩ values.
+A careful eye will notice how the men (`female == 0`) all have ⟨$\tau_i$⟩ values if -10, whereas the women all have values of -5.
+⟦$$\tau_\text{SATE} = \frac{1}{n} \sum_{i = 1}^n (y_i^1 - y_i^0).$$⟧
+We can also compute the SATE by subtracting the average of the ⟨$y_i^0$⟩ values from the average of the ⟨$y_i^1$⟩ values.
+⟦$$\tau_\text{PATE} = \frac{1}{N} \sum_{i = 1}^N (y_i^1 - y_i^0),$$⟧
+which is the same as the ⟨$\tau_\text{SATE}$⟩, but with ⟨$N$⟩ rather than ⟨$n$⟩. From the PATE perspective, we now have missing data for (a) the counterfactual values within our sample and (b) all potential outcomes for those within the population but not in our sample.
+Granted the values, above, here would be our ⟨$\tau_\text{SATE}$⟩ value.
+We could also estimate this with the regression model ⟨$y_i = a + \tau z_i + \text{error}_i$⟩. However, the estimand from such a model would be better thought of as a ⟨$\tau_\text{PATE}$⟩.
+Granted the values, above, our estimate of ⟨$\tau$⟩ comes out biased.
+In another way of speaking, out ⟨$\tau_\text{SATE}$⟩ is a biased estimator of the ⟨$\tau_\text{PATE}$⟩.
+The authors suggested an alternative way to think about sampling distributions is to suppose we had all the true values for ⟨$y_i^0$⟩, ⟨$y_i^1$⟩, and the relevant baseline covariates in our sample, and we randomly assigned participants to receive either treatment or control again and again, each time computing the estimate for ⟨$\tau$⟩ conditional on their observed treatment. Here’s a simulation function which can do just that.
+This simulation took about 20 seconds on my laptop. Anyway, here’s our sampling distribution for the ⟨$\tau_\text{SATE}$⟩.
+Happily, the mean of our sampling distribution is the true value -7.5. Thus, the estimator is unbiased. The standard deviation for the sampling distribution is how we assess the efficiency. It’s hard to assess this in the abstract, but an ⟨$\textit{SD}$⟩ of that size in this context is a little large, suggesting we have an inefficient estimator of ⟨$\tau$⟩. Given our tiny ⟨$N = 8$⟩ design, this should be of no surprise.
+When considering the population average treatment effect, we can conceptualize drawing a random sample of size ⟨$n_1$⟩ from a population to receive the treatment, drawing a random sample of size ⟨$n_0$⟩ from the same population to receive the control, and taking the difference between the average response in each as an estimate of the population average treatment effect. If this were done over and over, the estimates would form a sampling distribution for this estimate. For the estimate to be unbiased, we would need the mean of this sampling distribution to be centered on the true ⟨$\tau_\text{PATE}$⟩. A stricter criterion that would also lead to an unbiased treatment effect estimate would require the sampling distributions of the mean of ⟨$y$⟩ for the control and treated units to be centered on the population average of ⟨$y_0$⟩ and the population average of ⟨$y_1$⟩, respectively.
+As a consequence, the overall sample estimate for ⟨$\tau$⟩ is biased.
+Here’s what happens if we compute ⟨$\hat \tau_j$⟩ within each of the ⟨$j$⟩ `age` block.
+If we take the average of the ⟨$\hat \tau_j$⟩’s, we’ll get an unbiased estimate.
+⟦$$ \tau_\text{SATE} = \sum_j n_j \hat \tau_j \Big / \sum_j n_j. $$⟧
+⟦$$y_i = a + \tau_\text{RB} z_i + \gamma_1 b_{1i} + \gamma_2 b_{2i} + \gamma_3 b_{3i} + \text{error}_i,$$⟧
+where ⟨$\tau_\text{RB}$⟩ is the focal parameter, and the treatment effect given a random block design. The ⟨$a$⟩ parameter is the typical intercept, and the three ⟨$\gamma$⟩ parameters denote the deviations based on the block dummies. Here’s how to fit the model with *`lm()`.
+The parameter in the `treatment` line is our causal effect, ⟨$\tau_\text{RB}$⟩.
+How do we choose blocks when our goal is to increase statistical efficiency? The goal when creating blocks is to minimize the variation of each type of potential outcome, ⟨$y^0$⟩ and ⟨$y^1$⟩, within the block… In practice researchers only have access to observed pre-treatment variables when making decisions regarding how to define blocks… To the extent possible, the predictors used to define the blocks should be those that are believed to be predictive of the outcome based on either theory or on results from previous studies. (p. 349)
+“In a completely randomized design, the treatment assignment is a random variable that is independent of the potential outcomes” (p. 350). This implies that there will be no difference, on average, in potential outcomes across repeated randomizations, a condition called ignorability. We can express this as ⟨$z \perp y^0, y^1$⟩.
+Another important property of randomized experiments is that they create independence between treatment assignment and all variables ⟨$x$⟩ that occur before treatment assignment, so that ⟨$x \perp z$⟩. In general, the relevant cutoff time is when the treatment is assigned, not when it is implemented, because people can adjust their behavior based on the anticipation of a treatment to which they have been assigned. (p. 351, emphasis in the original)
+“When we randomize within blocks, the independence between potential outcomes and the treatment variable holds only conditional on block membership, ⟨$w$⟩” (p. 351). We can express this formally as ⟨$z \perp y^0, y^1 | w$⟩. “Intuitively, we can think of a randomized block experiment as a collection of experiments, each of which is performed within the members of a specific block” (p. 351). The implication is we want to include ⟨$w$⟩ as a covariate in the primary data analysis.
+The most straightforward approach to treatment effect estimation that accounts for the matched pairs design is to calculate pair-specific differences in outcomes, ⟨$d_j = y_j^T - y_j^C$⟩ (where ⟨$y_j^T$⟩ is the outcome of the treated unit in pair ⟨$j$⟩ and ⟨$y_j^C$⟩ is the outcome of the control unit in pair ⟨$j$⟩), and then calculate an average of those ⟨$K$⟩ differences, ⟨$\overline d = \frac{1}{K} \sum_{k=1}^K d_j$⟩. Including a predictor for each pair makes such models noisy to estimate using simple regression; data from such designs can often be more efficiently fit using multilevel models. (p. 352)
+Ideally, the randomized block experiment creates subgroups (blocks) within which the ⟨$y_i^0$⟩’s are more similar to each other and the ⟨$y_i^1$⟩’s are more similar to each other across treatment groups. This makes it possible to get sharper estimates of block-specific treatment effects, which can then be combined using a weighted average into an estimate of the average treatment effect across the entire experimental sample or population. (p. 352)
+⟦$$ \begin{align*} y_i & \sim \operatorname N(\mu_i, \sigma) \\ \mu_i & = a + \tau\ \text{treatment}_i \end{align*} $$⟧
+⟦$$ \begin{align*} y_i & \sim \operatorname N(\mu_i, \sigma) \\ \mu_i & = a + \tau\ \text{treatment}_i + b_1 \text{female}_i + b_2 \text{age}_i. \end{align*} $$⟧
+Note how the standard error values for `treatment` are right in line with the values discussed in the bottom of page 352 in the text. Importantly, this highlights the advantage of high-quality covariates when analyzing RCT data. They shrink the standard error for the focal parameter ⟨$\tau$⟩. To get a full sense of the magnitude of the shrinkage, we might look at a coefficient plot.
+The stable unit treatment value assumption (SUTVA) is “the potential outcome for unit ⟨$i$⟩ depends only on the treatment” (p. 353), which means the treatment status of a given participant does not effect the status of other participants. It also means that the kind or intensity of treatment is stable across time and participants.
+=== silverbullet-math
+This library implements the `$ ... $` and the `$$ ... $$` syntax using the `syntax` API, which can be used to render inline and block level math respectively. Both use $\href{https://katex.org/}{\KaTeX}$ under the hood.
+Let ⟨$S$⟩ be a set and ⟨$\circ : S \times S \to S,\; (a, b) \mapsto a \cdot b$⟩ be a binary operation, then the pair ⟨$(S, \circ)$⟩ is called a group iff
+⟨$\forall a, b \in S, \; a \circ b \in S$⟩ (completeness),
+⟨$\forall a,b,c \in S, \; (ab)c = a(bc)$⟩ (associativity),
+⟨$\exists e \in S$⟩ such that ⟨$\forall a \in S,\; ae=a=ea$⟩ (identity) and
+⟨$\forall a \in S,\; \exists b \in S$⟩ such that ⟨$ab=e=ba$⟩ (inverse).
+The Fourier transform of a complex-valued (Lebesgue) integrable function ⟨$f(x)$⟩ on the real line, is the complex valued function ⟨$\hat {f}(\xi )$⟩, defined by the integral
+⟦$$ \widehat{f}(\xi) = \int_{-\infty}^{\infty} f(x)\ e^{-i 2\pi \xi x}\,dx, \quad \forall \xi \in \mathbb{R}. $$⟧
+The current ⟨$\KaTeX$⟩ version is ${latex.katex.version}.
+=== transformer-blocks-readme
+For set of queries ⟨$\mathbf{Q} \in\mathbb{R}^{m,d}$⟩, keys ⟨$\mathbf{K}\in\mathbb{R}^{n,d}$⟩, and values ⟨$\mathbf{V}\in \mathbb{R}^{n,d}$⟩, we define:
+⟦$$\text{Attention}(\mathbf{Q},\mathbf{K},\mathbf{V}) = \text{Softmax}\left(\frac{1}{\sqrt{d}}\mathbf{Q}\mathbf{K}^\top\right)\mathbf{V}.$$⟧
+The interpretation is that each query ⟨$\mathbf{q}_j$⟩ corresponds to a different feature which aggregates a convex combination of the values ⟨$\mathbf{v}_i$⟩, where the weights of the convex combination are given by a scaled softmax over the dot products between query ⟨$\mathbf{q}_j$⟩ and the keys ⟨$\mathbf{k}_i$⟩. To see this, we can expand
+⟦$$\text{Softmax}\left(\frac{1}{\sqrt d} \begin{bmatrix} \mathbf{q}_1^\top \mathbf{k}_1 & \dots & \mathbf{q}_1^\top \mathbf{k}_n\\ \vdots & & \vdots \\ \mathbf{q}_n^\top \mathbf{k}_1 & \dots & \mathbf{q}_n^\top \mathbf{k}_n \end{bmatrix}\right) \begin{bmatrix}-\ \mathbf{v}_1\ -\\\vdots\\-\ \mathbf{v}_n\ -\end{bmatrix} = \begin{bmatrix}-\ \sum_i w_i^{(1)}\mathbf{v}_i -\\ \vdots \\ -\ \sum_i w_i^{(n)}\mathbf{v}_i\ -\end{bmatrix},$$⟧
+where the softmax is applied row-by-row, corresponding to a softmax per query. Here, the weights corresponding to the query ⟨$\mathbf{q}_j$⟩ comprise an ⟨$n$⟩-dimensional vector
+⟦$$\mathbf{w}^{(j)} = \mathrm{Softmax}\left(\frac{1}{\sqrt d} \begin{bmatrix} \mathbf{q}_j^\top \mathbf{k}_1 & \dots &\mathbf{q}_j^\top \mathbf{k}_n\end{bmatrix}\right),\quad\quad \mathbf{w}^{(j)} \geq \mathbf{0},\quad\quad\mathbf{1}^\top \mathbf{w^{(j)}}=1$$⟧
+We normalize by ⟨$\frac{1}{\sqrt d_k}$⟩ (the dimensionality of the queries and keys) to prevent the dot products ⟨$q_i^\top k_j$⟩ from blowing up in value and thereby vanishing gradients in the softmax.
+(Recall that if ⟨$\mathbf{q} \sim N(\mathbf{0}, \mathbf{I})$⟩ and ⟨$\mathbf{k}\sim N(\mathbf{0},\mathbf{I})$⟩ then ⟨$\mathbf{q}^\top \mathbf{k}\sim N(0, d)$⟩.)
+Runtime is ⟨$O(mnd)$⟩ i.e. "quadratic" in the self-attention case where ⟨$m=n$⟩.
+Multi-head attention projects ⟨$\mathbf{Q},\mathbf{K},\mathbf{V}$⟩ using ⟨$h$⟩ heads through linear embeddings. Then it applies attention to each of the embeddings, concatenates the resulting features at the end, then sends the result through another linear transform to create outputs ⟨$\mathbf{O}$⟩.
+⟦$$\begin{align*} \mathrm{MultiHeadAttention}(\mathbf{Q},\mathbf{K},\mathbf{V}) & = \begin{bmatrix}\mid & & \mid\\ \mathbf{O}_1&\dots & \mathbf{O}_h\\ \mid & & \mid \end{bmatrix}\mathbf{W}^{\mathbf{O}}\\ \mathrm{where}\ \mathbf{O}_i & = \text{Attention}(\mathbf{Q}\mathbf{W}_i^\mathbf{Q}, \mathbf{K}\mathbf{W}_i^\mathbf{K},\mathbf{V}\mathbf{W}_i^\mathbf{V})\\ \mathrm{and}\ & (\mathbf{W}_i^\mathbf{Q},\mathbf{W}_i^\mathbf{K},\mathbf{W}_i^\mathbf{V})_{i=1}^h, \mathbf{W}^\mathbf{O}\ \text{are learnable parameters} \end{align*}$$⟧
+Note that this operation is permutation-equivariant with respect to the inputs ⟨$\mathbf{Q}$⟩, and ⟨$\mathbf{K}$⟩, ⟨$\mathbf{V}$⟩.
+Consider the output of attention corresponding to the query ⟨$\mathbf{q}_j$⟩. Earlier we saw that it is equal to a convex combination of the values ⟨$\mathbf{v}_i$⟩, with weights given using keys ⟨$\mathbf{k}_i$⟩. We can generalize the computation of these weights by expressing it as a kernel function ⟨$\mathrm{sim}(\cdot, \cdot)$⟩ between queries and keys. Of course, we'll have to normalize so that the weights still sum to one. Scaled dot-product attention is equivalent to the following.
+⟦$$\sum_i w_i^{(j)}\mathbf{v}_i = \frac{\sum_i \mathrm{sim}(\mathbf{q}_j,\mathbf{k}_i) \mathbf{v}_i}{\sum_i\mathrm{sim}(\mathbf{q}_j,\mathbf{k}_i)}, \quad\quad \mathrm{sim}(\mathbf{q}_j,\mathbf{k}_i) = \exp\left(\frac{1}{\sqrt d}\mathbf{q}_j^\top \mathbf{k}_i\right).$$⟧
+Recall that we can express any kernel function as an inner product in a feature space, say ⟨$p$⟩-dimensional. Furthermore recall the associative property of matrix multiplication. We can write the following.
+⟦$$\begin{align*} \sum_i w_i^{(j)}\mathbf{v}_i & = \frac{\sum_i \phi(\mathbf{q}_j)^\top \phi(\mathbf{k}_i) \mathbf{v}_i}{\sum_i\phi(\mathbf{q}_j)^\top \phi(\mathbf{k}_i)}\\ & = \frac{\phi(\mathbf{q}_j)^\top \sum_i\phi(\mathbf{k}_i) \mathbf{v}_i^\top}{\phi(\mathbf{q}_j)^\top \sum_i \phi(\mathbf{k}_i)}\\ \end{align*}$$⟧
+⟦$$\mathrm{LinearAttention}(\mathbf{Q},\mathbf{K},\mathbf{V}) = \frac{\phi(\mathbf{Q})(\phi(\mathbf{K})^\top \mathbf{V})}{\phi(\mathbf{Q})(\phi(\mathbf{K})^\top\mathbf{1})}$$⟧
+Observe that both ⟨$\phi(\mathbf{K})^\top \mathbf{V}$⟩ and ⟨$\phi(\mathbf{K})^\top \mathbf{1}$⟩ only need to be computed once. The runtime is ⟨$O((m+n)pd)$⟩. This is extremely favorable because typically ⟨$m \approx n \gg p \approx d$⟩, and this brings runtime down to linear.
+The authors propose the following feature representation in which ⟨$p=d$⟩.
+⟦$$\phi(\mathbf{x}) = \mathrm{ELU}(\mathbf{x})+1$$⟧
+⟦$$\phi(\mathbf{x}) = \exp(\mathbf{x}),$$⟧
+⟦$$\mathrm{sim}(\mathbf{q}_j,\mathbf{k}_j) = \exp(\mathbf{q}_j)^\top \exp(\mathbf{k}_i) \approx \exp\left(\frac{1}{\sqrt d}\mathbf{q}_j^\top \mathbf{k}_i\right).$$⟧
+We can interpret linear attention as an RNN in the case of a causal attention mask (typically used in a Transformer decoder). Then each query ⟨$\mathbf{q}_j$⟩ can only attend to keys ⟨$\mathbf{k}_i$⟩ where ⟨$i \leq j$⟩. That is, ⟨$\mathrm{sim}(\mathbf{q}_j, \mathbf{k}_i) = 0$⟩ for ⟨$i >j$⟩. We can interpret ⟨$\sum_i \phi(\mathbf{k}_i)\mathbf{v}_i$⟩ and ⟨$\phi(\mathbf{k}_i)$⟩ as a "hidden state" that is updated in a recurrence relation for each subsequent query ⟨$\mathbf{q}_j$⟩.
+Specifically, they add a positional bias to the softmax input weighted by a learnable per-head parameter ⟨$m$⟩.
+⟦$$\begin{align*} \text{Softmax}\left(\frac{1}{\sqrt d} \begin{bmatrix} \mathbf{q}_1^\top \mathbf{k}_1 & \mathbf{q}_1^\top \mathbf{k}_2 & \dots & \mathbf{q}_1^\top \mathbf{k}_n\\ \mathbf{q}_2^\top \mathbf{k}_1 & \mathbf{q}_2^\top \mathbf{k}_2 & \dots & \mathbf{q}_2^\top \mathbf{k}_n \\ \vdots &\vdots & & \vdots \\ \mathbf{q}_n^\top \mathbf{k}_1 & \mathbf{q}_n^\top \mathbf{k}_2 &\dots & \mathbf{q}_n^\top \mathbf{k}_n \end{bmatrix} + m \begin{bmatrix} 0 & -1 & \dots & -n\\ -1 & 0 & \dots & -n+1 \\ \vdots & \vdots & & \vdots \\ -n & -n+1 &\dots & 0 \end{bmatrix}\right) \end{align*}$$⟧
+Typically the per-head parameters ⟨$m$⟩ are learned in log-space.
+⟦$$p_\theta(\mathbf{x}^{(i)}|\mathbf{x}^{(i-1)},\dots,\mathbf{x}^{(i-L)}) \sim \mathrm{Categorical}(\boldsymbol\pi),$$⟧
+=== vae-readme
+The VAE models a latent variable ⟨$\mathbf{z}$⟩ and an observed variable ⟨$\mathbf{x}$⟩.
+⟦$$\begin{equation*} \mathbf{z}\rightarrow \mathbf{x} \end{equation*}$$⟧
+We assume a forward model parameterized by ⟨$\theta$⟩, and a backward "approximate posterior" model by ⟨$\phi$⟩.
+⟦$$\begin{align*} p_\theta(\mathbf{x}, \mathbf{z}) & = p_\theta(\mathbf{z})p_\theta(\mathbf{x}|\mathbf{z}) & q_\phi(\mathbf{z}|\mathbf{x}) & \approx p_\theta(\mathbf{z}|\mathbf{x}) \end{align*}$$⟧
+Consider maximizing the likelihood of observed variables ⟨$\mathbf{x}$⟩ with latent variables ⟨$\mathbf{z}$⟩, with a model ⟨$\theta$⟩.
+Clustering: ⟨$\mathbf{x}$⟩ is observations, ⟨$\mathbf{z}$⟩ are membership identities.
+Bayesian inference: ⟨$\mathbf{x}$⟩ is observations, ⟨$\mathbf{z}$⟩ are model parameters.
+It's easy to hypothesize a model ⟨$p_\theta(\mathbf{x}|\mathbf{z})$⟩. But typically a closed-form model for the posterior of the latent variables is intractable due to the dimensionality of ⟨$\mathbf{z}$⟩. That is, it's impossible to compute the following.
+⟦$$p_\theta(\mathbf{z}|\mathbf{x})=\frac{p(\mathbf{x},\mathbf{z})}{\int_\mathbf{z}p(\mathbf{x},\mathbf{z})d\mathbf{z}}$$⟧
+⟦$$\begin{align*} \log p_\theta(\mathbf{x}) & = \log \int_\mathbf{z} p_\theta(\mathbf{x},\mathbf{z})d\mathbf{z}\\ & = \log \int_\mathbf{z}p_\theta(\mathbf{z})p_\theta(\mathbf{x}|\mathbf{z})d\mathbf{z}\\ & \geq \int_\mathbf{z} p_\theta(\mathbf{z})\log p_\theta(\mathbf{x}|\mathbf{z})d\mathbf{z}\\ & =\mathbb{E}_{\mathbf{z}\sim p_\theta(\mathbf{z})}[\log p_\theta(\mathbf{x}|\mathbf{z})] \end{align*}$$⟧
+Following similar logic, there is a bound that arises if we plug in any valid distribution ⟨$q_\phi(\mathbf{z}|\mathbf{x})$⟩ with parameters ⟨$\phi$⟩. (Personally I find it easier to understand the equations below with ⟨$q_\phi(\mathbf{z}|\mathbf{x})$⟩ substituted with ⟨$q_\phi(\mathbf{z})$⟩ i.e. an unconditional distribution. It really doesn't matter whether it's conditioned on ⟨$\mathbf{x}$⟩ or not.)
+⟦$$\begin{align*} \log p_\theta(\mathbf{x}) & = \log \int_\mathbf{z} q_\phi(\mathbf{z}|\mathbf{x})\frac{p_\theta(\mathbf{x},\mathbf{z})}{q_\phi(\mathbf{z}|\mathbf{x})}d\mathbf{z}\\ & \geq \int_\mathbf{z} q_\phi(\mathbf{z}|\mathbf{x}) \log \frac{p_\theta(\mathbf{x},\mathbf{z})}{q_\phi(\mathbf{z}|\mathbf{x})}d\mathbf{z}\\ & = \mathbb{E}_{\mathbf{z}\sim q_\phi(\mathbf{z}|\mathbf{x})}[\log p_\theta(\mathbf{x},\mathbf{z})]+ H(q_\phi(\mathbf{z}|\mathbf{x})) \\ & = \mathbb{E}_{\mathbf{z}\sim q_\phi(\mathbf{z}|\mathbf{x})}[\log p_\theta(\mathbf{x}|\mathbf{z})]+\mathbb{E}_{\mathbf{z}\sim q_\phi(\mathbf{z}|\mathbf{x})}[\log p_\theta(z)]+H(q_\phi(\mathbf{z}|\mathbf{x}))\\ &= \mathbb{E}_{\mathbf{z}\sim q_\phi(\mathbf{z}|\mathbf{x})}[\log p_\theta(\mathbf{x}|\mathbf{z})] -D_\mathrm{KL}(\ q_\phi(\mathbf{z}|\mathbf{x})\ \|\ p_\theta(\mathbf{z})\ )\\ & \triangleq \mathcal{L}_{\theta,\phi}(\mathbf{x}) \end{align*}$$⟧
+Property 2. The gap between the marginal likelihood and the ELBO is exactly the KL divergence between the true intractable posterior ⟨$p_\theta(\mathbf{z}|\mathbf{x})$⟩ and the approximated posterior ⟨$q_\phi(\mathbf{z}|\mathbf{x})$⟩.
+⟦$$\begin{align*} \log p_\theta(\mathbf{x}) - \mathcal{L}_{\theta,\phi}(\mathbf{x}) & = \log \int_\mathbf{z} p_\theta(\mathbf{x},\mathbf{z}) d\mathbf{z} - \int_\mathbf{z} q_\phi(\mathbf{z}|\mathbf{x}) \log \frac{p_\theta(\mathbf{x})p_\theta(\mathbf{z}|\mathbf{x})}{q_\phi(\mathbf{z}|\mathbf{x})}d\mathbf{z}\\ & = \log \int_\mathbf{z} p_\theta(\mathbf{z}|\mathbf{x}) d\mathbf{z} + \log p_\theta(\mathbf{x}) - \int_\mathbf{z} q_\phi(\mathbf{z}|\mathbf{x}) \log \frac{p_\theta(\mathbf{z}|\mathbf{x})}{q_\phi(\mathbf{z}|\mathbf{x})}d\mathbf{z} - \log p_\theta(\mathbf{x})\\ & = \log \int_\mathbf{z} p_\theta(\mathbf{z}|\mathbf{x}) d\mathbf{z} - \int_\mathbf{z} q_\phi(\mathbf{z}|\mathbf{x}) \log \frac{p_\theta(\mathbf{z}|\mathbf{x})}{q_\phi(\mathbf{z}|\mathbf{x})}d\mathbf{z} \\ & = D_\mathrm{KL}(\ q_\phi(\mathbf{z}|\mathbf{x})\ \|\ p_\theta(\mathbf{z}|\mathbf{x})\ ) \geq 0 \end{align*}$$⟧
+The distribution ⟨$p_\theta(\mathbf{x}|\mathbf{z}) \sim N(\boldsymbol\mu,\boldsymbol\Sigma)$⟩ where ⟨$\boldsymbol\mu,\boldsymbol\Sigma$⟩ are output by an "encoder" neural network dependent on ⟨$\mathbf{z}$⟩.
+The distribution ⟨$q_\phi(\mathbf{z}|\mathbf{x}) \sim N(\boldsymbol\mu,\boldsymbol\Sigma)$⟩ where ⟨$\boldsymbol\mu,\boldsymbol\Sigma$⟩ are output by a "decoder" neural network dependent on ⟨$\mathbf{x}$⟩.
+The distribution ⟨$p_\theta(\mathbf{z}) \sim N(\mathbf{0},\mathbf{I})$⟩ and is typically fixed and not learned.
+There are a variety of noise assumptions on ⟨$\boldsymbol\Sigma$⟩ we can choose, in this codebase we fully factorized covariance matrices throughout i.e. every predicted ⟨$\boldsymbol\Sigma = \mathrm{diag}(\sigma^2_d)$⟩. For details see [this repository]. Note that if we fix ⟨$\boldsymbol\Sigma = \mathbf{I}$⟩ then the reconstruction term is exactly the mean squared error of the reconstruction compared to the groundtruth.
+⟦$$\mathcal{L}_{\theta,\phi}(\mathbf{x}) = \underbrace{\mathbb{E}_{\mathbf{z}\sim q_\phi(\mathbf{z}|\mathbf{x})}[\log p_\theta(\mathbf{x}|\mathbf{z})]}_\text{reconstruction term} - \underbrace{D_\mathrm{KL}(q_\phi(\mathbf{z}|\mathbf{x})\ \|\ p_\theta(\mathbf{z}))}_\text{KL divergence term}$$⟧
+⟦$$\begin{align*} \nabla_\theta \mathbb{E}_{\mathbf{u}\sim p_\theta(\mathbf{u})}[f(\mathbf{u})] \end{align*}$$⟧
+Trick 1. The log-derivative trick (aka "REINFORCE"). Recall that for any function ⟨$g$⟩,
+⟦$$\nabla_\mathbf{u} \log g(\mathbf{u}) = \frac{\nabla_\mathbf{u} g(\mathbf{u})}{g(\mathbf{u})}$$⟧
+⟦$$\begin{align*} \nabla_\theta \mathbb{E}_{\mathbf{u} \sim p_\theta(\mathbf{u})}[f(\mathbf{u})] & = \nabla_\theta \int_\mathbf{u}p_\theta(\mathbf{u}) f_(\mathbf{u})d\mathbf{u}\\ & = \int_\mathbf{u}p_\theta(\mathbf{u})\frac{\nabla_\theta p_\theta(\mathbf{u})}{p_\theta(\mathbf{u})}f(\mathbf{u})d\mathbf{u}\\ & = \int_\mathbf{u}p_\theta(\mathbf{u})\nabla_\theta \log p_\theta(\mathbf{u}) f(\mathbf{u}) d\mathbf{u}\\ & = \mathbb{E}_{\mathbf{u}\sim p_\theta(\mathbf{u})}[\nabla_\theta \log p_\theta(\mathbf{u}) f(\mathbf{u})]\\ & \approx \frac{1}{K}\sum_{k=1}^K \nabla_\theta \log p_\theta(\mathbf{u}^{(k)}) f(\mathbf{u}^{(k)}) \end{align*}$$⟧
+⟦$$\begin{align*} \mathbf{u} & \sim p_\theta(\mathbf{u}) & & \iff& \mathbf{u} = g_\theta(\boldsymbol\epsilon), \boldsymbol\epsilon \sim p(\boldsymbol\epsilon). \end{align*}$$⟧
+⟦$$\begin{align*} \mathbf{u} & \sim N(\boldsymbol\mu,\boldsymbol\Sigma) & & \iff& \mathbf{u} = \mathbf{L}\boldsymbol\epsilon + \boldsymbol\mu, \boldsymbol\epsilon \sim N(\mathbf{0},\mathbf{I}) \text{ where } \mathbf{L}\mathbf{L}^\top = \boldsymbol\Sigma. \end{align*}$$⟧
+⟦$$\begin{align*} \nabla_\theta \mathbb{E}_{\mathbf{u}\sim p_\theta(\mathbf{u})}[f(\mathbf{u})] & = \nabla_\theta \mathbb{E}_{\boldsymbol\epsilon \sim p(\boldsymbol\epsilon)}\left[f\left(g_\theta(\boldsymbol\epsilon)\right)\right]\\ &= \mathbb{E}_{\boldsymbol\epsilon \sim p(\boldsymbol\epsilon)}[\nabla_\theta f\left(g_\theta(\boldsymbol\epsilon)\right)]\\ & \approx \frac{1}{K}\sum_{k=1}^K \nabla_\theta f(g_\theta(\boldsymbol\epsilon^{(k)})) \end{align*}$$⟧
+Putting it together in the context of VAEs, we use this trick to write ⟨$q_\phi(\mathbf{z}|\mathbf{x})$⟩ with a re-parameterization.
+⟦$$\begin{align*} \mathbf{z} & = \mu_\phi(\mathbf{x}) + L_\phi(\mathbf{x})\boldsymbol\epsilon \end{align*}$$⟧
+⟦$$\begin{align*} \nabla_{\theta,\phi}\mathcal{L}_{\theta,\phi}(\mathbf{x})& =\nabla_{\theta,\phi} \left(\mathbb{E}_{\mathbf{z}\sim q_\phi(\mathbf{z}|\mathbf{x})}[\log p_\theta(\mathbf{x}|\mathbf{z})] - D_\mathrm{KL}(\ q_\phi(\mathbf{z}|\mathbf{x})\ \|\ p_\theta(\mathbf{z})\ )\right)\\ & = \mathbb{E}_{\boldsymbol\epsilon\sim p(\boldsymbol\epsilon)}\left[\nabla_{\theta,\phi}\underbrace{\log p_\theta\left(\mathbf{x}|\mu_\phi(\mathbf{x}) + L_\phi(\mathbf{x})\boldsymbol\epsilon\right)}_\text{reconstruction term}\right] - \nabla_{\theta,\phi}\underbrace{D_\mathrm{KL}\left(\ q_\phi(\mathbf{z}|\mathbf{x})\ \|\ p_\theta(\mathbf{z}) \ \right)}_\text{KL divergence term} \end{align*}$$⟧

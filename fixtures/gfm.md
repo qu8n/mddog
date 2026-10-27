@@ -18,7 +18,7 @@ Escapes stay literal: \*not emphasis\*, \`not code\`, and entities render: &copy
 - Reference link: [CommonMark spec][spec]
 - Angle autolink: <https://github.github.com/gfm/>
 - Extended autolinks: https://example.com/path?query=1, www.example.org, and octocat@example.com
-- Relative link: [the MDX fixture](component.mdx)
+- Relative link: [the diagram fixture](diagram.svg)
 - Heading link: [jump to Tables](#tables)
 
 [spec]: https://spec.commonmark.org/0.31.2/ "CommonMark Spec"
