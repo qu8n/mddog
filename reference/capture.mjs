@@ -4,7 +4,6 @@ import path from 'node:path';
 
 const PAGES = {
   'gfm.md': { url: 'https://github.com/qu8n/gfm-test/blob/main/README.md', body: 'article.markdown-body', origin: 'https://github.com' },
-  'component.twin.md': { url: 'https://gist.github.com/qu8n/d63c249218e272f2b8d87b414a34d2e8', body: '#file-component-twin-md .markdown-body', origin: 'https://gist.github.com' },
 };
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []));
 const engineName = args.engine || 'webkit';

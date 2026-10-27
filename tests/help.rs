@@ -539,6 +539,23 @@ fn bare_mdd_lists_files_and_opens_one() {
 }
 
 #[test]
+fn the_list_shows_the_configured_extensions() {
+    let dir = scratch("listext");
+    std::fs::create_dir_all(dir.join("cfg/mddog")).unwrap();
+    std::fs::write(dir.join("cfg/mddog/config.toml"), "[file_list]\nextensions = [\"TXT\"]\n").unwrap();
+    std::fs::write(dir.join("alpha.md"), "# Alpha title\n").unwrap();
+    std::fs::write(dir.join("notes.txt"), "# Notes title\n").unwrap();
+    let cfg = dir.join("cfg");
+    let Viewer { mut child, tty: _tty, out } = start(&[dir.to_str().unwrap()], None, 80, &[("XDG_CONFIG_HOME", cfg.to_str().unwrap())], false);
+    wait_for(&out, 0, b"Notes title");
+    std::thread::sleep(Duration::from_millis(300));
+    let shown = String::from_utf8_lossy(&out.lock().unwrap()).into_owned();
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!shown.contains("Alpha title"), "the list showed a .md file");
+}
+
+#[test]
 fn a_pixel_click_in_the_list_follows_a_font_size_change() {
     let dir = scratch("listfont");
     let now = std::time::SystemTime::now();

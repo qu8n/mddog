@@ -285,7 +285,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         std::thread::Builder::new().stack_size(crate::render::STACK).spawn(move || {
             let bytes = std::fs::read(&f2);
             let _ = worker_tx.send(bytes.map(|b| {
-                let (src, doc) = page::doc(&f2, &b, &page::base_dir(&f2, stdin), |s, d| remote.and_then(|mut r| engine::spare::render(&mut r, s, d)));
+                let (src, doc) = page::doc(&b, &page::base_dir(&f2, stdin), |s, d| remote.and_then(|mut r| engine::spare::render(&mut r, s, d)));
                 (b, src, doc)
             }));
         })
@@ -467,7 +467,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         p.notice_until = Some(Instant::now() + Duration::from_secs(15));
     } else if std::str::from_utf8(&p.stamp).is_err() {
         p.notify("Some bytes are not UTF-8 and show as �");
-    } else if !p.stdin && !picker::is_markdown(&p.file) {
+    } else if !p.stdin && !crate::config::FileListConfig::default().shows(&p.file) {
         p.notify("Not a .md file, shown as Markdown");
     }
     p.start_threads(leftover);
@@ -1177,7 +1177,7 @@ impl Preview {
             return;
         }
         let base = self.base();
-        let (src, doc) = page::doc(&self.file, &bytes, &base, |s, d| self.engine.render(s, d));
+        let (src, doc) = page::doc(&bytes, &base, |s, d| self.engine.render(s, d));
         if self.render_doc(bytes, src, doc, true) {
             self.notify("Reloaded");
         }
@@ -1209,7 +1209,7 @@ impl Preview {
             Some(doc) if bytes == self.stamp => (self.src.clone(), doc),
             _ => {
                 let base = self.base();
-                page::doc(&self.file, &bytes, &base, |s, d| self.engine.render(s, d))
+                page::doc(&bytes, &base, |s, d| self.engine.render(s, d))
             }
         };
         self.render_doc(bytes, src, doc, true);
@@ -1793,7 +1793,7 @@ impl Preview {
         self.listing = false;
         self.opened = true;
         let base = self.base();
-        let (src, doc) = page::doc(&self.file, &bytes, &base, |s, d| self.engine.render(s, d));
+        let (src, doc) = page::doc(&bytes, &base, |s, d| self.engine.render(s, d));
         self.render_doc(bytes, src, doc, false);
         self.watch();
         trace::mark("file opened");

@@ -84,7 +84,7 @@ const src = [rules(mod('@primer/css/dist/core.css')), rules(mod('@primer/css/dis
 const marker = '<article class="markdown-body entry-content container-lg" itemprop="text">';
 fs.mkdirSync('scratch', { recursive: true });
 const pages = [];
-for (const md of ['gfm.md', 'component.twin.md']) {
+for (const md of ['gfm.md']) {
   let html = (await page(`../fixtures/${md}`)).replace('<head>', () => `<head><style>${src}</style>`);
   if (md === 'gfm.md') html = html.replace(marker, () => marker + sink);
   fs.writeFileSync(`scratch/${md}.html`, html);

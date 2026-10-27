@@ -30,7 +30,7 @@ fn path() -> Option<PathBuf> {
 }
 
 fn off() -> bool {
-    std::env::var_os("MDDOG_NO_SPARE").is_some()
+    std::env::var_os("MDDOG_NO_SPARE").is_some() || !crate::config::get().fast_start
 }
 
 fn write_frame(s: &mut UnixStream, b: &[u8]) -> io::Result<()> {
@@ -68,11 +68,16 @@ pub fn start_at_login() -> Result<PathBuf, String> {
     let plist = agent_plist()?;
     let esc = |p: &Path| p.to_string_lossy().replace('&', "&amp;").replace('<', "&lt;");
     let body = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{AGENT}</string><key>ProgramArguments</key><array><string>{}</string><string>--spare</string></array><key>EnvironmentVariables</key><dict><key>TMPDIR</key><string>{}</string>{}</dict><key>RunAtLoad</key><true/></dict></plist>\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{AGENT}</string><key>ProgramArguments</key><array><string>{}</string><string>--spare</string></array><key>EnvironmentVariables</key><dict><key>TMPDIR</key><string>{}</string>{}{}</dict><key>RunAtLoad</key><true/></dict></plist>\n",
         esc(&exe),
         esc(&std::env::temp_dir()),
         // The spare's socket name holds its cache root, so a moved root must reach it too.
-        std::env::var_os("MDDOG_CACHE_DIR").map_or_else(String::new, |_| format!("<key>MDDOG_CACHE_DIR</key><string>{}</string>", esc(&crate::assets::cache_dir())))
+        std::env::var_os("MDDOG_CACHE_DIR").map_or_else(String::new, |_| format!("<key>MDDOG_CACHE_DIR</key><string>{}</string>", esc(&crate::assets::cache_dir()))),
+        // launchd doesn't read the shell's environment, so the spare would miss a config under XDG_CONFIG_HOME.
+        std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|v| !v.is_empty())
+            .and_then(|v| std::path::absolute(v).ok())
+            .map_or_else(String::new, |d| format!("<key>XDG_CONFIG_HOME</key><string>{}</string>", esc(&d)))
     );
     std::fs::create_dir_all(plist.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
     std::fs::write(&plist, body).map_err(|e| format!("{}: {e}", plist.display()))?;
@@ -133,6 +138,9 @@ pub fn spawn() {
 }
 
 pub fn serve() -> i32 {
+    if off() {
+        return 0;
+    }
     let Some(path) = path() else { return 1 };
     // SAFETY: umask only sets the process file mode mask and cannot fail.
     unsafe { libc::umask(0o077) };
@@ -274,7 +282,7 @@ pub struct Client {
 }
 
 pub fn connect() -> Option<Client> {
-    if off() {
+    if std::env::var_os("MDDOG_NO_SPARE").is_some() {
         return None;
     }
     let path = path()?;
@@ -288,6 +296,10 @@ pub fn connect() -> Option<Client> {
         return None;
     }
     write_frame(&mut s, HELLO).ok()?;
+    // A spare from before fast_start was turned off serves this client, finds it gone, and exits.
+    if off() {
+        return None;
+    }
     Client::over(s)
 }
 

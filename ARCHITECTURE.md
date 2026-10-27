@@ -1,6 +1,6 @@
 # Architecture
 
-mddog shows a Markdown or MDX file in the terminal the way a browser shows it. It turns the file into an HTML page, lays the page out in an off-screen WebKit view, cuts it into image tiles, and draws the tiles with the Kitty graphics protocol. Keys and the mouse scroll, search, select, and follow links. The page reloads when the file changes.
+mddog shows a Markdown file in the terminal the way a browser shows it. It turns the file into an HTML page, lays the page out in an off-screen WebKit view, cuts it into image tiles, and draws the tiles with the Kitty graphics protocol. Keys and the mouse scroll, search, select, and follow links. The page reloads when the file changes.
 
 It is a macOS-only Rust binary, `mdd`, with no library users. It runs in four ways:
 
@@ -33,9 +33,8 @@ src/
   trace.rs           test and debug logging
   assets.rs          extracts embedded runtime files to the cache
   sweep.rs           names and writes private temp files, and removes the temp files, sockets, and runtime folders that dead runs left behind
-  render/            Markdown and MDX to HTML, the crate's only documented API
+  render/            Markdown to HTML, the crate's only documented API
     markdown.rs      comrak to the HTML GitHub's Markdown API returns, then the style's markup
-    mdx.rs           MDX to Markdown
     sanitize.rs, dom.rs  raw HTML allowlist, as a DOM pass
     highlight.rs     tree-sitter highlighting
     textmate.rs      TextMate highlighting (irosashi)
@@ -72,7 +71,7 @@ assets/
   runtime/           MathJax 3.2.0, mermaid 11.13.0, and Pele 1.6.0, embedded in the binary
   textmate/          128 grammars from starry-night, scope-to-class map
   spike.png, mddog-themes.png  README images
-fixtures/            gfm.md, component.mdx and its GitHub twin, diagram.svg
+fixtures/            gfm.md, diagram.svg
 tests/               integration tests (help over a pty, search, watch, headless, textmate golden)
 reference/           Node and Python dev tools: CSS build, grammar export, captures, probes, e2e, bench
 docs/                behavior spec, theme guide, terminal UAT notes, archive
@@ -84,8 +83,7 @@ plugins/
 
 ```mermaid
 flowchart TD
-  A["file or stdin"] --> B["mdx.rs: MDX to Markdown"]
-  B --> C["markdown.rs: comrak, sanitize, highlight"]
+  A["file or stdin"] --> C["markdown.rs: comrak, sanitize, highlight"]
   C --> D["style: GitHub markup and page"]
   D --> E["page/: add theme CSS, mddog.js, MathJax, Mermaid"]
   E --> F["engine: WKWebView, here or in the spare"]
@@ -94,11 +92,10 @@ flowchart TD
   G --> I["headless.rs: PNG files and JSON"]
 ```
 
-1. `mdx.rs` turns MDX into Markdown. Plain Markdown skips this step.
-2. `markdown.rs` writes the HTML GitHub's Markdown API returns, cleans raw HTML, and highlights code. The style then adds the repo view's markup.
-3. `page/` wraps the article in a full page with the CSS layers and scripts, writes it to a temp file, and loads it in WebKit.
-4. The engine lays the page out and takes snapshots, one tile at a time.
-5. The viewer sends the tiles to the terminal. Headless mode writes them as PNG files instead.
+1. `markdown.rs` writes the HTML GitHub's Markdown API returns, cleans raw HTML, and highlights code. The style then adds the repo view's markup.
+2. `page/` wraps the article in a full page with the CSS layers and scripts, writes it to a temp file, and loads it in WebKit.
+3. The engine lays the page out and takes snapshots, one tile at a time.
+4. The viewer sends the tiles to the terminal. Headless mode writes them as PNG files instead.
 
 The config file and `style.css` are read once at startup, before any of this.
 
@@ -159,7 +156,9 @@ A SIGINT that arrives while the editor runs is ignored. The signal handler check
 | `smooth_scroll` | `true` | Jump keys glide. `false` makes every jump instant. |
 | `glide_ms_per_page` | `200` | How long a glide over one screen takes. |
 | `copy_on_select` | `false` | Copy a selection when the mouse button is released. |
-| `mermaid.engine` | unset | `pele` or `obsidian`. Unset, the theme picks. |
+| `fast_start` | `true` | Keep a warm spare (see Warm spare). `false` makes each preview open in about 200 ms instead of 40 ms. |
+| `file_list.extensions` | `["md", "markdown"]` | Which files the file list shows, and which ones "Did you mean" suggests. The full list, without dots, in any case. `mdd FILE` opens any text file, whatever its extension. |
+| `mermaid.engine` | the theme's, else `pele` | `pele` or `obsidian`. A theme names its engine with `--mddog-mermaid`, or takes its base's. |
 
 `main` loads the file once, before the viewer takes the terminal, into a `OnceLock`. Everything else calls `config::get()`, which returns the defaults when nothing was loaded (tests, the library).
 
@@ -229,8 +228,6 @@ The terminal parts draw with the theme's `Palette`: the file list, the status ba
 ## Rendering
 
 ### HTML pipeline
-
-**MDX.** markdown-rs parses the file. Imports, exports, expressions, and comments are dropped. Each component (a JSX element whose name is not lowercase HTML) becomes a `jsx` code block of its source. Lowercase elements such as `<details>` stay as HTML and go through the sanitizer. Nothing is executed. On a parse error the file renders as plain Markdown.
 
 **Markdown.** `markdown.rs` parses with comrak (GFM on) and writes the HTML GitHub's Markdown API returns: alerts, footnotes, task lists, and math and Mermaid blocks.
 
@@ -302,7 +299,7 @@ A cold first paint takes about 200 ms, most of it AppKit and WebKit startup. A w
 
 **Finding the spare.**
 
-- The socket is in the per-user temp dir. Its name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. It also hashes the cache root, so a viewer with another `MDDOG_CACHE_DIR` never reaches a spare that reads its runtime from elsewhere. The spare inherits the variable, and `--start-at-login` writes it into the launchd job.
+- The socket is in the per-user temp dir. Its name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. It also hashes the cache root, so a viewer with another `MDDOG_CACHE_DIR` never reaches a spare that reads its runtime from elsewhere. The spare inherits the variable, and `--start-at-login` writes it into the launchd job, along with `XDG_CONFIG_HOME` so the login spare reads the same config.
 - The viewer connects only to a socket its own user owns, and each side talks only to a peer with its own uid (`getpeereid`). The spare ignores a connection that never sends hello.
 
 **Protocol.** The viewer drives the spare's WebView with six requests: `eval`, `load`, `resize`, `wait`, `snap`, and `render`. `load` carries the theme's mode as its third element. `render` is `["render", src, dir]`, so the spare confines media to the same root. A late or missing reply to the first render ends the connection, so the spare can't answer the main thread's next request with a stale reply.
@@ -314,7 +311,8 @@ A cold first paint takes about 200 ms, most of it AppKit and WebKit startup. A w
 - A spare serves one viewer, then exits. An unused spare exits after 12 hours.
 - It forks once more and the middle process exits, so launchd adopts it. Claude Code kills the plugin's child and all its descendants on each width change, and the next child would otherwise use a dying spare.
 - `--start-at-login` adds a launchd job that starts one spare at login. The job has no `KeepAlive`, so after that first spare the viewers start their own. `--no-start-at-login` stops and removes the job.
-- `MDDOG_NO_SPARE` turns the spare off.
+- `fast_start = false` turns the spare off. The viewer and headless mode don't start or use one, and say hello to a spare left from before the change and hang up, so it exits. `mdd --spare` exits at once, and `--start-at-login` refuses with a line that names the key and the config file. The config is a file and not an environment variable because launchd doesn't read the user's shell environment. The spare reads the key before warm-up.
+- `MDDOG_NO_SPARE` keeps the viewer, headless mode, and `mdd --spare` from using a spare. The tests set it.
 
 ## Drawing in the terminal
 
@@ -447,7 +445,7 @@ While a file loads, `Loader` (`loading.rs`) draws a page-shaped skeleton in term
 `picker.rs` holds the list. `Picker` keeps the items, the filter, and the selection, and `draw` paints the list over the whole screen as terminal text, as the `?` screen does. `preview::browse(root)` starts with the list and no document. It draws the list right after raw mode, before WebKit starts and before the terminal probe, and waits up to 50 ms for the first batch. Ctrl-p (`Action::Browse`) opens the same list over a file and keeps the last filter.
 
 - **Root.** `scope` picks the nearest folder with `.git` above the start, else the current folder. `mdd` starts from the current folder, and Ctrl-p from the open file's folder (the current folder for standard input). A folder argument is the root itself. Each Ctrl-p calls `Picker::follow`: when the open file is outside the current root, the root becomes `scope` of the file's folder, and the filter is cleared. A file under the root keeps it, so a list of a plain folder, or of a folder that holds several repos, stays put.
-- **Walk.** A walker thread uses `ignore::WalkBuilder` with `require_git(false)`, so it skips hidden and gitignored files with or without git. It keeps `.md`, `.markdown`, and `.mdx` files and stops at 10,000 (`CAP`), in walk order. It sends a batch every 30 ms with `term::Event::Listed`, which wakes the event loop. An `AtomicBool` stops the walk when the list closes or restarts.
+- **Walk.** A walker thread uses `ignore::WalkBuilder` with `require_git(false)`, so it skips hidden and gitignored files with or without git. It keeps files whose extension is in `file_list.extensions` (`.md` and `.markdown` by default) and stops at 10,000 (`CAP`), in walk order. It sends a batch every 30 ms with `term::Event::Listed`, which wakes the event loop. An `AtomicBool` stops the walk when the list closes or restarts.
 - **Titles.** `title` reads the first ATX heading from each file's first 4 KiB. Setext headings and headings after long front matter don't give a title.
 - **Filter.** `nucleo-matcher` scores `path + " " + title` as one string. `Picker` splits the match positions back into the path and the title for highlighting. The filter takes fzf's syntax (`!`, `^`, `'`, `$`).
 - **Switching files.** `open`, `switch`, and `back_file` change files inside one `Preview`. `open` pushes a `Visit`: the file, the stdin flag, the name, the whole `App`, a position anchor, and the source. The history holds 50 (`HISTORY`). `switch` resets the document state, restarts the watcher, and calls `render_doc`, which maps `restore_at` through a line diff as a reload does. The new `App` keeps `wrap` and `toc_visible`.
@@ -605,7 +603,6 @@ Opening a file fetches only what the document names: remote images, video poster
 ## Security
 
 - Raw HTML goes through GitHub's allowlist, and cmark-gfm's tag filter turns `<script>` and similar tags into text.
-- MDX is never executed.
 - Local images and videos load only from inside a root folder: the nearest folder above the file that has `.git`, else `$HOME` when the file is under it, else the file's own folder (`/tmp`, `/Volumes`). So `../sibling/img.png` works for notes outside git. `/x` means `<root>/x`. `markdown::render_in` drops `..` segments as text first, as WebKit's URL parser does, then compares canonical paths, so a symlink or `..` can't leave the root. It refuses an encoded `/`, which is one URL segment but two folders on disk, and it drops any `src`, `poster`, or `srcset` entry that would.
 - Remote images and media never reach a private or reserved address, even through a redirect to a name that resolves to one, or a DNS answer that changes between check and connect (rebinding). mddog fetches them itself (see Remote images):
   - ureq resolves through `remote::Checked`, which refuses a local name (`.local`, `.internal`, no dot, and so on) and returns a host's addresses only when every one is public (`private_ip`). ureq connects only to the addresses it returns, so the address checked is the address used.
@@ -662,7 +659,7 @@ Opening a file fetches only what the document names: remote images, video poster
 3. Copy the `.frozen.html` and `.geometry.json` files from `reference/renders/` into `reference/baseline/`.
 4. Delete the repo.
 
-`component.twin.md` has no repo page, so its baseline still comes from the secret gist. `capture.mjs` steps the viewport by the miss instead of bisecting, because the repo view's sidebar appears near 1012 px, so article width does not grow steadily with the viewport. These captures test the GitHub style and themes only. Another style would bring its own check.
+`capture.mjs` steps the viewport by the miss instead of bisecting, because the repo view's sidebar appears near 1012 px, so article width does not grow steadily with the viewport. These captures test the GitHub style and themes only. Another style would bring its own check.
 
 **CSS build.** `reference/build-css.mjs` builds from MIT npm packages: github-markdown-css, `@primer/css`, and `@primer/primitives`, plus `reference/github-overrides.css`. It prunes the rules to the ones that the pages mdd builds for the fixtures, and its kitchen sink, use, so run it after `cargo build --release`. It keeps the mddog block at the top of each theme file. Check the result against the baselines with `compare.mjs`.
 
@@ -676,7 +673,7 @@ Opening a file fetches only what the document names: remote images, video poster
 
 | Variable | Read by | Effect |
 |---|---|---|
-| `MDDOG_NO_SPARE` | mdd | No warm spare |
+| `MDDOG_NO_SPARE` | mdd, the spare | No warm spare, as with `fast_start = false`. For tests |
 | `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, cell geometry, page height after each measure, and remote fetches |
 | `MDDOG_DUMP_VIEW=FILE` | mdd | With `MDDOG_TRACE`, write a PNG of the viewport after each frame |
 | `MDDOG_DUMP_TILES=DIR` | mdd | Write each tile as it is sent |

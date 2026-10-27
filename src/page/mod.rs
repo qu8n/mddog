@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use crate::engine::Engine;
 use crate::render::markdown::{self, Doc};
-use crate::render::mdx;
 use crate::term;
 use crate::theme::Theme;
 use crate::{assets, config, trace};
@@ -28,9 +27,8 @@ pub struct Opts<'a> {
 /// The page's padding in CSS pixels. The loading skeleton uses it too.
 pub const PAD: f64 = 24.0;
 
-pub fn doc(file: &Path, bytes: &[u8], base: &Path, spare: impl FnOnce(&str, &Path) -> Option<Doc>) -> (String, Doc) {
-    let text = String::from_utf8_lossy(bytes).into_owned();
-    let src = if file.extension().is_some_and(|e| e.eq_ignore_ascii_case("mdx")) { mdx::to_markdown(&text) } else { text };
+pub fn doc(bytes: &[u8], base: &Path, spare: impl FnOnce(&str, &Path) -> Option<Doc>) -> (String, Doc) {
+    let src = String::from_utf8_lossy(bytes).into_owned();
     let shown = if src.trim().is_empty() { "*This file is empty.*" } else { &src };
     let doc = spare(shown, base).unwrap_or_else(|| markdown::render_in(shown, Some(base)));
     (src, doc)
@@ -95,13 +93,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn doc_reads_mdx_and_fills_an_empty_file() {
-        let (src, empty) = doc(Path::new("a.md"), b"  \n", Path::new("."), |_, _| None);
+    fn doc_fills_an_empty_file_and_takes_the_spare_render() {
+        let (src, empty) = doc(b"  \n", Path::new("."), |_, _| None);
         assert_eq!(src, "  \n");
         assert!(empty.html.contains("This file is empty"));
-        let (src, _) = doc(Path::new("a.MDX"), b"import X from './x'\n\n# Hi\n", Path::new("."), |_, _| None);
-        assert!(!src.contains("import"));
-        let (_, spare) = doc(Path::new("a.md"), b"# Hi", Path::new("."), |s, _| Some(markdown::render(&format!("{s} from the spare"))));
+        let (_, spare) = doc(b"# Hi", Path::new("."), |s, _| Some(markdown::render(&format!("{s} from the spare"))));
         assert!(spare.html.contains("from the spare"));
     }
 }

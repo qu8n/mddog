@@ -49,7 +49,7 @@ pub fn run(file: PathBuf, cols: u16) -> i32 {
             .stack_size(crate::render::STACK)
             .spawn(move || {
                 let bytes = std::fs::read(&file).ok()?;
-                let (_, doc) = page::doc(&file, &bytes, &page::base_dir(&file, false), |_, _| None);
+                let (_, doc) = page::doc(&bytes, &page::base_dir(&file, false), |_, _| None);
                 Some((bytes, doc))
             })
             .ok()
@@ -139,7 +139,7 @@ impl Renderer {
             return Ok(());
         }
         let base = page::base_dir(&self.file, false);
-        let doc = first.unwrap_or_else(|| page::doc(&self.file, &bytes, &base, |s, d| self.engine.render(s, d)).1);
+        let doc = first.unwrap_or_else(|| page::doc(&bytes, &base, |s, d| self.engine.render(s, d)).1);
         let (html, theme) = page::html(&doc, &base, false);
         let width_px = self.cols * self.cell_w;
         self.engine.resize(f64::from(width_px) / self.scale, 600.0);

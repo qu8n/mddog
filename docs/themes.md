@@ -17,7 +17,7 @@ Declare the mode and the terminal colors on `:root`:
   --mddog-bar-bg: #161b22;         /* bottom status bar */
   --mddog-border: #3d444d;         /* separators, TOC divider */
   --mddog-skeleton: #25292e;       /* loading skeleton bars */
-  --mddog-mermaid: pele;           /* optional: pele or obsidian; the config's engine wins */
+  --mddog-mermaid: pele;           /* optional: pele or obsidian; unset, the base's, else pele; the config's engine wins */
 }
 ```
 

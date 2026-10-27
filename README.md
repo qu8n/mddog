@@ -22,7 +22,7 @@ mddog fetches the Markdown (pun intended), turns it into a styled HTML page, ren
 
 <img src="assets/mddog-themes.png" alt="Themes preview"/>
 
-- Preview Markdown/MDX with real fonts, Mermaid diagrams, math, and more
+- Preview Markdown with real fonts, Mermaid diagrams, math, and more
 - Look like GitHub or Obsidian, in light or dark to match macOS
 - Search, a table of contents, and a fuzzy file list
 - Keyboard-first navigation with vim-like key bindings
@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 <details>
 <summary>What this script does</summary>
 
-The script installs the latest release of mddog. It also registers a small launchd job that starts mddog with WebKit loaded at login, so the first preview after login opens faster. To opt out of this, run `mdd --no-start-at-login` after installing or set the environment variable `MDDOG_NO_START_AT_LOGIN=1` before running the script.
+The script installs the latest release of mddog. It also registers a small launchd job that starts mddog with WebKit loaded at login, so the first preview after login opens faster. To opt out of this, run `mdd --no-start-at-login` after installing or set the environment variable `MDDOG_NO_START_AT_LOGIN=1` before running the script. To run mddog with no background process at all, set `fast_start = false` in its [config](#config-optional).
 
 If you want to build from source instead, install [Rust](https://rust-lang.org/tools/install/) first, then run the following commands:
 

@@ -25,7 +25,7 @@ xattr -d com.apple.quarantine "$dir/mdd" 2>/dev/null || true
 echo "mddog install: installed $("$dir/mdd" --version) at $dir/mdd"
 
 # The launchd job records the binary's path, so it runs after the move.
-[ "${MDDOG_NO_START_AT_LOGIN:-}" = 1 ] || "$dir/mdd" --start-at-login
+[ "${MDDOG_NO_START_AT_LOGIN:-}" = 1 ] || "$dir/mdd" --start-at-login || [ $? -eq 3 ]
 
 case ":$PATH:" in
   *":$dir:"*) echo "mddog install: done. Run mdd in a folder with Markdown files, or mdd README.md" ;;

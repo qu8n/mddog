@@ -16,7 +16,10 @@ pub struct Config {
     pub glide_ms_per_page: u32,
     /// Releasing a drag or double-click selection copies it.
     pub copy_on_select: bool,
+    /// Keep a warm spare so the next preview opens in about 40 ms instead of 200 ms.
+    pub fast_start: bool,
     pub mermaid: MermaidConfig,
+    pub file_list: FileListConfig,
     #[serde(skip)]
     pub css: String,
     /// The `theme` key's themes, read.
@@ -28,7 +31,18 @@ impl Default for Config {
     fn default() -> Config {
         let theme = ThemeSpec::default();
         let themes = theme.load(Path::new("")).expect("built-in themes");
-        Config { theme, live_reload: true, smooth_scroll: true, glide_ms_per_page: 200, copy_on_select: false, mermaid: MermaidConfig::default(), css: String::new(), themes }
+        Config {
+            theme,
+            live_reload: true,
+            smooth_scroll: true,
+            glide_ms_per_page: 200,
+            copy_on_select: false,
+            fast_start: true,
+            mermaid: MermaidConfig::default(),
+            file_list: FileListConfig::default(),
+            css: String::new(),
+            themes,
+        }
     }
 }
 
@@ -125,6 +139,51 @@ impl Default for Mermaid {
 /// The Mermaid engine for a page in this theme: the config's, else the theme's, else the style's.
 pub fn mermaid(t: &Theme) -> Mermaid {
     get().mermaid.engine.or(t.mermaid).unwrap_or_default()
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct FileListConfig {
+    /// The extensions the file list shows, lowercase and without the dot.
+    #[serde(deserialize_with = "extensions")]
+    pub extensions: Vec<String>,
+}
+
+impl Default for FileListConfig {
+    fn default() -> Self {
+        FileListConfig { extensions: vec!["md".into(), "markdown".into()] }
+    }
+}
+
+impl FileListConfig {
+    pub fn shows(&self, p: &Path) -> bool {
+        p.extension().and_then(|e| e.to_str()).is_some_and(|e| self.extensions.iter().any(|x| e.eq_ignore_ascii_case(x)))
+    }
+
+    /// The extensions for a sentence: ".md or .markdown".
+    pub fn names(&self) -> String {
+        let e: Vec<String> = self.extensions.iter().map(|x| format!(".{x}")).collect();
+        match &e[..] {
+            [] => String::new(),
+            [one] => one.clone(),
+            [rest @ .., last] if rest.len() == 1 => format!("{} or {last}", rest[0]),
+            [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
+        }
+    }
+}
+
+fn extensions<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    use serde::de::Error;
+    let list = Vec::<String>::deserialize(d)?;
+    if list.is_empty() {
+        return Err(D::Error::custom("needs at least one extension, such as \"md\""));
+    }
+    for e in &list {
+        if e.is_empty() || e.contains('.') {
+            return Err(D::Error::custom(format!("{e:?} is not an extension. Write each one without the dot, such as \"md\"")));
+        }
+    }
+    Ok(list.iter().map(|e| e.to_ascii_lowercase()).collect())
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -224,8 +283,10 @@ mod tests {
         assert!(Config::default().live_reload);
         assert!(Config::default().smooth_scroll);
         assert!(!Config::default().copy_on_select);
+        assert!(Config::default().fast_start);
         assert_eq!(Config::default().glide_ms_per_page, 200);
         assert_eq!(Config::default().mermaid.engine, None);
+        assert_eq!(Config::default().file_list.extensions, ["md", "markdown"]);
         let t = Config::default().themes;
         assert_eq!((t.light.name.as_str(), t.dark.map(|d| d.name)), ("github-light", Some("github-dark".into())));
     }
@@ -237,15 +298,28 @@ mod tests {
 
     #[test]
     fn full() {
-        let c = parse("theme = \"github-dark\"\nlive_reload = false\nsmooth_scroll = false\nglide_ms_per_page = 100\ncopy_on_select = true\n[mermaid]\nengine = \"pele\"\n").unwrap();
+        let c =
+            parse("theme = \"github-dark\"\nlive_reload = false\nsmooth_scroll = false\nglide_ms_per_page = 100\ncopy_on_select = true\nfast_start = false\n[mermaid]\nengine = \"pele\"\n").unwrap();
         assert_eq!(c.theme, ThemeSpec::One(Source::Builtin(theme::builtin("github-dark").unwrap())));
         assert_eq!((c.themes.light.name.as_str(), c.themes.dark), ("github-dark", None));
         assert!(!c.live_reload);
         assert!(!c.smooth_scroll);
         assert!(c.copy_on_select);
+        assert!(!c.fast_start);
         assert_eq!(c.glide_ms_per_page, 100);
         assert_eq!(c.mermaid.engine, Some(Mermaid::Pele));
         assert_eq!(parse("[mermaid]\nengine = \"obsidian\"\n").unwrap().mermaid.engine, Some(Mermaid::Obsidian));
+    }
+
+    #[test]
+    fn file_list_extensions() {
+        let f = parse("[file_list]\nextensions = [\"MD\", \"txt\"]\n").unwrap().file_list;
+        assert_eq!(f.extensions, ["md", "txt"]);
+        assert!(f.shows(Path::new("a/b.Txt")) && f.shows(Path::new("b.md")));
+        assert!(!f.shows(Path::new("b.markdown")) && !f.shows(Path::new("txt")) && !f.shows(Path::new("a.txt.bak")));
+        assert_eq!(f.names(), ".md or .txt");
+        assert_eq!(FileListConfig { extensions: vec!["md".into()] }.names(), ".md");
+        assert_eq!(FileListConfig { extensions: vec!["md".into(), "txt".into(), "rst".into()] }.names(), ".md, .txt, or .rst");
     }
 
     #[test]
@@ -279,6 +353,14 @@ mod tests {
         assert!(e.starts_with("line 1: background: unknown field `background`"), "{e}");
         let e = one_line("live_reload = \"yes\"\n");
         assert!(e.starts_with("line 1: live_reload: invalid type"), "{e}");
+        let e = one_line("fast_start = 0\n");
+        assert!(e.starts_with("line 1: fast_start: invalid type"), "{e}");
+        let e = one_line("[file_list]\nextensions = [\".md\"]\n");
+        assert!(e.starts_with("line 2: file_list.extensions: \".md\" is not an extension"), "{e}");
+        let e = one_line("[file_list]\nextensions = [\"md\", \"\"]\n");
+        assert!(e.starts_with("line 2: file_list.extensions: \"\" is not an extension"), "{e}");
+        let e = one_line("[file_list]\nextensions = []\n");
+        assert!(e.starts_with("line 2: file_list.extensions: needs at least one"), "{e}");
         let e = one_line("[colours]\n");
         assert!(e.starts_with("line 1: colours: unknown field `colours`"), "{e}");
         let e = one_line("theme = \"dark\n");

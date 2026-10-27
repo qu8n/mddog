@@ -154,22 +154,3 @@ f x <span class="pl-k">=</span> g x <span class="pl-s"><span class="pl-pds">&quo
     <span class="pl-ent">A</span><span class="pl-s"><span class="pl-pds"><span class="pl-sg">[</span></span>Markdown<span class="pl-pds"><span class="pl-sg">]</span></span></span> <span class="pl-k">--&gt;</span> <span class="pl-ent">B</span><span class="pl-s"><span class="pl-pds"><span class="pl-sg">{</span></span>Parser<span class="pl-pds"><span class="pl-sg">}</span></span></span>
     <span class="pl-ent">B</span> <span class="pl-k">--&gt;</span><span class="pl-k">|</span><span class="pl-s">GFM</span><span class="pl-k">|</span> <span class="pl-ent">C</span><span class="pl-s"><span class="pl-pds"><span class="pl-sg">[</span></span>HTML<span class="pl-pds"><span class="pl-sg">]</span></span></span>
     <span class="pl-ent">C</span> <span class="pl-k">--&gt;</span> <span class="pl-ent">D</span><span class="pl-s"><span class="pl-pds"><span class="pl-sg">[</span></span>Pixels<span class="pl-pds"><span class="pl-sg">]</span></span></span>
---- fixtures/component.twin.md mermaid source.mermaid
-<span class="pl-k">sequenceDiagram</span>
-    <span class="pl-k">participant</span> <span class="pl-ent">U</span> <span class="pl-k">as</span> <span class="pl-ent">User</span>
-    <span class="pl-k">participant</span> <span class="pl-ent">P</span> <span class="pl-k">as</span> <span class="pl-ent">Previewer</span>
-    <span class="pl-k">participant</span> <span class="pl-ent">T</span> <span class="pl-k">as</span> <span class="pl-ent">Terminal</span>
-    <span class="pl-ent">U</span><span class="pl-k">-&gt;&gt;</span><span class="pl-ent">P</span><span class="pl-k">:</span> <span class="pl-s">open post.mdx</span>
-    <span class="pl-ent">P</span><span class="pl-k">-&gt;&gt;</span><span class="pl-ent">T</span><span class="pl-k">:</span> <span class="pl-s">send image once</span>
-    <span class="pl-ent">T</span><span class="pl-k">--&gt;&gt;</span><span class="pl-ent">U</span><span class="pl-k">:</span> <span class="pl-s">show pixels</span>
---- fixtures/component.twin.md jsx source.js
-<span class="pl-k">&lt;</span>Callout title<span class="pl-k">=</span><span class="pl-s"><span class="pl-pds">&quot;</span>Heads up<span class="pl-pds">&quot;</span></span> type<span class="pl-k">=</span><span class="pl-s"><span class="pl-pds">&quot;</span>warn<span class="pl-pds">&quot;</span></span><span class="pl-k">&gt;</span>
-
-Components show as <span class="pl-c1">JSX</span> source. <span class="pl-k">**</span>Markdown<span class="pl-k">**</span> inside a component stays as text, including [links](https<span class="pl-k">:</span><span class="pl-c"><span class="pl-c">//</span>example.com).</span>
-
-<span class="pl-k">&lt;</span><span class="pl-k">/</span>Callout<span class="pl-k">&gt;</span>
---- fixtures/component.twin.md jsx source.js
-<span class="pl-k">&lt;</span>KeySequence combo<span class="pl-k">=</span>{[[<span class="pl-s"><span class="pl-pds">'</span>Ctrl<span class="pl-pds">'</span></span>, <span class="pl-s"><span class="pl-pds">'</span>e<span class="pl-pds">'</span></span>]]} <span class="pl-k">/</span><span class="pl-k">&gt;</span>
---- fixtures/component.twin.md ts source.ts
-<span class="pl-k">export</span> <span class="pl-k">const</span> <span class="pl-c1"><span class="pl-en">cssWidth</span></span> <span class="pl-k">=</span> (<span class="pl-v">cols</span><span class="pl-k">:</span> <span class="pl-c1">number</span>, <span class="pl-v">cellPx</span><span class="pl-k">:</span> <span class="pl-c1">number</span>, <span class="pl-v">scale</span><span class="pl-k">:</span> <span class="pl-c1">number</span>) <span class="pl-k">=&gt;</span>
-  <span class="pl-c1">Math</span>.<span class="pl-c1">floor</span>((<span class="pl-smi">cols</span> <span class="pl-k">*</span> <span class="pl-smi">cellPx</span>) <span class="pl-k">/</span> <span class="pl-smi">scale</span>);

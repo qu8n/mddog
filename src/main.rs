@@ -4,14 +4,14 @@ use mddog::*;
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
-const USAGE: &str = "usage: mdd [file.md|file.mdx|folder]
+const USAGE: &str = "usage: mdd [file.md|folder]
        command | mdd";
 
 fn help() -> String {
     format!(
         "{USAGE}
 
-Render Markdown and MDX in the terminal as a browser shows them, styled like GitHub by default. The preview reloads when the file changes.
+Render Markdown in the terminal as a browser shows them, styled like GitHub by default. The preview reloads when the file changes.
 It needs a terminal with the Kitty graphics protocol, such as Ghostty, Kitty, WezTerm, or iTerm2. It refuses to run in Warp and zellij.
 With no file, it lists the Markdown files in the current git repo, or else the current folder, to pick from. With a folder, it lists that folder.
 With -, or with input piped in, it reads standard input.
@@ -35,6 +35,13 @@ fn main() {
         std::process::exit(engine::spare::serve());
     }
     if std::env::args().nth(1).as_deref() == Some("--start-at-login") {
+        config::load().unwrap_or_else(|e| fail(&format!("config: {e}")));
+        if !config::get().fast_start {
+            let file = config::dir().map_or("config.toml".into(), |d| d.join("config.toml").display().to_string());
+            eprintln!("{}", fit(&format!("mdd: fast_start = false in {}, so there is no spare to start at login", term::printable(&file))));
+            // install.sh lets this one refusal through and stops on every other failure.
+            std::process::exit(3);
+        }
         match engine::spare::start_at_login() {
             Ok(_) => println!("mdd: launchd now starts a prewarmed mdd at login, so your first preview opens in about 40 ms instead of 250 ms. Undo with: mdd --no-start-at-login"),
             Err(e) => fail(&e),
@@ -160,7 +167,7 @@ fn check_file(path: &Path) -> Result<(), String> {
         let readme = std::fs::read_dir(path).ok().and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("readme.md"))));
         return Err(match readme {
             Some(r) => format!("{shown} is a folder. Did you mean {}?", term::printable(&r.display().to_string())),
-            None => format!("{shown} is a folder, not a file. Give a .md or .mdx file"),
+            None => format!("{shown} is a folder, not a file. Give a {} file", config::get().file_list.names()),
         });
     }
     let mut head = Vec::new();
@@ -180,7 +187,7 @@ fn near_match(path: &Path) -> Option<PathBuf> {
     let mut best: Option<(usize, PathBuf)> = None;
     for e in std::fs::read_dir(dir).ok()?.flatten() {
         let cand = e.file_name().to_string_lossy().to_lowercase();
-        if !(cand.ends_with(".md") || cand.ends_with(".mdx") || cand.ends_with(".markdown")) {
+        if !config::get().file_list.shows(Path::new(&cand)) {
             continue;
         }
         let d = if stem(&cand) == stem(&name) { 0 } else { distance(&cand, &name) };
@@ -260,7 +267,7 @@ mod tests {
         assert_eq!(near("raedme.md").as_deref(), Some("readme.md"));
         assert_eq!(near("README.MD").as_deref(), Some("readme.md"));
         assert_eq!(near("readme.markdown").as_deref(), Some("readme.md"));
-        assert_eq!(near("note.mdx").as_deref(), Some("notes.mdx"));
+        assert_eq!(near("note.mdx"), None);
         assert_eq!(near("guide.md").as_deref(), Some("guide.markdown"));
         assert_eq!(near("plans.md").as_deref(), Some("plan.md"));
         assert_eq!(near("rdme.md"), None);

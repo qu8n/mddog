@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn matches_golden() {
         let mut out = String::new();
-        for f in ["reference/probes/langs.md", "fixtures/gfm.md", "fixtures/component.twin.md"] {
+        for f in ["reference/probes/langs.md", "fixtures/gfm.md"] {
             let md = std::fs::read_to_string(f).unwrap();
             let arena = Arena::new();
             for node in parse_document(&arena, &md, &crate::render::markdown::options()).descendants() {

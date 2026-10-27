@@ -2,7 +2,7 @@
 name = "mddog"
 version = "0.1.0"
 edition = "2024"
-description = "Render Markdown and MDX in the terminal as a browser shows them, styled like GitHub by default"
+description = "Render Markdown in the terminal as a browser shows them, styled like GitHub by default"
 license = "MIT"
 publish = false
 
@@ -17,7 +17,6 @@ html5ever = "0.35"
 include_dir = "0.7.4"
 irosashi = { version = "=0.3.0", default-features = false }
 kuchikiki = "0.8.9-speedreader"
-markdown = "1"
 notify = "8"
 png = "0.18.1"
 regex = "1"

@@ -59,8 +59,9 @@ pub fn scope(start: &Path, cwd: &Path) -> PathBuf {
     start.ancestors().find(|d| d.join(".git").exists()).map_or_else(|| cwd.to_path_buf(), Path::to_path_buf)
 }
 
-pub fn is_markdown(p: &Path) -> bool {
-    p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["md", "markdown", "mdx"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+/// Whether the file list shows `p`, by the config's `file_list.extensions`.
+pub fn listed(p: &Path) -> bool {
+    crate::config::get().file_list.shows(p)
 }
 
 /// The text of the first ATX heading, outside front matter and code fences.
@@ -126,7 +127,7 @@ fn walk(root: PathBuf, tx: Sender<(Vec<Item>, bool)>, wake: Sender<Event>, stop:
             if count >= CAP || stop.load(Ordering::Relaxed) {
                 break;
             }
-            if !e.file_type().is_some_and(|t| t.is_file()) || !is_markdown(e.path()) {
+            if !e.file_type().is_some_and(|t| t.is_file()) || !listed(e.path()) {
                 continue;
             }
             let Some(item) = read_item(&root, e.into_path()) else { continue };
@@ -484,12 +485,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn markdown_is_md_markdown_or_mdx_in_any_case() {
-        for f in ["a.md", "a.MD", "a.markdown", "a.mdx", "dir.d/a.Mdx"] {
-            assert!(is_markdown(Path::new(f)), "{f}");
+    fn listed_is_md_or_markdown_in_any_case() {
+        for f in ["a.md", "a.MD", "a.markdown", "dir.d/a.Markdown"] {
+            assert!(listed(Path::new(f)), "{f}");
         }
-        for f in ["a.mdown", "a.mkd", "a.txt", "md", "a.md.bak"] {
-            assert!(!is_markdown(Path::new(f)), "{f}");
+        for f in ["a.mdx", "a.mdown", "a.mkd", "a.txt", "md", "a.md.bak"] {
+            assert!(!listed(Path::new(f)), "{f}");
         }
     }
 
@@ -675,7 +676,7 @@ mod tests {
     #[test]
     fn walk_skips_hidden_ignored_and_other_files() {
         let dir = std::env::temp_dir().join(format!("mddog-walk-{}", std::process::id()));
-        for f in ["a.md", "b.MDX", "c.markdown", "d.txt", ".hidden/e.md", "ignored/f.md", "sub/g.md"] {
+        for f in ["a.md", "b.MD", "c.markdown", "d.txt", "e.mdx", ".hidden/e.md", "ignored/f.md", "sub/g.md"] {
             let p = dir.join(f);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, "# T\n").unwrap();
@@ -690,7 +691,7 @@ mod tests {
         }
         let mut got: Vec<&str> = p.items.iter().map(|i| i.rel.as_str()).collect();
         got.sort_unstable();
-        assert_eq!(got, ["a.md", "b.MDX", "c.markdown", "sub/g.md"]);
+        assert_eq!(got, ["a.md", "b.MD", "c.markdown", "sub/g.md"]);
         assert!(p.items.iter().all(|i| i.title == "T"));
         std::fs::remove_dir_all(&dir).unwrap();
     }

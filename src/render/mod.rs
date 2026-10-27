@@ -7,7 +7,6 @@ pub(crate) mod dom;
 pub(crate) mod emoji;
 pub(crate) mod highlight;
 pub(crate) mod markdown;
-pub(crate) mod mdx;
 pub(crate) mod octicons;
 pub(crate) mod sanitize;
 pub(crate) mod textmate;

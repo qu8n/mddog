@@ -23,6 +23,17 @@ glide_ms_per_page = 200
 # Copy the text you select with a mouse drag or a double-click, as soon as you let go.
 copy_on_select = false
 
+# Keep a hidden mdd running with WebKit loaded, so the next preview opens in about 40 ms.
+# With false, mddog starts no background process, and each preview takes about 200 ms to open.
+# mdd --start-at-login then refuses to run.
+fast_start = true
+
+[file_list]
+# The file extensions the file list (mdd, mdd FOLDER, Ctrl-p) shows, and that
+# "Did you mean" picks from. This is the full list. Write each one without the dot.
+# mdd FILE opens any text file, whatever its extension.
+extensions = ["md", "markdown"]
+
 [mermaid]
 # pele (GitHub's frame and buttons, its own layout) or obsidian (draws like Obsidian).
 # Unset, the theme's --mddog-mermaid picks: obsidian under the Obsidian themes, pele otherwise.

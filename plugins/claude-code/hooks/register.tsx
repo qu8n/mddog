@@ -97,7 +97,7 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'open',
       description:
-        'Show a Markdown or MDX file in the mddog preview pane beside the chat, rendered as a browser shows it (styled like GitHub by default). Use it when the user asks to see, preview, or view a Markdown file. The pane re-renders whenever the file changes, so edit the file to update what they see.',
+        'Show a Markdown file in the mddog preview pane beside the chat, rendered as a browser shows it (styled like GitHub by default). Use it when the user asks to see, preview, or view a Markdown file. The pane re-renders whenever the file changes, so edit the file to update what they see.',
       inputSchema: {
         type: 'object',
         properties: { path: { type: 'string', description: 'The file, absolute or relative to the working directory' } },
