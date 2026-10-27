@@ -156,7 +156,7 @@ A SIGINT that arrives while the editor runs is ignored. The signal handler check
 | `smooth_scroll` | `true` | Jump keys glide. `false` makes every jump instant. |
 | `glide_ms_per_page` | `200` | How long a glide over one screen takes. |
 | `copy_on_select` | `false` | Copy a selection when the mouse button is released. |
-| `fast_start` | `true` | Keep a warm spare (see Warm spare). `false` makes each preview open in about 200 ms instead of 40 ms. |
+| `fast_start` | `true` | Keep a warm spare (see Warm spare). `false` makes each preview open slower. |
 | `file_list.extensions` | `["md", "markdown"]` | Which files the file list shows, and which ones "Did you mean" suggests. The full list, without dots, in any case. `mdd FILE` opens any text file, whatever its extension. |
 | `mermaid.engine` | the theme's, else `pele` | `pele` or `obsidian`. A theme names its engine with `--mddog-mermaid`, or takes its base's. |
 

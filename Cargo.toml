@@ -1,6 +1,6 @@
 [package]
 name = "mddog"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Render Markdown in the terminal as a browser shows them, styled like GitHub by default"
 license = "MIT"
@@ -56,6 +56,7 @@ regex = "1.13.1"
 [profile.release]
 lto = "thin"
 codegen-units = 4
+strip = true
 
 [[test]]
 name = "search"

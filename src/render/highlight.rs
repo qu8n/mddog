@@ -11,6 +11,7 @@ const CAPTURES: &[(&str, &str)] = &[
     ("function", "pl-en"),
     ("function.builtin", "pl-c1"),
     ("function.method", "pl-en"),
+    ("function.method.builtin", "pl-en"),
     ("function.macro", "pl-en"),
     ("constructor", "pl-v"),
     ("variable", "pl-s1"),
@@ -27,6 +28,8 @@ const CAPTURES: &[(&str, &str)] = &[
     ("boolean", "pl-c1"),
     ("string", "pl-s"),
     ("string.special", "pl-s"),
+    ("string.special.symbol", "pl-pds"),
+    ("string.special.regex", "pl-sr"),
     ("escape", "pl-cce"),
     ("type", "pl-smi"),
     ("type.builtin", "pl-smi"),
@@ -154,5 +157,23 @@ pub fn push_lines(out: &mut String, text: &str, open: &[&str]) {
         }
         first = false;
         out.push_str(&escape(line));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ruby_symbols_get_github_class() {
+        let html = super::block("ruby", "f(:a, b: 1)\n");
+        assert!(html.contains(r#"<span class="pl-pds">:a</span>"#), "{html}");
+        assert!(html.contains(r#"<span class="pl-pds">b</span>"#), "{html}");
+    }
+
+    #[test]
+    fn ruby_builtins_and_regexes_get_github_class() {
+        let html = super::block("ruby", "require \"a\"\ndefined?(x)\n/b/\n");
+        assert!(html.contains(r#"<span class="pl-en">require</span>"#), "{html}");
+        assert!(html.contains(r#"<span class="pl-en">defined?</span>"#), "{html}");
+        assert!(html.contains(r#"<span class="pl-sr">/b/</span>"#), "{html}");
     }
 }

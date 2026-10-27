@@ -14,12 +14,15 @@ jobs:
       - uses: actions/checkout@v5
       - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - run: cargo build --release --locked --target aarch64-apple-darwin --target x86_64-apple-darwin
-      - name: Package a universal binary
+      - name: Package one tarball per architecture
         run: |
-          lipo -create -output mdd target/aarch64-apple-darwin/release/mdd target/x86_64-apple-darwin/release/mdd
-          codesign --force --sign - mdd
-          tar czf mdd-macos.tar.gz mdd
-          shasum -a 256 mdd-macos.tar.gz > mdd-macos.tar.gz.sha256
-      - run: gh release create "$GITHUB_REF_NAME" mdd-macos.tar.gz mdd-macos.tar.gz.sha256 --generate-notes
+          for arch in arm64 x86_64; do
+            case $arch in arm64) target=aarch64-apple-darwin ;; x86_64) target=x86_64-apple-darwin ;; esac
+            cp "target/$target/release/mdd" mdd
+            codesign --force --sign - mdd
+            tar czf "mdd-macos-$arch.tar.gz" mdd
+            shasum -a 256 "mdd-macos-$arch.tar.gz" > "mdd-macos-$arch.tar.gz.sha256"
+          done
+      - run: gh release create "$GITHUB_REF_NAME" mdd-macos-*.tar.gz mdd-macos-*.tar.gz.sha256 --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

@@ -16,7 +16,7 @@ pub struct Config {
     pub glide_ms_per_page: u32,
     /// Releasing a drag or double-click selection copies it.
     pub copy_on_select: bool,
-    /// Keep a warm spare so the next preview opens in about 40 ms instead of 200 ms.
+    /// Keep a warm spare so the next preview opens faster.
     pub fast_start: bool,
     pub mermaid: MermaidConfig,
     pub file_list: FileListConfig,
