@@ -19,6 +19,7 @@ irosashi = { version = "=0.3.0", default-features = false }
 kuchikiki = "0.8.9-speedreader"
 notify = "8"
 png = "0.18.1"
+webp = { version = "0.3", default-features = false }
 regex = "1"
 serde_json = "1"
 similar = "3.2.0"

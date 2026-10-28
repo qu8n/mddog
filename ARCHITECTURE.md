@@ -70,7 +70,7 @@ assets/
   mddog.js           in-page code: search, code scroll bars, mouse, selection, Mermaid
   runtime/           MathJax 3.2.0, mermaid 11.13.0, and Pele 1.6.0, embedded in the binary
   textmate/          128 grammars from starry-night, scope-to-class map
-  spike.png, mddog-themes.png  README images
+  spike.png, mddog-themes.webp  README images
 fixtures/            gfm.md, diagram.svg
 tests/               integration tests (help over a pty, search, watch, headless, textmate and math goldens)
 reference/           Node and Python dev tools: CSS build, grammar export, captures, probes, e2e, bench
@@ -245,7 +245,7 @@ Local media is confined to a root folder (see Security).
 
 **Code.** Code is highlighted the way GitHub does it, with GitHub's `pl-*` classes. tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, and PHP. irosashi, a Rust port of vscode-textmate, covers the rest with starry-night's grammars. `tests/textmate.golden` pins the output.
 
-**Page.** `page/` (`page::doc`, `page::html`, `page::load`) is the one path from file bytes to a loaded page. The viewer, headless mode, and the spare all use it.
+**Page.** `page/` (`page::doc`, `page::html`, `page::load`) is the one path from file bytes to a loaded page. The viewer and headless mode use it. The spare only renders: it runs `markdown::render_in` and sends the result back to the viewer's `page::doc`.
 
 - It hands the article to the style's `page`, which adds the CSS layers, `mddog.js` and MathJax from `page::scripts`, and the Mermaid scripts.
 - `page::load` writes the page, waits for the load event, then gives fonts and images up to 500 ms.

@@ -22,6 +22,7 @@ Options
       --start-at-login    have launchd start a prewarmed mdd at login, so the first preview opens fast
       --no-start-at-login undo --start-at-login
       --headless COLS     write the preview as PNG tiles COLS cells wide and print them as JSON, for the Claude Code plugin
+      --webp              with --headless, write WebP tiles sized for the Claude Code desktop app instead
 
 In the preview, press ? to list the keys.
 "
@@ -59,9 +60,11 @@ fn main() {
     let mut files: Vec<String> = Vec::new();
     let mut options = true;
     let mut headless: Option<u16> = None;
+    let mut webp = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--webp" if options => webp = true,
             "--headless" if options => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u16| (1..=255).contains(&n)) {
                 Some(n) => headless = Some(n),
                 None => usage("--headless needs a column count from 1 to 255"),
@@ -90,6 +93,9 @@ fn main() {
         _ => fail(&format!("opens one file at a time, but got {}: {}", files.len(), files.join(", "))),
     };
     config::load().unwrap_or_else(|e| fail(&format!("config: {e}")));
+    if webp && headless.is_none() {
+        usage("--webp needs --headless");
+    }
     if let Some(cols) = headless {
         if file.is_empty() {
             usage("--headless needs a file");
@@ -98,7 +104,7 @@ fn main() {
             usage("--headless needs a file, not standard input");
         }
         check_file(Path::new(&file)).unwrap_or_else(|e| fail(&e));
-        std::process::exit(headless::run(PathBuf::from(file), cols));
+        std::process::exit(headless::run(PathBuf::from(file), cols, webp));
     }
     if file.is_empty() || (file != "-" && Path::new(&file).is_dir()) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

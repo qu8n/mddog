@@ -23,6 +23,21 @@ impl Bitmap {
         enc.set_compression(png::Compression::Fast);
         enc.write_header()?.write_image_data(&self.rgba)
     }
+
+    /// WebP at libwebp's method 2. Lossless takes about a sixth of `write_png`'s bytes for a page of text, so a
+    /// tile fits in the 128 KiB `Svg` source the Claude Code desktop app draws; lossy is for pictures, and for
+    /// the small copies it draws where sharp tiles don't fit. Returns the bytes written.
+    /// Lossy at `quality` when given, else lossless.
+    pub fn write_webp(&self, path: &Path, quality: Option<f32>) -> Result<usize, String> {
+        let mut cfg = webp::WebPConfig::new().map_err(|()| "libwebp refused its default config".to_string())?;
+        cfg.lossless = i32::from(quality.is_none());
+        // Lossless reads it as effort.
+        cfg.quality = quality.unwrap_or(75.0);
+        cfg.method = 2;
+        let mem = webp::Encoder::from_rgba(&self.rgba[..], self.width as u32, self.height as u32).encode_advanced(&cfg).map_err(|e| format!("libwebp: {e:?}"))?;
+        std::fs::write(path, &*mem).map_err(|e| e.to_string())?;
+        Ok(mem.len())
+    }
 }
 
 pub fn snapshot_size(width: f64, h: f64, scale: f64) -> (usize, usize) {
@@ -45,8 +60,8 @@ impl Engine {
         }
     }
 
-    /// Whether WebKit blocks loads to private hosts (see `remote::content_rules`). A spare serves only once its
-    /// own rules are in place.
+    /// Whether WebKit blocks direct http and https image and media loads (see `remote::content_rules`). A spare
+    /// serves only once its own rules are in place.
     pub fn content_rules(&self) -> bool {
         match self {
             Engine::Local(e) => e.content_rules(),

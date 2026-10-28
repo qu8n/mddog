@@ -20,7 +20,7 @@ mddog fetches the Markdown (pun intended), turns it into a styled HTML page, ren
 
 ## Features
 
-<img src="assets/mddog-themes.png" alt="Themes preview"/>
+<img src="assets/mddog-themes.webp" alt="Themes preview"/>
 
 - Preview Markdown with real fonts, Mermaid diagrams, math, and more
 - Look like GitHub or Obsidian, in light or dark to match macOS
