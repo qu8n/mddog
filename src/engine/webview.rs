@@ -253,11 +253,6 @@ impl Engine {
         }
     }
 
-    pub fn wait_frame(&self) {
-        let _ = self.eval("window.mddogFrame = false; requestAnimationFrame(() => { window.mddogFrame = true; }); ''");
-        self.wait_js("window.mddogFrame", Duration::from_millis(100));
-    }
-
     pub fn new(width: f64) -> Engine {
         let mtm = MainThreadMarker::new().expect("main thread");
         let app = NSApplication::sharedApplication(mtm);

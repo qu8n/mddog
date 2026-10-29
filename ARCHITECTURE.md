@@ -8,7 +8,7 @@ It is a macOS-only Rust binary, `mdd`, with no library users. It runs in four wa
 |---|---|---|
 | Viewer | `mdd FILE`, `mdd -`, or piped input | Draws the page in the terminal and handles keys and the mouse |
 | File list | `mdd`, `mdd FOLDER`, or Ctrl-p in the viewer | Lists the Markdown files under a folder to pick from |
-| Headless | `mdd --headless COLS FILE` | Writes PNG tiles and prints JSON, for the Claude Code plugin |
+| Headless | `mdd --headless COLS [--webp] FILE` | Writes PNG or WebP tiles and prints JSON, for the Claude Code plugin |
 | Spare | the viewer, headless mode, or launchd at login (`mdd --spare`) | Waits with WebKit already started, so the next viewer starts fast |
 
 Two parts decide how a page looks. The **style** is the HTML around the Markdown and the base CSS. There is one style: GitHub's repo view. The **theme** is one CSS file on top. It can only recolor the page, as `github-light` and `github-dark` do, or restyle all of it, as `obsidian-light` and `obsidian-dark` do. By default mddog uses the GitHub pair and follows the macOS appearance.
@@ -27,7 +27,7 @@ src/
   main.rs            CLI: options, file and stdin checks, --spare, --start-at-login, --no-start-at-login
   config.rs          optional config file: theme, live reload, smooth scroll, glide time, copy on select, Mermaid engine
   theme.rs           themes: built-in list, mode and --mddog-* chrome colors read from a theme's CSS
-  headless.rs        --headless: render to PNG files, for the Claude Code plugin
+  headless.rs        --headless: render to PNG or WebP files, for the Claude Code plugin
   watch.rs           file watcher
   editor.rs          runs $EDITOR
   trace.rs           test and debug logging
@@ -142,7 +142,7 @@ A SIGINT that arrives while the editor runs is ignored. The signal handler check
 - With no file and a terminal on standard input, or with a folder, it opens the file list.
 - With `-`, or with no file and piped input, it copies standard input to a private temp file.
 - `--help` is short and points to the `?` screen for keys. It works even when the config file is broken, because `main` loads the config only after it parses the options.
-- `--headless COLS FILE` runs headless mode. Like the viewer, it stops on a broken config.
+- `--headless COLS FILE` runs headless mode. Like the viewer, it stops on a broken config. `--webp` needs `--headless`.
 - The viewer refuses to start in a terminal that has no Kitty graphics, and in Warp and zellij, which garble a scrolled image.
 
 ### Config
@@ -306,6 +306,8 @@ A cold first paint takes about 200 ms, most of it AppKit and WebKit startup. A w
 **Finding the spare.**
 
 - The socket is in the per-user temp dir. Its name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. It also hashes the cache root, so a viewer with another `MDDOG_CACHE_DIR` never reaches a spare that reads its runtime from elsewhere. The spare inherits the variable, and `--start-at-login` writes it into the launchd job, along with `XDG_CONFIG_HOME` so the login spare reads the same config.
+- So each binary path, cache root, and temp dir gets its own spare, and each idles up to 12 hours.
+- macOS limits a Unix socket path to 104 bytes. Under a long `TMPDIR` the spare fails to bind and exits 1 at once, so there is no warm start.
 - The viewer connects only to a socket its own user owns, and each side talks only to a peer with its own uid (`getpeereid`). The spare ignores a connection that never sends hello.
 
 **Protocol.** The viewer drives the spare's WebView with six requests: `eval`, `load`, `resize`, `wait`, `snap`, and `render`. `load` carries the theme's mode as its third element. `render` is `["render", src, dir]`, so the spare confines media to the same root. A late or missing reply to the first render ends the connection, so the spare can't answer the main thread's next request with a stale reply.
@@ -315,6 +317,7 @@ A cold first paint takes about 200 ms, most of it AppKit and WebKit startup. A w
 **Lifetime.**
 
 - A spare serves one viewer, then exits. An unused spare exits after 12 hours.
+- Every 3 s, an unused spare checks that its binary and its socket are unchanged, and exits if either changed. So a rebuild or reinstall retires the old spare rather than leaving it for 12 hours. That includes the login spare, which launchd doesn't restart.
 - It forks once more and the middle process exits, so launchd adopts it. Claude Code kills the plugin's child and all its descendants on each width change, and the next child would otherwise use a dying spare.
 - `--start-at-login` adds a launchd job that starts one spare at login. The job has no `KeepAlive`, so after that first spare the viewers start their own. `--no-start-at-login` stops and removes the job.
 - `fast_start = false` turns the spare off. The viewer and headless mode don't start or use one, and say hello to a spare left from before the change and hang up, so it exits. `mdd --spare` exits at once, and `--start-at-login` refuses with a line that names the key and the config file. The config is a file and not an environment variable because launchd doesn't read the user's shell environment. The spare reads the key before warm-up.
@@ -531,9 +534,25 @@ It cuts the page into PNG tiles of at most 100 rows (a Claude Code image can't e
 - A WebKit stall exits with code 1, so the host can say the preview stopped. A signal removes the folder and exits at once.
 - It shares the viewer's page path (`page::doc`, `page::html`, `script`) and image limits (`kitty::TILE_BYTES`, `kitty::storage_limit`), and does not import `preview.rs`.
 
+With `--webp` it writes WebP tiles for the plugin's desktop path instead (`webp_tiles`). A tile is 10 rows (160 CSS px), halved until its file fits 96,000 bytes. Each tile has two copies:
+
+- Sharp: the backing scale (2x on a Retina display) and lossless. A file over 12,000 bytes is tried lossy at quality 75, which it keeps when that saves 40% or more. Pictures do, text doesn't.
+- Small: half the backing scale, at least 1x, the smaller of lossless and lossy. Over 20 KB, it is encoded again at quality 40. That is a target, not a bound: the worst measured at 202 columns is 22 KB.
+
+Each tile in the JSON adds `width` and `height` in pixels, `bytes`, and `small`, an object with its own `file`, `width`, `height`, and `bytes`. Without `--webp` the JSON is unchanged.
+
+A snapshot must run on the main thread (WebKit) and takes a few milliseconds. Encoding a tile takes up to a hundred times that. So, as on the PNG path, the main thread takes each tile's sharp and small snapshots, and a scoped thread encodes them (`webp_tile`), up to `available_parallelism()` tiles ahead. That makes text pages about 3 times faster than one thread.
+
+- Each tile after the first is a guess, because the tile above it may still be halved. When a tile comes back too big, the main thread waits for the guesses in flight, drops them, and takes the tile again at half the rows. It then takes one tile at a time until one fits at the full 10 rows, or a big picture would drop every guess.
+- Workers return bytes (`Bitmap::webp`), and the main thread writes only the tiles it keeps. So file numbers stay in order, and dropped guesses don't leave files behind.
+- Pages with big pictures run at serial speed, since a chain of halvings (10, 5, 3) is serial.
+- Each tile in flight holds a sharp and a small bitmap, about 6.5 MiB at 255 columns and 2x. So memory scales with CPU count: about 80 MB on 12 cores.
+
 ## Claude Code plugin
 
-The plugin is not part of the Rust build. It calls the `mdd` binary (or `MDDOG_BIN`) like any other caller. README.md has the install steps.
+The plugin is not part of the Rust build. It calls the `mdd` binary (or `MDDOG_BIN`) like any other caller. README.md has the install steps. `mdd` ships through `install.sh` and the plugin through the Claude Code marketplace, with no version check between them: an older `mdd` fails on `--webp`. Claude Code caches an installed plugin by its `plugin.json` `version`, so each release bumps it with Cargo's (see Releasing).
+
+Its tests are in `plugins/claude-code/tests/`. `tsc -p plugins/claude-code` type-checks them once a live load has written `.claude-plugin/types/` (gitignored).
 
 `plugins/claude-code/` is a hooks-module mod (`hooks/register.tsx`). A mod can't host a TTY program: `$.process.spawn` pipes stdout and stderr and closes stdin. It can draw kitty images through the `Image` element. So mddog renders with `--headless`, and Claude Code owns display and input.
 
@@ -553,13 +572,23 @@ sequenceDiagram
 
 Claude Code decides whether a pane is placed, not the plugin. It seats a pane the person asked for (a typed command) at any width. It may hold back a pane a plugin opens on its own, as from a model tool call, in a narrow terminal (observed: under 144 columns, or under 110 for a pane the person opened before). Then `$.ui.open` returns `{isPlaced: false, reason}`, and the pane waits undrawn with no `ui.render`. `show()` stops the old file's child, and the tool tells the model to pass the user a fixed message: zoom out, or run `/mddog <path>`. `/mddog` doesn't check `isPlaced`.
 
-**Drawing.**
+**Drawing in the terminal.**
 
+- Claude Code owns the pane frame: the top bar with the close mark, the bottom bar, and the divider. A mod can't recolor it. `backgroundColor` in `$.ui.open` reaches only the body.
 - The pane's width is capped at 255 columns, the `--headless` limit. A width change stops the child and starts one at the new width.
 - The pane draws the tiles as a column of `Image`s keyed `tile-0`, `tile-1`, and so on. Only the `keep` tiles nearest the scroll position are mounted, and each other tile is a blank `Box` of its height. Mounting a long page whole went past herdr's 64 MiB quota, and herdr then dropped the oldest images, the ones in view. Stable keys let an edit swap sources in place, so the pane keeps its scroll position.
 - Only the last complete JSON line on stdout counts. The last stderr line shows in red above the tiles.
-- When the tiles are taller than the pane, a dim key hint sits above them. The pane API has no pinned footer, so the hint scrolls away with the page.
 - Navigation is Claude Code's own pane scroll. mddog's keys (search, links, contents, code scroll) are not forwarded, because the spawn API has no stdin channel.
+
+**Drawing on the desktop.** The desktop app, VS Code, and the mobile app (Remote Control) have no `Image` element. There the plugin runs `mdd --headless COLS --webp` and draws each tile as a plain `Svg` whose source holds `<image href="data:image/webp;base64,...">`. It never sets `isInteractive`, because DOMPurify strips `image`.
+
+- One Svg's source may hold 131,072 characters, and the desktop drops a whole drawing past 262,144. So only a window of tiles near the view is read and drawn, within `SVG_BUDGET` (250,000). Each Svg is charged about 550 characters of markup and props, against about 310 real.
+- `window()` picks each tile's copy in three steps. Small copies cover the tiles in view, plus one above and one below while the person scrolls. 300 ms after the last `ui.scroll`, those margins drop. Then the tiles in view switch to sharp while the budget lasts. Then tiles further out are added as small copies. A copy too big for one Svg is never drawn.
+- Every Svg gets an explicit CSS `width` and `height`. Without them, the desktop sized each box from its own guess at the pane width but drew the image at the real width, so tiles overlapped and the scroll ended early. The pane asks mdd for `floor(bodyColumns × 8.75 / 8)` columns and draws each at 8 CSS px. The code font's advance is 8.8 to 9 px, so the page fills 98 to 99% of the pane. A box wider than the pane would be clipped.
+- Tiles outside the window become gaps of the same height: an Svg with a transparent `rect` and the alt "Not shown yet". The desktop draws an empty Svg with a blank alt as nothing, so the content below moved up into its place. A gap over 4,096 px is cut into several, since the desktop refuses a taller Svg.
+- Scroll offsets come in rows. The plugin assumes 19.5 CSS px per row until the first `ui.scroll`, then measures it: the tiles' summed CSS height over `contentRows`. `ui.scroll` names no surface, so while two surfaces draw tiles the estimate stays, and it drifts on very long pages.
+- State is per surface. `views` is keyed by `e.surface`, and each view holds its own child, tiles, Svg sources, row size, and scroll timer. So the terminal and the mobile app can draw the pane at once without restarting each other's child.
+- Links and text selection don't work here. Pages over about 100,000 rows need so many gap Svgs that the drawing could pass its limit.
 
 **Stopping.** Closing the pane and `session.end` stop the child. `session.end` also clears the pane, because `/clear` ends the session without unloading the module. If the child stream fails, the plugin restarts it up to 3 times, then shows `could not run mdd: ...`. When the child exits, the pane shows `mddog stopped. Run /mddog again to restart it.`
 
@@ -578,8 +607,8 @@ There is no database. The binary reads `config.toml` and `style.css` from its co
 | `$TMPDIR/mddog-<pid>-<hex>-warm.html` | The spare's warm-up page. Removed once the warm-up ends. |
 | `$TMPDIR/mddog-<pid>-<hex>-stdin.md` | A copy of standard input. Removed when the viewer exits. |
 | `$TMPDIR/tty-graphics-protocol-mddog-<pid>-<hex>-<tag>` | A tile sent by temp file. The terminal deletes it. |
-| `$TMPDIR/mddog-<uid>-<hash>.sock` | The spare's socket, mode 0700. Removed when a client connects, or when the spare exits unused after 12 hours. |
-| `$TMPDIR/mddog-tiles-<pid>-<hex>/` | Headless PNG tiles, mode 0700. Removed on a normal exit and on SIGTERM, SIGINT, or SIGHUP. |
+| `$TMPDIR/mddog-<uid>-<hash>.sock` | The spare's socket, mode 0700. Removed when a client connects, when the binary changes, or when the spare exits unused after 12 hours. |
+| `$TMPDIR/mddog-tiles-<pid>-<hex>/` | Headless PNG or WebP tiles, mode 0700. Removed on a normal exit and on SIGTERM, SIGINT, or SIGHUP. |
 | `~/Library/LaunchAgents/dev.mddog.spare.plist` | The login spare's launchd job. Only with `--start-at-login`. |
 
 Each temp name has the pid and a per-run hex nonce, and the files are private.
@@ -628,7 +657,13 @@ Opening a file fetches only what the document names: remote images, video poster
 - Each `unsafe` block or impl has a `// SAFETY:` comment on the line above that names the invariant it relies on, and each `unsafe fn` has a `# Safety` doc section. Clippy's `undocumented_unsafe_blocks` enforces the comment, and `unnecessary_safety_comment` flags one left on safe code. Before you add a block, check whether the objc2 binding or std already has a safe call. When the same call repeats, wrap it once in a small safe function next to its callers, as `sweep::uid` and `webview::appearance` do.
 - CI (`.github/workflows/check.yml`) runs `./check.sh` on every push and pull request. It runs on a macOS runner because the WebKit and pty tests need macOS.
 - `python3 reference/keymap-check.py` checks that every test named in docs/behavior.md ran and passed.
-- `claude plugin test plugins/claude-code` runs the plugin's tests.
+- `claude plugin test plugins/claude-code` runs the plugin's tests in `plugins/claude-code/tests/`.
+
+### Releasing
+
+1. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
+2. Commit as `chore: release X.Y.Z`.
+3. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` builds both architectures and publishes the release.
 
 ### Integration tests
 
@@ -644,7 +679,7 @@ Opening a file fetches only what the document names: remote images, video poster
 - Every wait in `tests/search.rs` goes through `wait`, `loaded`, or `next_frame`, which allow 30 s and panic on timeout. A check that runs on a page that is not ready fails later and points at the wrong thing. Pele's ResizeObserver resets the zoom on its first callback, so press its buttons only after `next_frame`.
 - Every test that launches mdd or a WebView sets `MDDOG_CACHE_DIR` to `$TMPDIR/mddog-test-cache`, so `./check.sh` leaves `~/Library/Caches/mddog/` alone. Unit tests skip the remote disk cache.
 - macOS limits a Unix socket path to 104 bytes, so `tests/headless.rs` keeps its `TMPDIR` short.
-- Every test that launches mdd sets `MDDOG_NO_SPARE`, except `the_spare_outlives_a_tree_kill`. Its `StopSpares` guard stops the test binary's spares when the test ends, pass or fail, so no spare lives on for its 12-hour idle limit.
+- Every test that launches mdd sets `MDDOG_NO_SPARE`, except `the_spare_outlives_a_tree_kill` and `a_rebuild_retires_the_old_spare`. The first one's `StopSpares` guard stops the test binary's spares when the test ends, pass or fail, so no spare lives on for its 12-hour idle limit. The second runs a copy of the binary, so it kills its own child through a `Reap` guard.
 - A unit test in `src/render/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
 - `tests/math.rs` renders `fixtures/math/` and checks its math against `tests/math.golden` in the same way. `UPDATE_GOLDEN=1 cargo test --test math` rewrites it.
 
@@ -701,7 +736,7 @@ Opening a file fetches only what the document names: remote images, video poster
 |---|---|
 | Style | The markup and base CSS around the Markdown. GitHub's repo view is the only one. |
 | Theme | One CSS file on top of the style, which also gives the terminal chrome its colors. |
-| Tile | A pane-wide strip of the page sent to the terminal as one image. In headless mode, a PNG file of at most 100 rows and 8 MiB decoded. |
+| Tile | A pane-wide strip of the page sent to the terminal as one image. In headless mode, a PNG file of at most 100 rows and 8 MiB decoded, or with `--webp` a 10-row WebP file and its small copy. |
 | Band | Under herdr, a pane-wide image of a tile's changed rows, placed over the tile at `z=1` until the tile is sent whole again. |
 | Glide | An eased scroll to a jump target, drawn at pixel offsets. |
 | Round | One render's set of tiles in headless mode. |

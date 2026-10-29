@@ -16,6 +16,8 @@ use super::{Bitmap, CALL_LIMIT, Engine, snapshot_size};
 use crate::term::kitty::{self, Shm};
 
 const IDLE: Duration = Duration::from_secs(12 * 60 * 60);
+/// How often an unused spare checks that a client can still reach it.
+const CHECK: Duration = Duration::from_secs(3);
 const HELLO: &[u8] = b"mddog";
 const WARM_MD: &str =
     "```js\nx\n```\n```ts\nx\n```\n```tsx\nx\n```\n```python\nx\n```\n```rust\nx\n```\n```go\nx\n```\n```ruby\nx\n```\n```css\nx\n```\n```html\nx\n```\n```php\nx\n```\n```sh\nx\n```\n";
@@ -178,13 +180,14 @@ pub fn serve() -> i32 {
     let deadline = Instant::now() + IDLE;
     let client = loop {
         let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
+        // A rebuilt binary or moved socket means no client can reach this spare, and a newer spare serves them.
+        if left.is_zero() || !reachable(&path, bound) {
             remove();
             return 0;
         }
         let mut fds = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
         // SAFETY: fds is one valid pollfd, and the count passed is 1.
-        match unsafe { libc::poll(&mut fds, 1, left.as_millis().min(i32::MAX as u128) as i32) } {
+        match unsafe { libc::poll(&mut fds, 1, left.min(CHECK).as_millis() as i32) } {
             0 => continue,
             n if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => continue,
             n if n < 0 => {
@@ -211,9 +214,19 @@ pub fn serve() -> i32 {
     0
 }
 
+/// Whether clients still find this spare: the binary is unchanged, so they hash the same `path`, and the socket there is still the one `id` names.
+fn reachable(path: &Path, id: Option<(u64, u64)>) -> bool {
+    self::path().as_deref() == Some(path) && is(path, id)
+}
+
+/// Whether the file at `path` is the one `id` (device, inode) names.
+fn is(path: &Path, id: Option<(u64, u64)>) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| Some((m.dev(), m.ino())) == id)
+}
+
 /// Removes the file at `path` when it is still the one `id` (device, inode) names.
 fn remove_if(path: &Path, id: Option<(u64, u64)>) {
-    if std::fs::symlink_metadata(path).is_ok_and(|m| Some((m.dev(), m.ino())) == id) {
+    if is(path, id) {
         let _ = std::fs::remove_file(path);
     }
 }

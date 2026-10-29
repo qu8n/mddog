@@ -126,7 +126,8 @@ struct Renderer {
     round: u64,
     stamp: Option<Vec<u8>>,
     gone: bool,
-    /// Lossless WebP tiles sized for the desktop app's `Svg` element, instead of PNG tiles for a terminal.
+    /// WebP tiles sized for the desktop app's `Svg` element, instead of PNG tiles for a terminal. Text tiles are
+    /// lossless; pictures and small copies can be lossy (see `webp_tiles`).
     webp: bool,
 }
 
@@ -212,55 +213,93 @@ impl Renderer {
         Ok(())
     }
 
-    /// Cuts the page into lossless WebP tiles of `WEBP_ROWS` rows, halving a tile whose file would not fit one
+    /// Cuts the page into WebP tiles of `WEBP_ROWS` rows, halving a tile whose file would not fit one
     /// desktop `Svg` (its base64 under 131,072 characters with the markup around it). Each tile also gets a
     /// `small` copy at 1x, a quarter of the pixels: one drawing holds 262,144 characters, which
     /// dense text or pictures in a tall pane outgrow, so the plugin draws small copies where sharp ones don't fit.
-    /// One thread: each size decides the next snapshot.
+    /// A snapshot takes a few milliseconds and encoding up to a hundred times that, so tiles encode on other
+    /// threads while the next are taken, each taken as if the tiles above it fit. A tile that doesn't drops the
+    /// tiles after it and is taken again at half the rows, and the tiles after it go one at a time until one fits
+    /// whole: a big picture would drop every guess.
     fn webp_tiles(&self, round: u64, rows: u32) -> Result<Vec<serde_json::Value>, String> {
-        let mut tiles = Vec::new();
-        let mut top = 0;
-        while top < rows {
-            let mut n = WEBP_ROWS.min(rows - top);
+        let workers = std::thread::available_parallelism().map_or(ENCODERS, usize::from);
+        let mut ahead = workers;
+        std::thread::scope(|s| {
+            let mut tiles = Vec::new();
+            let mut encoding = VecDeque::new();
+            let (mut top, mut n) = (0, WEBP_ROWS);
             loop {
-                let (y, h) = (f64::from(top * self.cell_h) / self.scale, f64::from(n * self.cell_h) / self.scale);
-                let mut bmp = self.engine.snapshot(y, h, self.scale).ok_or("the snapshot failed")?;
-                bmp.rgba.unlink();
-                let path = self.dir.join(format!("{round}-{}.webp", tiles.len()));
-                let mut size = bmp.write_webp(&path, None)?;
-                // A picture takes a third of its lossless bytes as lossy, text four fifths or more: only a picture
-                // goes lossy, so a pane full of one stays 2x within the desktop's 262,144 characters.
-                if size > WEBP_LOSSY_FROM {
-                    let lossless = size;
-                    size = bmp.write_webp(&path, Some(75.0))?;
-                    if size * 10 > lossless * 6 {
-                        size = bmp.write_webp(&path, None)?;
-                    }
-                }
-                if size <= WEBP_MAX_BYTES || n == 1 {
+                if top < rows && encoding.len() < ahead {
+                    let at = n.min(rows - top);
+                    let (y, h) = (f64::from(top * self.cell_h) / self.scale, f64::from(at * self.cell_h) / self.scale);
+                    let mut bmp = self.engine.snapshot(y, h, self.scale).ok_or("the snapshot failed")?;
+                    bmp.rgba.unlink();
                     let mut low = self.engine.snapshot(y, h, (self.scale / 2.0).max(1.0)).ok_or("the snapshot failed")?;
                     low.rgba.unlink();
-                    let small = self.dir.join(format!("{round}-{}s.webp", tiles.len()));
-                    // Lossless suits text and lossy suits pictures, at a third to a tenth of the other's bytes.
-                    let lossless = low.write_webp(&small, None)?;
-                    let mut small_size = low.write_webp(&small, Some(75.0))?;
-                    if small_size > lossless {
-                        small_size = low.write_webp(&small, None)?;
-                    }
-                    // The plugin must fit the view in small copies, about seven tiles to a drawing.
-                    if small_size > WEBP_SMALL_MAX {
-                        small_size = low.write_webp(&small, Some(40.0))?;
-                    }
-                    tiles.push(serde_json::json!({
-                        "file": path, "rows": n, "width": bmp.width, "height": bmp.height, "bytes": size,
-                        "small": { "file": small, "width": low.width, "height": low.height, "bytes": small_size },
-                    }));
-                    break;
+                    encoding.push_back((top, at, s.spawn(move || webp_tile(&bmp, &low, at == 1))));
+                    (top, n) = (top + at, WEBP_ROWS);
+                    continue;
                 }
-                n = n.div_ceil(2);
+                let Some((at, got, h)) = encoding.pop_front() else { break };
+                let Some(t) = h.join().unwrap_or_else(|e| std::panic::resume_unwind(e))? else {
+                    // Wait out the dropped tiles, or each halving adds threads that starve WebKit's snapshots.
+                    for (_, _, h) in encoding.drain(..) {
+                        let _ = h.join();
+                    }
+                    (top, n, ahead) = (at, got.div_ceil(2), 1);
+                    continue;
+                };
+                if got == WEBP_ROWS {
+                    ahead = workers;
+                }
+                let path = self.dir.join(format!("{round}-{}.webp", tiles.len()));
+                let small = self.dir.join(format!("{round}-{}s.webp", tiles.len()));
+                for (p, b) in [(&path, &t.sharp), (&small, &t.small)] {
+                    std::fs::write(p, b).map_err(|e| format!("cannot write {}: {}", p.display(), term::io_error(&e)))?;
+                }
+                tiles.push(serde_json::json!({
+                    "file": path, "rows": got, "width": t.width, "height": t.height, "bytes": t.sharp.len(),
+                    "small": { "file": small, "width": t.small_width, "height": t.small_height, "bytes": t.small.len() },
+                }));
             }
-            top += n;
-        }
-        Ok(tiles)
+            Ok(tiles)
+        })
     }
+}
+
+struct WebpTile {
+    sharp: Vec<u8>,
+    width: usize,
+    height: usize,
+    small: Vec<u8>,
+    small_width: usize,
+    small_height: usize,
+}
+
+/// Encodes a tile and its small copy, or returns `None` when the tile is too big for one `Svg` and `last` (one
+/// row, so it can't be halved) is false.
+fn webp_tile(bmp: &engine::Bitmap, low: &engine::Bitmap, last: bool) -> Result<Option<WebpTile>, String> {
+    let mut sharp = bmp.webp(None)?;
+    // A picture takes a third of its lossless bytes as lossy, text four fifths or more: only a picture
+    // goes lossy, so a pane full of one stays 2x within the desktop's 262,144 characters.
+    if sharp.len() > WEBP_LOSSY_FROM {
+        let lossy = bmp.webp(Some(75.0))?;
+        if lossy.len() * 10 <= sharp.len() * 6 {
+            sharp = lossy;
+        }
+    }
+    if sharp.len() > WEBP_MAX_BYTES && !last {
+        return Ok(None);
+    }
+    // Lossless suits text and lossy suits pictures, at a third to a tenth of the other's bytes.
+    let lossless = low.webp(None)?;
+    let mut small = low.webp(Some(75.0))?;
+    if small.len() > lossless.len() {
+        small = lossless;
+    }
+    // The plugin must fit the view in small copies, about seven tiles to a drawing.
+    if small.len() > WEBP_SMALL_MAX {
+        small = low.webp(Some(40.0))?;
+    }
+    Ok(Some(WebpTile { sharp, width: bmp.width, height: bmp.height, small, small_width: low.width, small_height: low.height }))
 }

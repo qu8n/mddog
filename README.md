@@ -83,15 +83,16 @@ To update, run the mddog install script again, then:
 claude plugin marketplace update mddog && claude plugin update mddog@mddog
 ```
 
-Then start a new session or run `/reload-plugins`.
+Then start a new session or run `/reload-plugins`. Always update `mdd` and the plugin together: an older `mdd` can't draw the pane in the desktop app.
 
 ### Usage
 
-- Inside a Claude Code session, open a file with `/mddog @<file.md>` or `/mddog <file.md>`, or ask Claude to show you one.
+- Inside a Claude Code session, open a file with `/mddog @<file.md>` or `/mddog <file.md>`, or ask Claude to show you one. The pane works in the terminal and in the Claude Code desktop app.
 - Scroll with the mouse wheel, or click the pane and use the arrow and page keys.
 - The pane refreshes when the file changes.
 - If Claude opens the pane and it doesn't appear, the terminal is too narrow. Zoom out, or run `/mddog <file.md>` yourself.
 - To run a different `mdd` binary, set `MDDOG_BIN`.
+- If `/mddog` is the first message of a new session, the app shows "/mddog isn't a command here", but the command still runs. The app checks that first message before mddog has registered `/mddog`, so later calls show no note.
 
 Note: Claude Code only shows images in the terminals it knows, like Ghostty, kitty, iTerm2, and WezTerm. In other places, start it with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 claude`.
 
@@ -107,3 +108,4 @@ Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `
 - mddog refuses to run in Warp and zellij, whose bugs garble scrolling ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424), [zellij#5573](https://github.com/zellij-org/zellij/issues/5573)). In a multiplexer running inside Warp, mddog can't tell and runs anyway, with the same garbling.
 - No tmux support as it can't show images yet ([tmux#5445](https://github.com/tmux/tmux/pull/5445)).
 - In herdr, scrolling lags in most terminals except for Ghostty ([herdr#5512](https://github.com/herdrdev/herdr/issues/5512)). Starting herdr with `TERM_PROGRAM=ghostty herdr` fixes it, but then herdr also treats the terminal as Ghostty for notifications and focus.
+- In the Claude Code desktop app, the plugin's pane can't click links or select text.

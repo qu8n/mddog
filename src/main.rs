@@ -7,27 +7,22 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "usage: mdd [file.md|folder]
        command | mdd";
 
-fn help() -> String {
-    format!(
-        "{USAGE}
+const HELP: &str = "Preview Markdown in your terminal the way a browser renders it.
 
-Render Markdown in the terminal as a browser shows them, styled like GitHub by default. The preview reloads when the file changes.
-It needs a terminal with the Kitty graphics protocol, such as Ghostty, Kitty, WezTerm, or iTerm2. It refuses to run in Warp and zellij.
-With no file, it lists the Markdown files in the current git repo, or else the current folder, to pick from. With a folder, it lists that folder.
-With -, or with input piped in, it reads standard input.
+Usage
+  mdd                     list Markdown files from current repo or folder to preview
+  mdd file.md             preview a Markdown file
+  mdd folder              list Markdown files in a folder to preview
+  command | mdd           preview the output of a command in Markdown format
 
 Options
   -h, --help              show this help
   -V, --version           show the version
-      --start-at-login    have launchd start a prewarmed mdd at login, so the first preview opens fast
+      --start-at-login    start a prewarmed mdd at login so previews open faster
       --no-start-at-login undo --start-at-login
-      --headless COLS     write the preview as PNG tiles COLS cells wide and print them as JSON, for the Claude Code plugin
-      --webp              with --headless, write WebP tiles sized for the Claude Code desktop app instead
 
 In the preview, press ? to list the keys.
-"
-    )
-}
+";
 
 fn main() {
     trace::start();
@@ -70,7 +65,7 @@ fn main() {
                 None => usage("--headless needs a column count from 1 to 255"),
             },
             "-h" | "--help" if options => {
-                print!("{}", help());
+                print!("{HELP}");
                 return;
             }
             "-V" | "--version" if options => {

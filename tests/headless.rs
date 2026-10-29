@@ -123,3 +123,46 @@ fn the_spare_outlives_a_tree_kill() {
     assert!(doomed.is_empty(), "the spare was a child of the headless process: {doomed:?}");
     assert_eq!(line["columns"], 60);
 }
+
+/// Kills the child on drop, so a failed step does not leave it running.
+struct Reap(std::process::Child);
+
+impl Drop for Reap {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+fn a_rebuild_retires_the_old_spare() {
+    // The socket name hashes the binary's mtime, so each rebuild used to leave its old spare idle for 12 hours.
+    let dir = std::env::temp_dir().join(format!("mddog-rebuild-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let exe = dir.join("mdd");
+    std::fs::copy(env!("CARGO_BIN_EXE_mdd"), &exe).unwrap();
+    let mut spare = Reap(Command::new(&exe).arg("--spare").env("MDDOG_CACHE_DIR", test_cache()).env("TMPDIR", &dir).spawn().unwrap());
+    let socket = || std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".sock"));
+    let within = |secs: u64, mut done: Box<dyn FnMut() -> bool + '_>| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        while !done() && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        done()
+    };
+    assert!(within(20, Box::new(socket)), "the spare never listened");
+    std::fs::copy(&exe, dir.join("mdd.new")).unwrap();
+    // The copy keeps the old mtime, and a rebuild would not.
+    std::fs::File::options().write(true).open(dir.join("mdd.new")).unwrap().set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(1)).unwrap();
+    std::fs::rename(dir.join("mdd.new"), &exe).unwrap();
+    // The socket is bound before warm-up, so allow for warm-up's waits too.
+    let exited = within(20, Box::new(|| spare.0.try_wait().unwrap().is_some()));
+    let status = spare.0.try_wait().unwrap();
+    let left = socket();
+    drop(spare);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(exited, "the old spare outlived the rebuild");
+    // A spare whose warm-up fails exits with 1, and that is not the retirement under test.
+    assert!(status.is_some_and(|s| s.success()), "the spare failed rather than retired: {status:?}");
+    assert!(!left, "the old spare left its socket");
+}

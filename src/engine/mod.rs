@@ -26,17 +26,16 @@ impl Bitmap {
 
     /// WebP at libwebp's method 2. Lossless takes about a sixth of `write_png`'s bytes for a page of text, so a
     /// tile fits in the 128 KiB `Svg` source the Claude Code desktop app draws; lossy is for pictures, and for
-    /// the small copies it draws where sharp tiles don't fit. Returns the bytes written.
+    /// the small copies it draws where sharp tiles don't fit.
     /// Lossy at `quality` when given, else lossless.
-    pub fn write_webp(&self, path: &Path, quality: Option<f32>) -> Result<usize, String> {
+    pub fn webp(&self, quality: Option<f32>) -> Result<Vec<u8>, String> {
         let mut cfg = webp::WebPConfig::new().map_err(|()| "libwebp refused its default config".to_string())?;
         cfg.lossless = i32::from(quality.is_none());
         // Lossless reads it as effort.
         cfg.quality = quality.unwrap_or(75.0);
         cfg.method = 2;
         let mem = webp::Encoder::from_rgba(&self.rgba[..], self.width as u32, self.height as u32).encode_advanced(&cfg).map_err(|e| format!("libwebp: {e:?}"))?;
-        std::fs::write(path, &*mem).map_err(|e| e.to_string())?;
-        Ok(mem.len())
+        Ok(mem.to_vec())
     }
 }
 
