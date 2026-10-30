@@ -303,3 +303,53 @@ fn webp_tile(bmp: &engine::Bitmap, low: &engine::Bitmap, last: bool) -> Result<O
     }
     Ok(Some(WebpTile { sharp, width: bmp.width, height: bmp.height, small, small_width: low.width, small_height: low.height }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bitmap(width: usize, height: usize, px: impl Fn(usize, usize) -> [u8; 4]) -> engine::Bitmap {
+        let mut rgba = kitty::Shm::create(kitty::shm_name(), width * height * 4).unwrap();
+        for (i, p) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            p.copy_from_slice(&px(i % width, i / width));
+        }
+        engine::Bitmap { width, height, rgba }
+    }
+
+    /// A fixed xorshift, so the noise and its encoded size are the same on every run.
+    fn noise(seed: usize) -> u8 {
+        let mut x = (seed as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        (x >> 32) as u8
+    }
+
+    #[test]
+    fn flat_tiles_stay_lossless_and_keep_the_small_size() {
+        let (bmp, low) = (bitmap(800, 200, |_, _| [250, 250, 250, 255]), bitmap(400, 100, |_, _| [250, 250, 250, 255]));
+        let tile = webp_tile(&bmp, &low, false).unwrap().unwrap();
+        assert_eq!(tile.sharp, bmp.webp(None).unwrap());
+        assert!(tile.sharp.len() < WEBP_LOSSY_FROM);
+        assert_eq!((tile.width, tile.height, tile.small_width, tile.small_height), (800, 200, 400, 100));
+    }
+
+    #[test]
+    fn pictures_go_lossy() {
+        let px = |x: usize, y: usize| [(x / 4) as u8, (y + x / 8) as u8, 128u8.wrapping_add(noise(x * 7 + y * 13) % 24), 255];
+        let (bmp, low) = (bitmap(600, 200, px), bitmap(300, 100, px));
+        let lossless = bmp.webp(None).unwrap();
+        assert!(lossless.len() > WEBP_LOSSY_FROM, "the fixture must be big enough to try lossy");
+        let tile = webp_tile(&bmp, &low, false).unwrap().unwrap();
+        assert!(tile.sharp.len() * 10 <= lossless.len() * 6, "{} lossy against {} lossless", tile.sharp.len(), lossless.len());
+    }
+
+    #[test]
+    fn noise_too_big_for_one_svg_is_halved_unless_last() {
+        let px = |x: usize, y: usize| [noise(x + y * 1200), noise(x + y * 1200 + 1), noise(x + y * 1200 + 2), 255];
+        let (bmp, low) = (bitmap(1200, 400, px), bitmap(600, 200, px));
+        assert!(webp_tile(&bmp, &low, false).unwrap().is_none());
+        let last = webp_tile(&bmp, &low, true).unwrap().unwrap();
+        assert!(last.sharp.len() > WEBP_MAX_BYTES);
+    }
+}

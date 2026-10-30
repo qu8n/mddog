@@ -355,12 +355,13 @@ fn hints_work_while_help_shows() {
 
 #[test]
 fn closing_help_sends_the_page_again() {
-    let Viewer { mut child, mut tty, out } = open(GFM, 70, &[]);
+    let dir = scratch("helpagain");
+    let trace = dir.join("trace.log");
+    let Viewer { mut child, mut tty, out } = open(GFM, 70, &[("MDDOG_TRACE", trace.to_str().unwrap())]);
     wait_for(&out, 0, b"a=p,");
     tty.write_all(b"?").unwrap();
     wait_for(&out, 0, b"mddog keys");
-    std::thread::sleep(Duration::from_millis(1500));
-    let closed = out.lock().unwrap().len();
+    let closed = settled(&trace, "", &out);
     tty.write_all(b"?").unwrap();
     let place = wait_for(&out, closed, b"a=p,i=");
     let all = out.lock().unwrap().clone();
@@ -368,7 +369,33 @@ fn closing_help_sends_the_page_again() {
     let sent = find(&all[closed..], format!("t=d,i={id},q=2").as_bytes()).map(|i| closed + i);
     tty.write_all(b"q").unwrap();
     let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(sent.is_some_and(|s| s < place), "image {id} was placed after help closed but not sent again");
+}
+
+/// Waits for the viewer to re-place the page once its late content (math, diagrams, remote images) is in,
+/// after the traced line that contains `after`, then for the terminal output to stop growing, and returns its length.
+/// The quiet spell outlasts the viewer's one-second idle fold, which redraws the page after the last key.
+fn settled(trace: &std::path::Path, after: &str, out: &Mutex<Vec<u8>>) -> usize {
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        let log = std::fs::read_to_string(trace).unwrap_or_default();
+        if log.find(after).is_some_and(|i| log[i..].contains("late content settled")) {
+            break;
+        }
+        assert!(Instant::now() < end, "late content never settled after {after:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let mut len = out.lock().unwrap().len();
+    loop {
+        std::thread::sleep(Duration::from_millis(1500));
+        let now = out.lock().unwrap().len();
+        if now == len {
+            return len;
+        }
+        assert!(Instant::now() < end, "the terminal output never stopped growing");
+        len = now;
+    }
 }
 
 /// Waits for the page to be placed again after `before`, and says whether the screen was cleared on the way.
@@ -379,31 +406,35 @@ fn cleared_before_placing(out: &Mutex<Vec<u8>>, before: usize) -> bool {
 
 #[test]
 fn closing_the_contents_clears_its_text() {
-    let Viewer { mut child, mut tty, out } = open(GFM, 100, &[]);
+    let dir = scratch("tocclose");
+    let trace = dir.join("trace.log");
+    let Viewer { mut child, mut tty, out } = open(GFM, 100, &[("MDDOG_TRACE", trace.to_str().unwrap())]);
     wait_for(&out, 0, b"a=p,");
     tty.write_all(b"t").unwrap();
     wait_for(&out, 0, b"CONTENTS");
-    std::thread::sleep(Duration::from_millis(1500));
-    let closed = out.lock().unwrap().len();
+    let closed = settled(&trace, "key Char('t')", &out);
     tty.write_all(b"t").unwrap();
     let cleared = cleared_before_placing(&out, closed);
     tty.write_all(b"q").unwrap();
     let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(cleared, "the sidebar's text stayed on screen under the wider page");
 }
 
 #[test]
 fn a_resize_clears_the_old_status_row() {
-    let Viewer { mut child, tty, out } = open(GFM, 100, &[]);
+    let dir = scratch("resizerow");
+    let trace = dir.join("trace.log");
+    let Viewer { mut child, tty, out } = open(GFM, 100, &[("MDDOG_TRACE", trace.to_str().unwrap())]);
     wait_for(&out, 0, b"a=p,");
-    std::thread::sleep(Duration::from_millis(1500));
-    let before = out.lock().unwrap().len();
+    let before = settled(&trace, "", &out);
     let size = libc::winsize { ws_row: 30, ws_col: 90, ws_xpixel: 90 * 18, ws_ypixel: 30 * 38 };
     resize(&tty, size);
     let cleared = cleared_before_placing(&out, before);
     let mut tty = tty;
     tty.write_all(b"q").unwrap();
     let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(cleared, "the status row stayed at its old row after a resize");
 }
 
@@ -696,6 +727,9 @@ fn tiles_line_up_at_an_odd_cell_height() {
 
 /// Sends `mouse` with `copy_on_select` set to `on`. Returns the text of each
 /// OSC 52 copy the viewer wrote, and what it sent to a stand-in pbcopy.
+/// A click names a terminal cell, which lands on a Retina page point only at scale 2; a CI runner's screen is 1x.
+const RETINA: (&str, &str) = ("MDDOG_SCALE", "2");
+
 fn mouse_copies(on: bool, mouse: &[u8]) -> (Vec<String>, String) {
     let dir = scratch(&format!("select-{on}-{}", mouse.len()));
     std::fs::write(dir.join("mddog/config.toml"), format!("copy_on_select = {on}\n")).unwrap();
@@ -706,7 +740,7 @@ fn mouse_copies(on: bool, mouse: &[u8]) -> (Vec<String>, String) {
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let file = dir.join("a.md");
     std::fs::write(&file, "alpha beta gamma\n\ndelta epsilon zeta\n").unwrap();
-    let env = [("XDG_CONFIG_HOME", dir.to_str().unwrap()), ("PATH", &path)];
+    let env = [("XDG_CONFIG_HOME", dir.to_str().unwrap()), ("PATH", &path), RETINA];
     let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &env);
     wait_for(&out, 0, b"a=p,");
     let before = out.lock().unwrap().len();
@@ -849,7 +883,7 @@ fn buttons_show_the_hand() {
     std::fs::write(&file, "```rust\nfn main() {}\n```\n\n```mermaid\ngraph LR\n  A --> B\n```\n").unwrap();
     std::fs::create_dir_all(dir.join("mddog")).unwrap();
     std::fs::write(dir.join("mddog/config.toml"), "theme = \"github-dark\"\n").unwrap();
-    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &[("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
+    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &[("XDG_CONFIG_HOME", dir.to_str().unwrap()), RETINA]);
     let drawn = wait_for(&out, 0, b"a=p,");
     // Text, then the code copy, Mermaid copy and Mermaid expand buttons, with text between.
     let mut at = drawn;

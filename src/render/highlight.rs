@@ -141,7 +141,7 @@ fn tree_sitter_html_spans(config: &HighlightConfiguration, code: &str) -> Option
     Some(out)
 }
 
-pub fn push_lines(out: &mut String, text: &str, open: &[&str]) {
+fn push_lines(out: &mut String, text: &str, open: &[&str]) {
     let mut first = true;
     for line in text.split('\n') {
         if !first {

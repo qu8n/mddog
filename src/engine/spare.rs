@@ -282,7 +282,7 @@ fn warm(engine: &Engine) {
     let file = crate::sweep::temp_path("mddog-", "-warm.html");
     if crate::page::load(engine, &file, &html, theme.dark, Duration::from_secs(5)).is_ok() {
         let _ = engine.eval(crate::page::script::START_MERMAID);
-        engine.wait_js("document.fonts.status === 'loaded' && mddog.state.math === true && mddog.state.mermaid === true", Duration::from_secs(5));
+        engine.wait_js(&format!("document.fonts.status === 'loaded' && {} && {}", crate::page::script::MATH_DONE, crate::page::script::MERMAID_DONE), Duration::from_secs(5));
     }
     let _ = std::fs::remove_file(&file);
 }

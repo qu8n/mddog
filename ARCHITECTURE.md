@@ -600,9 +600,9 @@ There is no database. The binary reads `config.toml` and `style.css` from its co
 |---|---|
 | `~/Library/Caches/mddog/runtime-<hash>/` | MathJax, mermaid, and Pele. Unpacked into `runtime-<hash>.tmp<pid>`, then renamed into place. Each page build that uses it sets its mtime, so the sweep can tell which folders are in use. |
 | `~/Library/Caches/mddog/content-rules/` | WebKit's compiled content rule. Each run compiles it again over the same file. |
-| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>` and a rename. The sweep removes it. |
+| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>-<n>`, a name of its own per write, and a rename. The sweep removes it. |
 | `~/Library/Caches/mddog/diagram-sizes.json` | The last 512 obsidian-engine diagram sizes, oldest dropped first. Written through `diagram-sizes.tmp<pid>` and a rename. Read and write errors are ignored, since a missing size only brings back the jump. |
-| `~/Library/Caches/mddog/image-sizes.json` | The natural sizes of the last 512 remote images with no `height`, by URL (up to 2048 characters), oldest dropped first. Read at the first page with remote images, and written like `diagram-sizes.json`. |
+| `~/Library/Caches/mddog/image-sizes.json` | The natural sizes of the last 512 remote images with no `height`, by URL (up to 2048 characters), oldest dropped first. Read at the first page with remote images, and written like `diagram-sizes.json`. WebKit gives an SVG wider than the page the page-fit size as its natural size, so such an SVG is remembered smaller than it is. |
 | `$TMPDIR/mddog-<pid>-<hex>.html` | The page. Kept until the viewer exits, because the obsidian engine's frame loads `file:` scripts after the page loads, and WebKit refuses them once the page file is gone. |
 | `$TMPDIR/mddog-<pid>-<hex>-warm.html` | The spare's warm-up page. Removed once the warm-up ends. |
 | `$TMPDIR/mddog-<pid>-<hex>-stdin.md` | A copy of standard input. Removed when the viewer exits. |
@@ -661,9 +661,10 @@ Opening a file fetches only what the document names: remote images, video poster
 
 ### Releasing
 
-1. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
-2. Commit as `chore: release X.Y.Z`.
-3. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` builds both architectures and publishes the release.
+1. Run `claude plugin test plugins/claude-code`, since `./check.sh` and CI don't run the plugin's tests.
+2. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
+3. Commit as `chore: release X.Y.Z`.
+4. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` checks that the tag matches both versions, then builds both architectures and publishes the release.
 
 ### Integration tests
 
@@ -679,6 +680,7 @@ Opening a file fetches only what the document names: remote images, video poster
 - Every wait in `tests/search.rs` goes through `wait`, `loaded`, or `next_frame`, which allow 30 s and panic on timeout. A check that runs on a page that is not ready fails later and points at the wrong thing. Pele's ResizeObserver resets the zoom on its first callback, so press its buttons only after `next_frame`.
 - Every test that launches mdd or a WebView sets `MDDOG_CACHE_DIR` to `$TMPDIR/mddog-test-cache`, so `./check.sh` leaves `~/Library/Caches/mddog/` alone. Unit tests skip the remote disk cache.
 - macOS limits a Unix socket path to 104 bytes, so `tests/headless.rs` keeps its `TMPDIR` short.
+- The pty tests in `tests/help.rs` that click at a cell and expect a given word or button set `MDDOG_SCALE=2`, since GitHub's macOS runners have a 1x screen. The others run at the screen's own scale, since a forced 2x on a 1x screen changes how tiles line up.
 - Every test that launches mdd sets `MDDOG_NO_SPARE`, except `the_spare_outlives_a_tree_kill` and `a_rebuild_retires_the_old_spare`. The first one's `StopSpares` guard stops the test binary's spares when the test ends, pass or fail, so no spare lives on for its 12-hour idle limit. The second runs a copy of the binary, so it kills its own child through a `Reap` guard.
 - A unit test in `src/render/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
 - `tests/math.rs` renders `fixtures/math/` and checks its math against `tests/math.golden` in the same way. `UPDATE_GOLDEN=1 cargo test --test math` rewrites it.
@@ -717,6 +719,7 @@ Opening a file fetches only what the document names: remote images, video poster
 | Variable | Read by | Effect |
 |---|---|---|
 | `MDDOG_NO_SPARE` | mdd, the spare | No warm spare, as with `fast_start = false`. For tests |
+| `MDDOG_SCALE` | mdd, the spare | Pixels per CSS pixel in place of the screen's, so pty tests click the same page points on a 1x CI runner. For tests |
 | `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, cell geometry, page height after each measure, and remote fetches |
 | `MDDOG_DUMP_VIEW=FILE` | mdd | With `MDDOG_TRACE`, write a PNG of the viewport after each frame |
 | `MDDOG_DUMP_TILES=DIR` | mdd | Write each tile as it is sent |
