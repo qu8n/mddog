@@ -6,8 +6,8 @@ use std::thread::{JoinHandle, ScopedJoinHandle};
 use std::time::Duration;
 
 use crate::Doc;
-use crate::engine::{self, Engine};
-use crate::page::{self, remote, script};
+use crate::engine::{self, Engine, Late};
+use crate::page;
 use crate::term;
 use crate::term::kitty;
 use crate::watch;
@@ -51,7 +51,8 @@ pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
         eprintln!("mdd: can't watch {} for changes", term::printable(&file.display().to_string()));
         return 1;
     };
-    let spare = engine::spare::connect();
+    let native = engine::native();
+    let spare = if native { None } else { engine::spare::connect() };
     // With no spare, the first render runs while WebKit starts.
     let first = if spare.is_none() {
         let file = file.clone();
@@ -59,26 +60,32 @@ pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
             .stack_size(crate::render::STACK)
             .spawn(move || {
                 let bytes = std::fs::read(&file).ok()?;
-                let (_, doc) = page::doc(&bytes, &page::base_dir(&file, false), |_, _| None);
+                let (_, doc) = page::doc(&bytes, &page::base_dir(&file, false), |_, _| native.then(crate::Doc::default));
                 Some((bytes, doc))
             })
             .ok()
     } else {
         None
     };
-    let engine = spare.map_or_else(
-        || {
-            let e = Engine::new(800.0);
-            e.load_blank();
-            e
-        },
-        Engine::Remote,
-    );
+    let engine = if native {
+        Engine::new_native(800.0)
+    } else {
+        spare.map_or_else(
+            || {
+                let e = Engine::new(800.0);
+                e.load_blank();
+                e
+            },
+            Engine::Remote,
+        )
+    };
     let scale = engine.scale();
     let (cell_w, cell_h) = cell_size(scale).unwrap_or(((8.0 * scale) as u32, (16.0 * scale) as u32));
     let mut r = Renderer { engine, file, first, dir, html: PathBuf::new(), scale, cell_w, cell_h, cols: u32::from(cols.max(1)), round: 0, stamp: None, gone: false, webp };
     r.html = r.dir.join("page.html");
-    engine::spare::spawn();
+    if !native {
+        engine::spare::spawn();
+    }
     let mut swept = false;
     let code = loop {
         if let Err(e) = r.render() {
@@ -156,20 +163,15 @@ impl Renderer {
         let (html, theme) = page::html(&doc, &base, false);
         let width_px = self.cols * self.cell_w;
         self.engine.resize(f64::from(width_px) / self.scale, 600.0);
-        page::load(&self.engine, &self.html, &html, theme.dark, Duration::from_secs(3))?;
-        let mut late = vec!["true"];
-        if doc.math {
-            late.push(script::MATH_DONE);
+        if !self.engine.load_markdown(&String::from_utf8_lossy(&bytes), &base, false, theme) {
+            page::load(&self.engine, &self.html, &html, theme.dark, Duration::from_secs(3))?;
         }
         if doc.mermaid {
-            let _ = self.engine.eval(script::START_MERMAID);
-            late.push(script::MERMAID_DONE);
+            self.engine.start_mermaid();
         }
-        if remote::load(&self.engine, REMOTE_LIMIT) {
-            late.push(script::REMOTE_DONE);
-        }
-        self.engine.wait_js(&late.join(" && "), LATE_WAIT);
-        let bottom = script::measure(&self.engine).height;
+        let late = Late { math: doc.math, mermaid: doc.mermaid, remote: self.engine.load_remote(REMOTE_LIMIT) };
+        self.engine.wait_late(late, LATE_WAIT);
+        let bottom = self.engine.layout().height;
         let rows = ((bottom * self.scale).ceil() as u32).div_ceil(self.cell_h).max(1);
         self.engine.resize(f64::from(width_px) / self.scale, f64::from(rows * self.cell_h) / self.scale);
         engine::spin(1.0);

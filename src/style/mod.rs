@@ -5,7 +5,7 @@ use kuchikiki::NodeRef;
 use crate::config;
 use crate::page::Opts;
 
-mod github;
+pub(crate) mod github;
 
 pub struct Style {
     /// Adds this style's markup to the sanitized HTML. `front` is the file's front matter, if any.

@@ -20,8 +20,6 @@ pub struct Config {
     pub prewarm: bool,
     pub mermaid: MermaidConfig,
     pub file_list: FileListConfig,
-    #[serde(skip)]
-    pub css: String,
     /// The `theme` key's themes, read.
     #[serde(skip)]
     pub themes: Themes,
@@ -40,7 +38,6 @@ impl Default for Config {
             prewarm: true,
             mermaid: MermaidConfig::default(),
             file_list: FileListConfig::default(),
-            css: String::new(),
             themes,
         }
     }
@@ -208,17 +205,11 @@ pub fn load() -> Result<(), String> {
 
 pub fn read(dir: &Path) -> Result<Config, String> {
     let path = dir.join("config.toml");
-    let mut config = match std::fs::read_to_string(&path) {
+    let config = match std::fs::read_to_string(&path) {
         Ok(text) => parse(&text, dir).map_err(|e| format!("{}: {e}", path.display()))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
         Err(e) => return Err(format!("{}: {}", path.display(), crate::term::io_error(&e))),
     };
-    let css = dir.join("style.css");
-    match std::fs::read_to_string(&css) {
-        Ok(text) => config.css = theme::relative_urls(&text, dir),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("{}: {}", css.display(), crate::term::io_error(&e))),
-    }
     Ok(config)
 }
 
@@ -334,6 +325,10 @@ mod tests {
         assert!(c.themes.light.dark);
         let abs = dir.join("mine.css").display().to_string();
         assert!(parse(&format!("theme = {abs:?}\n")).unwrap().themes.light.dark);
+        // A bad token stops mddog with the config line, the file and the token.
+        std::fs::write(dir.join("bad.css"), ":root{color-scheme:dark;--mddog-tint:#101010}").unwrap();
+        let e = super::parse("live_reload = true\ntheme = \"bad.css\"\n", &dir).unwrap_err();
+        assert_eq!(e, format!("line 2: theme: {}: --mddog-tint: unknown token. A theme sets color-scheme and the --mddog-* tokens that docs/themes.md lists", dir.join("bad.css").display()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

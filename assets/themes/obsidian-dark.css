@@ -1,7 +1,10 @@
-/* Obsidian dark: Obsidian's default theme as its reading view draws a note. The values were measured in Obsidian 1.14.
-   Everything below the :root block is the same in obsidian-light.css; a test keeps the two in step. */
+/* Obsidian dark: the colors and type of Obsidian's default theme in its reading view, measured in Obsidian 1.14.
+   obsidian-light.css sets the same tokens; a test keeps the two in step. */
 :root {
   color-scheme: dark;
+  --mddog-mermaid: obsidian;
+
+  /* The terminal chrome */
   --mddog-bg: #1c1c1c;
   --mddog-fg: #dadada;
   --mddog-fg-muted: #b3b3b3;
@@ -10,323 +13,42 @@
   --mddog-bar-bg: #282828;
   --mddog-border: #333333;
   --mddog-skeleton: #2e2e2e;
-  --mddog-mermaid: obsidian;
 
-  --obs-text: #dadada;
-  --obs-muted: #b3b3b3;
-  --obs-faint: #666666;
-  --obs-link: #a68af9;
-  --obs-accent: #8a5cf5;
-  --obs-code-bg: #232323;
-  --obs-border: #333333;
-  --obs-guide: #373737;
-  --obs-selection: rgba(138, 92, 245, 0.33);
-  --obs-red: #fb464c;
-  --obs-orange: #e9973f;
-  --obs-yellow: #e0de71;
-  --obs-green: #44cf6e;
-  --obs-cyan: #53dfdd;
-  --obs-blue: #027aff;
-  --obs-purple: #a882ff;
-  --obs-pink: #fa99cd;
-  --obs-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 8.2 7 10.6l4.6-5' fill='none' stroke='%231c1c1c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  --obs-external: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5'/%3E%3C/svg%3E");
+  /* The page */
+  --mddog-text: #dadada;
+  --mddog-text-muted: #b3b3b3;
+  --mddog-heading: #dadada;
+  --mddog-link: #a68af9;
+  --mddog-accent: #8a5cf5;
+  --mddog-code-bg: #2b2b2b;
+  --mddog-pre-bg: #232323;
+  --mddog-alt-bg: #232323;
+  --mddog-rule: #333333;
+  --mddog-mark-bg: #5a4a00;
+  --mddog-match-bg: #5a4a00;
+  --mddog-match-current-bg: #9e6a03;
+  --mddog-text-selection: #483699;
+  --mddog-alert-note: #027aff;
+  --mddog-alert-tip: #53dfdd;
+  --mddog-alert-important: #a882ff;
+  --mddog-alert-warning: #e9973f;
+  --mddog-alert-caution: #fb464c;
+  --mddog-diff-add-bg: #1b3324;
+  --mddog-diff-del-bg: #3a1d1f;
 
-  /* The GitHub variables the base CSS reads */
-  --fgColor-default: #dadada;
-  --fgColor-muted: #b3b3b3;
-  --fgColor-accent: #a68af9;
-  --fgColor-success: #44cf6e;
-  --fgColor-attention: #e9973f;
-  --fgColor-danger: #fb464c;
-  --fgColor-done: #a882ff;
-  --fgColor-onEmphasis: #ffffff;
-  --fgColor-white: #ffffff;
-  --bgColor-default: #1c1c1c;
-  --bgColor-muted: #232323;
-  --bgColor-neutral-muted: #333333;
-  --bgColor-emphasis: #555555;
-  --bgColor-white: #ffffff;
-  --bgColor-accent-muted: rgba(138, 92, 245, 0.15);
-  --bgColor-attention-muted: rgba(233, 151, 63, 0.15);
-  --bgColor-danger-muted: rgba(251, 70, 76, 0.1);
-  --borderColor-default: #333333;
-  --borderColor-muted: #333333;
-  --borderColor-emphasis: #555555;
-  --borderColor-neutral-muted: #333333;
-  --borderColor-accent-emphasis: #8a5cf5;
-  --borderColor-accent-muted: rgba(138, 92, 245, 0.4);
-  --borderColor-attention-emphasis: #e9973f;
-  --borderColor-danger-emphasis: #fb464c;
-  --borderColor-danger-muted: rgba(251, 70, 76, 0.4);
-  --borderColor-done-emphasis: #a882ff;
-  --borderColor-success-emphasis: #44cf6e;
-  --button-default-fgColor-rest: #dadada;
-  --button-default-bgColor-rest: #282828;
-  --button-default-bgColor-hover: #333333;
-  --button-default-bgColor-active: #3f3f3f;
-  --button-default-borderColor-rest: #333333;
-  --button-default-borderColor-hover: #3f3f3f;
-  --button-default-borderColor-active: #555555;
-  --button-default-shadow-resting: none;
-  --focus-outlineColor: #8a5cf5;
-  --color-prettylights-syntax-comment: #666666;
-  --color-prettylights-syntax-constant: #a882ff;
-  --color-prettylights-syntax-constant-other-reference-link: #a68af9;
-  --color-prettylights-syntax-entity: #e0de71;
-  --color-prettylights-syntax-entity-tag: #fb464c;
-  --color-prettylights-syntax-keyword: #fa99cd;
-  --color-prettylights-syntax-string: #44cf6e;
-  --color-prettylights-syntax-string-regexp: #e9973f;
-  --color-prettylights-syntax-variable: #53dfdd;
-  --color-prettylights-syntax-storage-modifier-import: #dadada;
-  --color-prettylights-syntax-brackethighlighter-angle: #b3b3b3;
-  --color-prettylights-syntax-brackethighlighter-unmatched: #fb464c;
-  --color-prettylights-syntax-carriage-return-text: #dadada;
-  --color-prettylights-syntax-carriage-return-bg: #fb464c;
-  --color-prettylights-syntax-invalid-illegal-text: #fb464c;
-  --color-prettylights-syntax-invalid-illegal-bg: transparent;
-  --color-prettylights-syntax-markup-bold: #dadada;
-  --color-prettylights-syntax-markup-italic: #dadada;
-  --color-prettylights-syntax-markup-heading: #e9973f;
-  --color-prettylights-syntax-markup-list: #e9973f;
-  --color-prettylights-syntax-markup-inserted-text: #44cf6e;
-  --color-prettylights-syntax-markup-inserted-bg: transparent;
-  --color-prettylights-syntax-markup-deleted-text: #fb464c;
-  --color-prettylights-syntax-markup-deleted-bg: transparent;
-  --color-prettylights-syntax-markup-changed-text: #e9973f;
-  --color-prettylights-syntax-markup-changed-bg: transparent;
-  --color-prettylights-syntax-markup-ignored-text: #b3b3b3;
-  --color-prettylights-syntax-markup-ignored-bg: transparent;
-  --color-prettylights-syntax-meta-diff-range: #a882ff;
-  --color-prettylights-syntax-sublimelinter-gutter-mark: #666666;
-}
+  /* Code */
+  --mddog-pl-comment: #666666;
+  --mddog-pl-keyword: #fa99cd;
+  --mddog-pl-string: #44cf6e;
+  --mddog-pl-constant: #a882ff;
+  --mddog-pl-entity: #e0de71;
+  --mddog-pl-inserted: #44cf6e;
+  --mddog-pl-deleted: #fb464c;
 
-.markdown-body {
-  color: var(--obs-text);
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, Inter, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-}
-::selection {
-  background-color: var(--obs-selection);
-}
-
-/* Headings */
-.markdown-body :is(h1, h2, h3, h4, h5, h6) {
-  margin: 16px 0;
-  padding: 0;
-  border: 0;
-  color: var(--obs-text);
-}
-.markdown-body > :not(.markdown-heading, hr) + .markdown-heading > :is(h1, h2, h3, h4, h5, h6) {
-  margin-top: 40px;
-}
-.markdown-body h1 { font-size: 1.618em; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
-.markdown-body h2 { font-size: 1.462em; line-height: 1.2; font-weight: 680; letter-spacing: -0.011em; }
-.markdown-body h3 { font-size: 1.318em; line-height: 1.3; font-weight: 660; letter-spacing: -0.008em; }
-.markdown-body h4 { font-size: 1.188em; line-height: 1.4; font-weight: 640; letter-spacing: -0.005em; }
-.markdown-body h5 { font-size: 1.076em; line-height: 1.5; font-weight: 620; letter-spacing: -0.002em; }
-.markdown-body h6 { font-size: 1em; line-height: 1.5; font-weight: 600; }
-.markdown-body strong {
-  font-weight: 600;
-}
-
-/* Links. A link out of the note gets a small arrow, as in Obsidian. */
-.markdown-body a[href] {
-  color: var(--obs-link);
-  text-decoration: underline;
-}
-.markdown-body :is(a[href^="http"], a[href^="mailto:"]):not(:has(img)) {
-  padding-inline-end: 0.9em;
-  background: var(--obs-external) no-repeat right 0.25em / 0.825em;
-}
-.markdown-body :is(a[href^="http"], a[href^="mailto:"]):dir(rtl):not(:has(img)) {
-  background-position: left 0.25em;
-}
-
-/* Lists: small round bullets and faint numbers, with a guide line beside nested lists */
-.markdown-body :is(ul, ol) {
-  padding-inline: 1.89em 0;
-}
-.markdown-body li {
-  padding: 0.075em 0;
-}
-.markdown-body li + li {
-  margin-top: 0;
-}
-.markdown-body li > p {
-  margin: 0;
-}
-.markdown-body ul > li {
-  position: relative;
-  list-style: none;
-}
-.markdown-body ul > li:not(.task-list-item)::before {
-  content: "";
-  position: absolute;
-  top: 0.675em;
-  inset-inline-start: -0.95em;
-  width: 0.3em;
-  height: 0.3em;
-  border-radius: 50%;
-  background-color: var(--obs-faint);
-}
-/* The doubled class beats GitHub's roman and alpha numbers on nested lists */
-.markdown-body.markdown-body ol {
-  list-style-type: decimal;
-}
-.markdown-body ol > li::marker {
-  color: var(--obs-faint);
-  font-variant-numeric: tabular-nums;
-}
-.markdown-body li > :is(ul, ol) {
-  position: relative;
-}
-.markdown-body li > :is(ul, ol)::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  inset-inline-start: -0.85em;
-  border-inline-start: 1px solid var(--obs-guide);
-}
-
-/* Task lists */
-.markdown-body .task-list-item + .task-list-item {
-  margin-top: 0;
-}
-/* Holds the row open when the floated checkbox is all an item has */
-.markdown-body .task-list-item {
-  min-height: 1.5em;
-}
-/* Floated, so the space after it collapses and a done task's strike line starts at its text.
-   Physical sides: task lists get no dir="auto", but a loose item's paragraph does. */
-.markdown-body input.task-list-item-checkbox {
-  float: left;
-  width: 16px;
-  height: 16px;
-  margin: 0.3em 8px 0 -24px;
-  border: 1px solid var(--obs-faint);
-  border-radius: 4px;
-  background: transparent;
-}
-.markdown-body input.task-list-item-checkbox:checked {
-  border-color: var(--obs-accent);
-  background: var(--obs-accent) var(--obs-check) no-repeat center / 16px;
-}
-/* A loose list puts the checkbox inside the item's paragraph */
-.markdown-body .task-list-item:has(> input:checked, > p:first-child > input:checked) {
-  color: var(--obs-muted);
-  text-decoration: line-through;
-}
-
-/* Quotes and callouts */
-.markdown-body blockquote {
-  padding: 0;
-  padding-inline-start: 24px;
-  border: 0;
-  border-inline-start: 2px solid var(--obs-accent);
-  color: var(--obs-text);
-}
-.markdown-body .markdown-alert {
-  padding: 12px;
-  padding-inline-start: 24px;
-  border: 0;
-  border-radius: 4px;
-  background-color: color-mix(in srgb, var(--obs-callout) 10%, transparent);
-}
-.markdown-body .markdown-alert-note { --obs-callout: var(--obs-blue); }
-.markdown-body :is(.markdown-alert-tip, .markdown-alert-important) { --obs-callout: var(--obs-cyan); }
-.markdown-body :is(.markdown-alert-warning, .markdown-alert-caution) { --obs-callout: var(--obs-orange); }
-.markdown-body .markdown-alert .markdown-alert-title {
-  margin-bottom: 16px;
-  color: var(--obs-callout);
-  font-weight: 600;
-  line-height: 1.3;
-}
-.markdown-body .markdown-alert-title .octicon {
-  margin-right: 4px !important;
-}
-.markdown-body .markdown-alert > :last-child {
-  margin-bottom: 16px;
-}
-
-/* Code */
-.markdown-body :is(code, kbd, pre) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Source Code Pro", monospace;
-}
-.markdown-body :is(code, kbd) {
-  color: var(--obs-text);
-  font-size: 0.875em;
-  background-color: var(--obs-code-bg);
-  border-radius: 4px;
-}
-.markdown-body code {
-  padding: 0.15em 0.3em;
-}
-.markdown-body kbd {
-  padding: 0.1em 0.25em;
-  line-height: 1.5;
-  vertical-align: baseline;
-  border: 0;
-  box-shadow: none;
-}
-.markdown-body pre,
-.markdown-body .highlight pre {
-  padding: 12px 16px;
-  color: var(--obs-text);
-  font-size: 0.875em;
-  line-height: 1.715; /* 24px lines, as Obsidian keeps the body's line height around smaller code text */
-  background-color: var(--obs-code-bg);
-  border-radius: 4px;
-}
-
-/* Tables */
-.markdown-body table {
-  line-height: 1.3;
-  border-collapse: collapse;
-}
-.markdown-body table th,
-.markdown-body table td {
-  padding: 4px 8px;
-  border: 1px solid var(--obs-border);
-}
-.markdown-body table th {
-  font-weight: 600;
-}
-.markdown-body table tr,
-.markdown-body table tr:nth-child(2n) {
-  background-color: transparent;
-  border-top: 0;
-}
-
-/* Rules, images, footnotes */
-.markdown-body hr {
-  height: 0;
-  margin: 32px 0;
-  border: 0;
-  border-top: 2px solid var(--obs-border);
-  background: none;
-}
-.markdown-body img {
-  border-radius: 4px;
-}
-.markdown-body a[href][data-footnote-ref] {
-  text-decoration: none;
-}
-.markdown-body .footnotes {
-  margin-top: 32px;
-  padding-top: 32px;
-  border-top: 2px solid var(--obs-border);
-  color: var(--obs-text);
-  font-size: 0.875em;
-}
-.markdown-body .footnotes ol {
-  padding-inline: 1.8em 0;
-}
-.markdown-body .footnotes .data-footnote-backref {
-  color: var(--obs-faint);
-  font-family: inherit;
-  text-decoration: none;
+  /* Type */
+  --mddog-font-body: system-ui;
+  --mddog-font-code: ui-monospace, SFMono-Regular, Menlo;
+  --mddog-heading-scale: 1.618 1.462 1.318 1.188 1.076 1;
+  --mddog-line-height: 1.5;
+  --mddog-code-size: 0.875;
 }

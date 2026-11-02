@@ -6,10 +6,11 @@ window.mddog = (() => {
   const lengthMacro = RegExp(`(hskip|hspace|raise|mspace|mskip|kern|lower|above|mkern|moveleft|moveright|rule|Rule|space|Space)({${num}(${units})})+`, 'g');
   const state = { math: false, mermaid: false, sizes: {}, images: {} };
 
+  // Decodes entities only: `<` is escaped first, so math like `$a<b$` can't open a tag and lose its text.
   function decode(text) {
     const d = document.implementation.createHTMLDocument('');
     d.open();
-    d.write(`<html><body>${text}</body></html>`);
+    d.write(`<html><body>${text.replaceAll('<', '&lt;')}</body></html>`);
     d.close();
     return d.body.textContent || '';
   }
@@ -409,7 +410,9 @@ window.mddogMouse = (() => {
     const copy = document.importNode(svg, true);
     copy.removeAttribute('width');
     copy.removeAttribute('height');
-    copy.removeAttribute('style');
+    // Only the size and a zoom's layout go: pele keeps the diagram's colors as custom properties in the same
+    // style attribute.
+    for (const p of ['width', 'height', 'max-width', 'max-height', 'margin', 'display', 'cursor', 'user-select', 'touch-action', 'outline']) copy.style.removeProperty(p);
     wrap.appendChild(copy);
     holder.appendChild(wrap);
     holder.style.cssText = `top:${top}px;height:${Math.max(0, Math.min(height, document.documentElement.scrollHeight - top))}px`;

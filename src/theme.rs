@@ -1,6 +1,6 @@
-//! Themes: one CSS file that the page loads after the style's CSS, and whose `color-scheme` and `--mddog-*` colors the terminal chrome draws with. A theme can recolor the page, as the GitHub themes do, or restyle all of it, as the Obsidian themes do.
+//! Themes: one file of `:root` tokens. The terminal chrome draws with its `color-scheme` and terminal colors, and the page with its page colors, syntax colors and type.
 
-use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -28,16 +28,12 @@ pub struct Palette {
     pub skeleton: Rgb,
 }
 
-/// The `--mddog-*` names, in `Palette`'s field order.
+/// The terminal colors' token names, in `Palette`'s field order.
 pub const VARS: [&str; 8] = ["bg", "fg", "fg-muted", "fg-bright", "selection-bg", "bar-bg", "border", "skeleton"];
 
 impl Palette {
     fn from(c: [Rgb; 8]) -> Palette {
         Palette { bg: c[0], fg: c[1], fg_muted: c[2], fg_bright: c[3], selection_bg: c[4], bar_bg: c[5], border: c[6], skeleton: c[7] }
-    }
-
-    fn colors(&self) -> [Rgb; 8] {
-        [self.bg, self.fg, self.fg_muted, self.fg_bright, self.selection_bg, self.bar_bg, self.border, self.skeleton]
     }
 
     /// Resets the SGR attributes and sets the background back to the theme's.
@@ -72,32 +68,91 @@ pub fn rgb(s: &str) -> Option<Rgb> {
     Some((v[0], v[1], v[2]))
 }
 
+/// What a token holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// `#rgb` or `#rrggbb`.
+    Color,
+    /// Font names, first choice first, as CSS's `font-family` lists them.
+    Fonts,
+    /// Six sizes, one per heading level, in em.
+    Scale,
+    /// One positive number.
+    Number,
+}
+
+/// Every token but `--mddog-base` and `--mddog-mermaid`, without the `--mddog-` prefix. GitHub's themes set them all, so any other theme can leave some out.
+#[rustfmt::skip]
+const TOKENS: &[(&str, Kind)] = &[
+    // The terminal chrome (VARS).
+    ("bg", Kind::Color), ("fg", Kind::Color), ("fg-muted", Kind::Color), ("fg-bright", Kind::Color),
+    ("selection-bg", Kind::Color), ("bar-bg", Kind::Color), ("border", Kind::Color), ("skeleton", Kind::Color),
+    // The page.
+    ("text", Kind::Color), ("text-muted", Kind::Color), ("heading", Kind::Color), ("link", Kind::Color), ("accent", Kind::Color),
+    ("code-bg", Kind::Color), ("pre-bg", Kind::Color), ("alt-bg", Kind::Color), ("rule", Kind::Color), ("mark-bg", Kind::Color),
+    ("match-bg", Kind::Color), ("match-current-bg", Kind::Color), ("text-selection", Kind::Color),
+    ("alert-note", Kind::Color), ("alert-tip", Kind::Color), ("alert-important", Kind::Color), ("alert-warning", Kind::Color), ("alert-caution", Kind::Color),
+    ("diff-add-bg", Kind::Color), ("diff-del-bg", Kind::Color),
+    // Code.
+    ("pl-comment", Kind::Color), ("pl-keyword", Kind::Color), ("pl-string", Kind::Color), ("pl-constant", Kind::Color),
+    ("pl-entity", Kind::Color), ("pl-inserted", Kind::Color), ("pl-deleted", Kind::Color),
+    // Type.
+    ("font-body", Kind::Fonts), ("font-code", Kind::Fonts), ("heading-scale", Kind::Scale), ("line-height", Kind::Number), ("code-size", Kind::Number),
+];
+
+/// A token's value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    Color(Rgb),
+    Fonts(Vec<String>),
+    Scale([f32; 6]),
+    Number(f32),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
     /// The built-in name, or the file's path as the config gave it.
     pub name: String,
     pub dark: bool,
-    pub css: Cow<'static, str>,
     pub palette: Palette,
-    /// The theme its `--mddog-base` names, which the page loads first.
-    pub base: Option<Box<Theme>>,
+    /// Every token, with the ones the theme leaves out taken from its base, else from GitHub's theme of its mode.
+    tokens: BTreeMap<&'static str, Value>,
     /// The Mermaid engine its `--mddog-mermaid` names, or its base's. The config's engine wins.
     pub mermaid: Option<crate::config::Mermaid>,
 }
 
 impl Theme {
-    /// The themes the page loads, first to last: GitHub's theme of this mode (unless the chain starts there), each base, then this one.
-    pub fn layers(&self) -> Vec<&Theme> {
-        let mut out = vec![self];
-        while let Some(b) = out[out.len() - 1].base.as_deref() {
-            out.push(b);
+    fn token(&self, name: &str) -> &Value {
+        self.tokens.get(name).unwrap_or_else(|| panic!("no token {name}"))
+    }
+
+    /// A color token, by its name without `--mddog-`.
+    pub fn color(&self, name: &str) -> Rgb {
+        match self.token(name) {
+            Value::Color(c) => *c,
+            v => panic!("{name} is {v:?}, not a color"),
         }
-        let github = github(self.dark);
-        if out[out.len() - 1].name != github.name {
-            out.push(github);
+    }
+
+    pub fn fonts(&self, name: &str) -> &[String] {
+        match self.token(name) {
+            Value::Fonts(f) => f,
+            v => panic!("{name} is {v:?}, not fonts"),
         }
-        out.reverse();
-        out
+    }
+
+    pub fn number(&self, name: &str) -> f32 {
+        match self.token(name) {
+            Value::Number(n) => *n,
+            v => panic!("{name} is {v:?}, not a number"),
+        }
+    }
+
+    pub fn heading_scale(&self) -> [f32; 6] {
+        match self.token("heading-scale") {
+            Value::Scale(s) => *s,
+            v => panic!("heading-scale is {v:?}"),
+        }
     }
 }
 
@@ -106,7 +161,15 @@ fn github(dark: bool) -> &'static Theme {
 }
 
 pub fn builtin(name: &str) -> Option<&'static Theme> {
-    static ALL: LazyLock<Vec<Theme>> = LazyLock::new(|| BUILTIN.iter().map(|(n, css)| parse(n, Cow::Borrowed(css)).expect("built-in theme")).collect());
+    static ALL: LazyLock<Vec<Theme>> = LazyLock::new(|| {
+        // The GitHub themes come first, so the others can fill in from them.
+        let mut all: Vec<Theme> = Vec::new();
+        for (n, css) in BUILTIN {
+            let under = all.iter().find(|t: &&Theme| t.name.starts_with("github-") && css.contains(if t.dark { "color-scheme: dark" } else { "color-scheme: light" })).cloned();
+            all.push(read(n, css, under.as_ref(), &mut |f| Err(format!("{f}: a built-in theme has no file base"))).expect("built-in theme"));
+        }
+        all
+    });
     ALL.iter().find(|t| t.name == name)
 }
 
@@ -141,20 +204,18 @@ fn load(path: &Path, seen: &mut Vec<PathBuf>) -> Result<Theme, String> {
     let css = std::fs::read_to_string(path).map_err(|e| format!("{shown}: {}", crate::term::io_error(&e)))?;
     let dir = path.parent().unwrap_or(Path::new(""));
     seen.push(key);
-    read(&shown, relative_urls(&css, dir).into(), &mut |f| load(&resolve(dir, f), seen))
+    read(&shown, &css, None, &mut |f| load(&resolve(dir, f), seen))
 }
 
-/// Reads a built-in theme, or theme text whose base, if any, is a built-in.
-pub fn parse(name: &str, css: Cow<'static, str>) -> Result<Theme, String> {
-    read(name, css, &mut |f| Err(format!("{f}: only a theme file can have a file as its base")))
+/// Reads theme text whose base, if any, is a built-in.
+pub fn parse(name: &str, css: &str) -> Result<Theme, String> {
+    read(name, css, None, &mut |f| Err(format!("{f}: only a theme file can have a file as its base")))
 }
 
-/// Reads a theme's base, mode and chrome colors from its `:root` rules. `file` reads a base that is a file. A color the theme leaves out comes from its base, else from GitHub's theme of the same mode.
-fn read(name: &str, css: Cow<'static, str>, file: &mut dyn FnMut(&str) -> Result<Theme, String>) -> Result<Theme, String> {
-    // Only `:root` rules count, so a component's own color-scheme or --mddog-* value can't stand in for the theme's.
-    let decls = root_decls(&css);
-    // A custom property's name is case-sensitive, a standard property's isn't.
-    let last = |prop: &str| decls.iter().rev().find(|(p, _)| if prop.starts_with("--") { p == prop } else { p.eq_ignore_ascii_case(prop) }).map(|(_, v)| v.as_str());
+/// Reads a theme's tokens. `file` reads a base that is a file. `under` stands in for GitHub's theme while the built-ins load.
+fn read(name: &str, css: &str, under: Option<&Theme>, file: &mut dyn FnMut(&str) -> Result<Theme, String>) -> Result<Theme, String> {
+    let decls = root_decls(css).map_err(|e| format!("{name}: {e}"))?;
+    let last = |prop: &str| decls.iter().rev().find(|(p, _)| p == prop).map(|(_, v)| v.as_str());
     let base = match last("--mddog-base").map(|v| v.trim_matches(['"', '\''])) {
         None => None,
         Some(b) if is_file(b) => Some(file(b).map_err(|e| format!("{name}: --mddog-base: {e}"))?),
@@ -179,60 +240,91 @@ fn read(name: &str, css: Cow<'static, str>, file: &mut dyn FnMut(&str) -> Result
         Some("obsidian") => Some(crate::config::Mermaid::Obsidian),
         Some(v) => return Err(format!("{name}: --mddog-mermaid must be obsidian or pele, but got {v:?}")),
     };
-    let mut set: [Option<Rgb>; 8] = [None; 8];
-    for (p, value) in &decls {
-        let Some(i) = p.strip_prefix("--mddog-").and_then(|v| VARS.iter().position(|x| x == &v)) else { continue };
-        set[i] = Some(rgb(value).filter(|_| matches!(value.len(), 4 | 7)).ok_or_else(|| format!("{name}: {p}: expected a hex color such as #0d1117, but got {value:?}"))?);
-    }
-    let colors = if set.iter().all(Option::is_some) {
-        set.map(Option::unwrap_or_default)
-    } else {
-        let under = base.as_ref().map_or_else(|| github(dark).palette, |b| b.palette).colors();
-        std::array::from_fn(|i| set[i].unwrap_or(under[i]))
+    let mut tokens = match (&base, under) {
+        (Some(b), _) => b.tokens.clone(),
+        (None, Some(u)) => u.tokens.clone(),
+        // GitHub's own themes start empty, and a test checks they set every token.
+        (None, None) if name.starts_with("github-") && BUILTIN.iter().any(|(n, _)| *n == name) => BTreeMap::new(),
+        (None, None) => github(dark).tokens.clone(),
     };
-    Ok(Theme { name: name.to_string(), dark, css, palette: Palette::from(colors), base: base.map(Box::new), mermaid })
+    for (p, value) in &decls {
+        if matches!(p.as_str(), "color-scheme" | "--mddog-base" | "--mddog-mermaid") {
+            continue;
+        }
+        let Some((key, kind)) = p.strip_prefix("--mddog-").and_then(|t| TOKENS.iter().find(|(k, _)| *k == t)) else {
+            return Err(format!("{name}: {p}: unknown token. A theme sets color-scheme and the --mddog-* tokens that docs/themes.md lists"));
+        };
+        tokens.insert(key, value_of(*kind, value).ok_or_else(|| format!("{name}: {p}: expected {}, but got {value:?}", expected(*kind)))?);
+    }
+    let colors: Vec<Rgb> = VARS
+        .iter()
+        .map(|v| match tokens.get(v) {
+            Some(Value::Color(c)) => *c,
+            _ => (0, 0, 0),
+        })
+        .collect();
+    let palette = Palette::from(std::array::from_fn(|i| colors[i]));
+    Ok(Theme { name: name.to_string(), dark, palette, tokens, mermaid })
 }
 
-/// The declarations, as (property, value), of the top-level rules whose selector list has `:root`. Rules inside `@media` and the like may not apply, so they don't count, and neither do nested rules.
-fn root_decls(css: &str) -> Vec<(String, String)> {
+fn expected(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Color => "a hex color such as #0d1117",
+        Kind::Fonts => "a list of font names such as \"SF Pro Text\", system-ui",
+        Kind::Scale => "six sizes in em, one per heading level, such as 2 1.5 1.25 1 0.875 0.85",
+        Kind::Number => "a positive number such as 1.5",
+    }
+}
+
+fn value_of(kind: Kind, v: &str) -> Option<Value> {
+    let number = |s: &str| s.parse::<f32>().ok().filter(|n| n.is_finite() && *n > 0.0);
+    match kind {
+        Kind::Color => rgb(v).filter(|_| matches!(v.len(), 4 | 7)).map(Value::Color),
+        Kind::Fonts => {
+            let names: Vec<String> = v.split(',').map(|f| f.trim().trim_matches(['"', '\'']).trim().to_string()).collect();
+            // A name is plain text, so it can't break out of the CSS WebKit builds from it.
+            names.iter().all(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || " -_.".contains(c))).then_some(Value::Fonts(names))
+        }
+        Kind::Scale => {
+            let sizes: Vec<f32> = v.split_whitespace().map(number).collect::<Option<_>>()?;
+            <[f32; 6]>::try_from(sizes).ok().map(Value::Scale)
+        }
+        Kind::Number => number(v).map(Value::Number),
+    }
+}
+
+/// The declarations, as (property, value), of a theme's `:root` rules. Anything else in the file is an error, so a theme written for the old CSS contract says so instead of losing its rules.
+fn root_decls(css: &str) -> Result<Vec<(String, String)>, String> {
     let (clean, mask) = masks(css);
     let mut out = Vec::new();
-    let mut push = |from: usize, to: usize| {
-        if let Some(colon) = mask[from..to].find(':') {
-            out.push((clean[from..from + colon].trim().to_string(), clean[from + colon + 1..to].trim().to_string()));
+    let mut rest = 0;
+    while let Some(open) = mask[rest..].find('{').map(|i| rest + i) {
+        let selector = clean[rest..open].trim();
+        if selector != ":root" {
+            return Err(format!("a theme holds only `:root {{ ... }}` tokens, but it has {:?}", selector.split_whitespace().collect::<Vec<_>>().join(" ")));
         }
-    };
-    let (mut depth, mut start, mut decl, mut root) = (0usize, 0, 0, false);
-    for (i, c) in mask.bytes().enumerate() {
-        match c {
-            b'{' => {
-                if depth == 0 {
-                    root = mask[start..i].split(',').any(|s| s.trim() == ":root");
-                    decl = i + 1;
-                }
-                depth += 1;
-            }
-            b'}' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    if root {
-                        push(decl, i);
-                    }
-                    root = false;
-                    start = i + 1;
-                } else if depth == 1 {
-                    decl = i + 1;
-                }
-            }
-            b';' if depth == 0 => start = i + 1,
-            b';' if depth == 1 && root => {
-                push(decl, i);
-                decl = i + 1;
-            }
-            _ => {}
+        let close = mask[open..].find('}').map(|i| open + i).ok_or("a `:root {` has no closing `}`")?;
+        if mask[open + 1..close].contains('{') {
+            return Err("a theme holds only `:root { ... }` tokens, but its :root has a nested rule".into());
         }
+        for (i, d) in mask[open + 1..close].split(';').scan(open + 1, |at, d| {
+            let start = *at;
+            *at += d.len() + 1;
+            Some((start, d))
+        }) {
+            if d.trim().is_empty() {
+                continue;
+            }
+            let colon = d.find(':').ok_or_else(|| format!("expected a token such as --mddog-bg: #0d1117, but got {:?}", clean[i..i + d.len()].trim()))?;
+            out.push((clean[i..i + colon].trim().to_string(), clean[i + colon + 1..i + d.len()].trim().to_string()));
+        }
+        rest = close + 1;
     }
-    out
+    let tail = clean[rest..].trim();
+    if !tail.is_empty() {
+        return Err(format!("a theme holds only `:root {{ ... }}` tokens, but it has {:?}", tail.split_whitespace().collect::<Vec<_>>().join(" ")));
+    }
+    Ok(out)
 }
 
 /// The CSS with its comments blanked to spaces, and that again with the contents of its strings blanked to `x`. Both keep every byte offset, so a scan of the second can slice values out of the first.
@@ -251,11 +343,7 @@ fn masks(css: &str) -> (String, String) {
             q @ (b'"' | b'\'') => {
                 let mut j = i + 1;
                 while j < b.len() && b[j] != q && !matches!(b[j], b'\n' | b'\r' | b'\x0c') {
-                    j += match (b[j], b.get(j + 1..j + 3)) {
-                        (b'\\', Some(b"\r\n")) => 3,
-                        (b'\\', _) => 2,
-                        _ => 1,
-                    };
+                    j += if b[j] == b'\\' { 2 } else { 1 };
                 }
                 let j = j.min(b.len());
                 mask[i + 1..j].fill(b'x');
@@ -268,102 +356,96 @@ fn masks(css: &str) -> (String, String) {
     (text(clean), text(mask))
 }
 
-/// Points each relative `url()` and `@import` at `dir`, the CSS file's folder. Otherwise they would start from the page's `<base>`, the Markdown file's folder.
-pub fn relative_urls(css: &str, dir: &Path) -> String {
-    static URL: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"(?i)(?:^|[^\w-])url\(\s*(?:"(x*)"|'(x*)'|([^\s"')]+))|@import\s+(?:"(x*)"|'(x*)')"#).expect("valid regex"));
-    static SCHEME: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9+.-]*:").expect("valid regex"));
-    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
-    let (_, mask) = masks(css);
-    let (mut out, mut last) = (String::with_capacity(css.len()), 0);
-    for c in URL.captures_iter(&mask) {
-        let Some(m) = c.iter().skip(1).flatten().next() else { continue };
-        let target = &css[m.range()];
-        if target.is_empty() || target.starts_with(['#', '/']) || SCHEME.is_match(target) {
-            continue;
-        }
-        out.push_str(&css[last..m.start()]);
-        out.push_str(&format!("{}/{target}", crate::page::file_url(&dir)));
-        last = m.end();
-    }
-    out.push_str(&css[last..]);
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn builtins_set_every_color() {
-        for (name, css) in BUILTIN {
-            let text = masks(css).0;
-            for v in VARS {
-                assert!(text.contains(&format!("--mddog-{v}:")), "{name} lacks --mddog-{v}");
+    fn github_themes_set_every_token() {
+        for name in ["github-light", "github-dark"] {
+            let css = BUILTIN.iter().find(|(n, _)| *n == name).unwrap().1;
+            let decls = root_decls(css).unwrap();
+            for (t, _) in TOKENS {
+                assert!(decls.iter().any(|(p, _)| *p == format!("--mddog-{t}")), "{name} lacks --mddog-{t}");
             }
+        }
+        for (name, _) in BUILTIN {
+            assert_eq!(builtin(name).unwrap().tokens.len(), TOKENS.len(), "{name}");
         }
         let dark = builtin("github-dark").unwrap();
         assert!(dark.dark);
         assert_eq!(dark.palette.bg, (13, 17, 23));
         assert_eq!(dark.palette.bar_bg, (22, 27, 34));
+        assert_eq!(dark.color("link"), (0x44, 0x93, 0xf8));
         assert!(!builtin("github-light").unwrap().dark);
         assert!(builtin("nope").is_none());
     }
 
     #[test]
-    fn missing_colors_come_from_github() {
-        let t = parse("x.css", ":root { color-scheme: light; --mddog-bg: #fafafa; /* --mddog-fg: #fff; */ --mddog-fg: #123 }".into()).unwrap();
-        let light = builtin("github-light").unwrap().palette;
+    fn missing_tokens_come_from_github() {
+        let t = parse("x.css", ":root { color-scheme: light; --mddog-bg: #fafafa; /* --mddog-fg: #fff; */ --mddog-fg: #123 }").unwrap();
+        let light = builtin("github-light").unwrap();
         assert_eq!(t.palette.bg, (250, 250, 250));
         assert_eq!(t.palette.fg, (17, 34, 51));
-        assert_eq!(t.palette.fg_muted, light.fg_muted);
-        assert_eq!(t.palette.skeleton, light.skeleton);
-        let t = parse("y.css", "@media (prefers-color-scheme: dark) { a { color: red } }\n:root{color-scheme:dark}".into()).unwrap();
+        assert_eq!(t.palette.fg_muted, light.palette.fg_muted);
+        assert_eq!(t.color("pl-keyword"), light.color("pl-keyword"));
+        assert_eq!(t.fonts("font-code"), light.fonts("font-code"));
+        let t = parse("y.css", ":root{color-scheme:dark}").unwrap();
         assert_eq!(t.palette, builtin("github-dark").unwrap().palette);
     }
 
     #[test]
+    fn type_tokens_read() {
+        let t = parse("x.css", ":root{color-scheme:light;--mddog-font-body:\"Avenir Next\", 'Inter',system-ui;--mddog-heading-scale:1.6 1.4 1.2 1 1 .9;--mddog-line-height:1.6;--mddog-code-size:0.9}")
+            .unwrap();
+        assert_eq!(t.fonts("font-body"), ["Avenir Next", "Inter", "system-ui"]);
+        assert_eq!(t.heading_scale(), [1.6, 1.4, 1.2, 1.0, 1.0, 0.9]);
+        assert_eq!((t.number("line-height"), t.number("code-size")), (1.6, 0.9));
+    }
+
+    #[test]
     fn bad_themes_say_why() {
-        assert_eq!(parse("x.css", ":root{--mddog-bg:#fff}".into()).unwrap_err(), "x.css: set color-scheme: light or dark on :root, or a base theme with --mddog-base");
-        assert_eq!(parse("x.css", ":root{color-scheme:light dark}".into()).unwrap_err(), "x.css: color-scheme must be light or dark, but got \"light dark\"");
-        let scoped = parse("x.css", ".a{color-scheme:light;--mddog-bg:#fff}\n:root { color-scheme: dark }\n.b{--mddog-bg:#fff}".into()).unwrap();
-        assert!(scoped.dark && scoped.palette == builtin("github-dark").unwrap().palette);
-        // The last top-level declaration wins, as in the cascade. A :root inside @media may not apply, so it doesn't count.
-        assert!(parse("x.css", ":root{color-scheme:dark}@media print{:root{color-scheme:light}}".into()).unwrap().dark);
-        assert!(!parse("x.css", "@import url(a.css);:root,html{color-scheme:dark}:root{color-scheme:light}".into()).unwrap().dark);
-        let e = parse("x.css", ":root{color-scheme:dark;--mddog-fg:var(--x)}".into()).unwrap_err();
-        assert_eq!(e, "x.css: --mddog-fg: expected a hex color such as #0d1117, but got \"var(--x)\"");
-        assert!(parse("x.css", ":root{color-scheme:dark;--mddog-fg:#ffffff80}".into()).is_err());
+        let e = |css: &str| parse("x.css", css).unwrap_err();
+        assert_eq!(e(":root{--mddog-bg:#fff}"), "x.css: set color-scheme: light or dark on :root, or a base theme with --mddog-base");
+        assert_eq!(e(":root{color-scheme:light dark}"), "x.css: color-scheme must be light or dark, but got \"light dark\"");
+        assert_eq!(e(":root{color-scheme:dark;--mddog-fg:var(--x)}"), "x.css: --mddog-fg: expected a hex color such as #0d1117, but got \"var(--x)\"");
+        assert!(e(":root{color-scheme:dark;--mddog-fg:#ffffff80}").starts_with("x.css: --mddog-fg: expected a hex color"));
+        assert_eq!(e(":root{color-scheme:dark;--mddog-tint:#fff}"), "x.css: --mddog-tint: unknown token. A theme sets color-scheme and the --mddog-* tokens that docs/themes.md lists");
+        assert!(e(":root{color-scheme:dark;--fgColor-default:#fff}").starts_with("x.css: --fgColor-default: unknown token"));
+        assert!(e(":root{color-scheme:dark;--mddog-heading-scale:2 1.5}").starts_with("x.css: --mddog-heading-scale: expected six sizes"));
+        assert!(e(":root{color-scheme:dark;--mddog-line-height:-1}").starts_with("x.css: --mddog-line-height: expected a positive number"));
+        assert!(e(":root{color-scheme:dark;--mddog-font-body:a,,b}").starts_with("x.css: --mddog-font-body: expected a list of font names"));
+        assert!(e(":root{color-scheme:dark;--mddog-font-body:\"a</style>\"}").starts_with("x.css: --mddog-font-body: expected a list of font names"));
+        // Rules and at-rules belonged to the old CSS themes.
+        assert_eq!(e(":root{color-scheme:dark}\n.markdown-body h1 { color: red }"), "x.css: a theme holds only `:root { ... }` tokens, but it has \".markdown-body h1\"");
+        assert_eq!(e("@import url(a.css);:root{color-scheme:dark}"), "x.css: a theme holds only `:root { ... }` tokens, but it has \"@import url(a.css);:root\"");
+        assert_eq!(e(":root{color-scheme:dark;& a{--mddog-bg:#fff}}"), "x.css: a theme holds only `:root { ... }` tokens, but its :root has a nested rule");
+        assert_eq!(e(":root{color-scheme:dark} junk"), "x.css: a theme holds only `:root { ... }` tokens, but it has \"junk\"");
+        assert_eq!(e(":root{color-scheme:dark; nonsense }"), "x.css: expected a token such as --mddog-bg: #0d1117, but got \"nonsense\"");
     }
 
     #[test]
     fn quotes_hide_braces_and_comments() {
-        let red = |css: &str| parse("x.css", css.to_string().into()).map(|t| (t.dark, t.palette.bg));
-        assert_eq!(red(":root{ --icon:\"}\"; color-scheme:dark; --mddog-bg:#ff0000; }"), Ok((true, (255, 0, 0))));
-        assert_eq!(red(":root{ --icon:\"{\"; color-scheme:dark; --mddog-bg:#ff0000; }"), Ok((true, (255, 0, 0))));
-        assert_eq!(red(":root{ color-scheme:dark; --icon:\"}\"; --mddog-bg:#ff0000; }"), Ok((true, (255, 0, 0))));
-        assert_eq!(red(":root{ --a:'\\';}'; color-scheme:dark; --mddog-bg:#ff0000 }"), Ok((true, (255, 0, 0))));
-        assert_eq!(red(":root{ --a:\"\\\r\n}\"; color-scheme:dark; --mddog-bg:#ff0000; --MDDOG-BASE:nope }"), Ok((true, (255, 0, 0))));
-        assert_eq!(red("a::before{content:\"/*\"}:root{color-scheme:dark;--mddog-bg:#ff0000}/* */"), Ok((true, (255, 0, 0))));
-        assert_eq!(red(":root{color-scheme:dark;--x:\"color-scheme: light; --mddog-bg: #fff\";--mddog-bg:#ff0000}"), Ok((true, (255, 0, 0))));
-        // A nested rule's declarations aren't the root's.
-        assert_eq!(red(":root{color-scheme:dark;& a{--mddog-bg:#fff}--mddog-bg:#ff0000}"), Ok((true, (255, 0, 0))));
+        let bg = |css: &str| parse("x.css", css).map(|t| (t.dark, t.palette.bg));
+        assert_eq!(bg(":root{ color-scheme:dark; /* } { ; */ --mddog-bg:#ff0000; }"), Ok((true, (255, 0, 0))));
+        // A brace in quotes is the value's, so the error is about the value.
+        assert!(bg(":root{ color-scheme:dark; --mddog-font-body:\"}{;\"; }").unwrap_err().starts_with("x.css: --mddog-font-body: expected"));
+        assert_eq!(bg("/* :root{color-scheme:light} */:root{color-scheme:dark;--mddog-bg:#ff0000}/* } */"), Ok((true, (255, 0, 0))));
+        // The last declaration wins, as in the cascade.
+        assert_eq!(bg(":root{color-scheme:dark;--mddog-bg:#fff}:root{--mddog-bg:#ff0000}"), Ok((true, (255, 0, 0))));
     }
 
     #[test]
     fn a_base_fills_in_the_rest() {
         let obsidian = builtin("obsidian-dark").unwrap();
-        let t = parse("x.css", ":root { --mddog-base: obsidian-dark; --mddog-bg: #202a44; }".into()).unwrap();
+        let t = parse("x.css", ":root { --mddog-base: obsidian-dark; --mddog-bg: #202a44; }").unwrap();
         assert!(t.dark);
         assert_eq!(t.palette, Palette { bg: (32, 42, 68), ..obsidian.palette });
-        let names: Vec<_> = t.layers().iter().map(|l| l.name.clone()).collect();
-        assert_eq!(names, ["github-dark", "obsidian-dark", "x.css"]);
-        assert_eq!(builtin("github-dark").unwrap().layers().len(), 1);
-        let on_github = parse("x.css", ":root{--mddog-base:\"github-light\"}".into()).unwrap();
-        assert_eq!(on_github.layers().len(), 2);
-        assert!(!on_github.dark);
-        let e = parse("x.css", ":root{--mddog-base:obsidian-dark;color-scheme:light}".into()).unwrap_err();
+        assert_eq!(t.heading_scale(), obsidian.heading_scale());
+        assert_eq!(t.color("link"), obsidian.color("link"));
+        let e = parse("x.css", ":root{--mddog-base:obsidian-dark;color-scheme:light}").unwrap_err();
         assert_eq!(e, "x.css: color-scheme is light, but its base obsidian-dark is dark");
-        let e = parse("x.css", ":root{--mddog-base:nope}".into()).unwrap_err();
+        let e = parse("x.css", ":root{--mddog-base:nope}").unwrap_err();
         assert!(e.starts_with("x.css: --mddog-base: unknown theme \"nope\". Built-in themes: github-light"), "{e}");
     }
 
@@ -374,9 +456,9 @@ mod tests {
         assert_eq!(builtin("obsidian-light").unwrap().mermaid, Some(Mermaid::Obsidian));
         assert_eq!(builtin("github-dark").unwrap().mermaid, Some(Mermaid::Pele));
         assert_eq!(builtin("github-light").unwrap().mermaid, Some(Mermaid::Pele));
-        assert_eq!(parse("x.css", ":root{--mddog-base:obsidian-dark}".into()).unwrap().mermaid, Some(Mermaid::Obsidian));
-        assert_eq!(parse("x.css", ":root{--mddog-base:obsidian-dark;--mddog-mermaid:'pele'}".into()).unwrap().mermaid, Some(Mermaid::Pele));
-        let e = parse("x.css", ":root{color-scheme:dark;--mddog-mermaid:dot}".into()).unwrap_err();
+        assert_eq!(parse("x.css", ":root{--mddog-base:obsidian-dark}").unwrap().mermaid, Some(Mermaid::Obsidian));
+        assert_eq!(parse("x.css", ":root{--mddog-base:obsidian-dark;--mddog-mermaid:'pele'}").unwrap().mermaid, Some(Mermaid::Pele));
+        let e = parse("x.css", ":root{color-scheme:dark;--mddog-mermaid:dot}").unwrap_err();
         assert_eq!(e, "x.css: --mddog-mermaid must be obsidian or pele, but got \"dot\"");
         // No config loaded in tests, so the theme's choice stands.
         assert_eq!(crate::config::mermaid(builtin("obsidian-dark").unwrap()), Mermaid::Obsidian);
@@ -388,14 +470,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mddog-base-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("a.css"), ":root{--mddog-base:sub/b.css;--mddog-fg:#010203}").unwrap();
-        std::fs::write(dir.join("sub/b.css"), ":root{--mddog-base:obsidian-light;--mddog-bg:#fefefe}\nh1{background:url(img.png)}").unwrap();
+        std::fs::write(dir.join("sub/b.css"), ":root{--mddog-base:obsidian-light;--mddog-bg:#fefefe}").unwrap();
         let a = file(&dir.join("a.css")).unwrap();
         assert!(!a.dark);
         assert_eq!((a.palette.bg, a.palette.fg, a.palette.border), ((254, 254, 254), (1, 2, 3), builtin("obsidian-light").unwrap().palette.border));
-        let names: Vec<_> = a.layers().iter().map(|l| l.name.clone()).collect();
-        assert_eq!(names[..2], ["github-light", "obsidian-light"]);
-        // A base's own URLs start from its own folder.
-        assert!(a.layers()[2].css.contains(&format!("url({}/img.png)", crate::page::file_url(&dir.join("sub")))));
         std::fs::write(dir.join("sub/b.css"), ":root{--mddog-base:../a.css}").unwrap();
         let e = file(&dir.join("a.css")).unwrap_err();
         let (a, b) = (dir.join("a.css").display().to_string(), dir.join("sub/b.css").display().to_string());
@@ -404,25 +482,15 @@ mod tests {
     }
 
     #[test]
-    fn relative_urls_start_at_the_file() {
-        let dir = Path::new("/t/my theme");
-        let at = "file:///t/my%20theme";
-        let css = "@font-face{src:url( \"f.woff2\" ) format('woff2'),url(../f.ttf)}@import 'more.css';@import url(x.css);a{b:url(data:image/png;base64,AA),url(#i),url(/abs.png),url(https://x/y.png),url(file:///z),url('')}/* url(c.png) */i::after{content:\"url(d.png)\"}";
-        let want = format!(
-            "@font-face{{src:url( \"{at}/f.woff2\" ) format('woff2'),url({at}/../f.ttf)}}@import '{at}/more.css';@import url({at}/x.css);a{{b:url(data:image/png;base64,AA),url(#i),url(/abs.png),url(https://x/y.png),url(file:///z),url('')}}/* url(c.png) */i::after{{content:\"url(d.png)\"}}"
-        );
-        assert_eq!(relative_urls(css, dir), want);
-    }
-
-    #[test]
-    fn obsidian_modes_share_their_rules() {
-        // Each file is its :root block of colors, then the same rules.
-        let rules = |name: &str| {
+    fn obsidian_modes_set_the_same_tokens() {
+        let names = |name: &str| {
             let css = BUILTIN.iter().find(|(n, _)| *n == name).unwrap().1;
-            css.split_once("\n}\n").unwrap().1
+            root_decls(css).unwrap().into_iter().map(|(p, _)| p).collect::<Vec<_>>()
         };
-        assert_eq!(rules("obsidian-light"), rules("obsidian-dark"));
-        assert!(!builtin("obsidian-light").unwrap().dark && builtin("obsidian-dark").unwrap().dark);
+        assert_eq!(names("obsidian-light"), names("obsidian-dark"));
+        let (light, dark) = (builtin("obsidian-light").unwrap(), builtin("obsidian-dark").unwrap());
+        assert!(!light.dark && dark.dark);
+        assert_eq!(light.heading_scale(), dark.heading_scale());
     }
 
     #[test]
@@ -448,9 +516,10 @@ mod tests {
     }
 
     #[test]
-    fn builtin_chrome_text_is_readable() {
+    fn builtin_text_is_readable() {
         for (name, _) in BUILTIN {
-            let p = builtin(name).unwrap().palette;
+            let t = builtin(name).unwrap();
+            let p = t.palette;
             let bg = p.bg;
             for (what, fg, ground, min) in [
                 ("fg on bg", p.fg, bg, 4.5),
@@ -459,6 +528,9 @@ mod tests {
                 ("fg-muted on bg", p.fg_muted, bg, 4.5),
                 ("fg-muted on bar", p.fg_muted, p.bar_bg, 4.5),
                 ("fg-bright on bar", p.fg_bright, p.bar_bg, 4.5),
+                ("text on bg", t.color("text"), bg, 4.5),
+                ("text on pre-bg", t.color("text"), t.color("pre-bg"), 4.5),
+                ("link on bg", t.color("link"), bg, 3.0),
             ] {
                 let c = contrast(fg, ground);
                 assert!(c >= min, "{name}: {what} is {c:.2}:1");

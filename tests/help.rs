@@ -267,17 +267,17 @@ fn contents_toggle_keeps_the_loaded_version_without_live_reload() {
 }
 
 #[test]
-fn a_page_that_does_not_load_keeps_its_source() {
+fn an_image_that_never_loads_does_not_stall_the_page() {
     let dir = scratch("noload");
     std::fs::write(dir.join("mddog/config.toml"), "live_reload = false\n").unwrap();
-    // WebKit waits on a FIFO with no writer, so the load event never comes.
+    // A FIFO with no writer never finishes a read, so an image read that waits on it would hang the page.
     let fifo = std::ffi::CString::new(dir.join("stall.png").to_str().unwrap()).unwrap();
     // SAFETY: fifo is a NUL-terminated path that outlives the call.
     assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
     let file = dir.join("a.md");
     std::fs::write(&file, "# Alpha\n\n![](stall.png)\n\n## Alpha two\n").unwrap();
     let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 100, &[("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
-    wait_for(&out, 0, b"WebKit couldn't load the page");
+    wait_for(&out, 0, b"a=p,");
     let before = out.lock().unwrap().len();
     tty.write_all(b"t").unwrap();
     let end = Instant::now() + Duration::from_secs(10);
@@ -288,7 +288,7 @@ fn a_page_that_does_not_load_keeps_its_source() {
     tty.write_all(b"q").unwrap();
     let _ = exits_within(&mut child, Duration::from_secs(5));
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(kept, "t after a failed load lost the document");
+    assert!(kept, "the table of contents lost the headings after the image");
 }
 
 /// The last `top=` the viewer traced after the line that contains `after`, once one is there.
@@ -849,6 +849,7 @@ fn buttons_show_the_hand() {
     std::fs::write(&file, "```rust\nfn main() {}\n```\n\n```mermaid\ngraph LR\n  A --> B\n```\n").unwrap();
     std::fs::create_dir_all(dir.join("mddog")).unwrap();
     std::fs::write(dir.join("mddog/config.toml"), "theme = \"github-dark\"\n").unwrap();
+    // The cells below are WebKit's geometry; the native page sits about a row lower.
     let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &[("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
     let drawn = wait_for(&out, 0, b"a=p,");
     // Text, then the code copy, Mermaid copy and Mermaid expand buttons, with text between.

@@ -81,12 +81,6 @@ pub fn swap(engine: &Engine, article: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether the page lays out the same at any view height: a built-in theme (no `vh` unit or height media query,
-/// which a test checks) and no `css` setting. A custom theme or `css` may depend on the height.
-pub fn height_free(theme: &Theme) -> bool {
-    config::get().css.is_empty() && crate::theme::builtin(&theme.name).is_some_and(|b| b == theme)
-}
-
 pub fn build(article: &str, o: &Opts) -> String {
     (crate::style::DEFAULT.page)(article, o)
 }
@@ -107,7 +101,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn built_in_themes_are_height_free() {
+    fn pages_lay_out_the_same_at_any_height() {
         // A viewport-height unit or a height media query in any letter case.
         let uses_height = |css: &str| {
             let css = css.to_ascii_lowercase();
@@ -120,8 +114,6 @@ mod tests {
         assert!(uses_height("p{min-height:100dvb}") && uses_height("body{min-height:100VH}") && uses_height("@media (max-height: 600px){p{}}") && !uses_height("@media (max-width: 600px){.vh{}}"));
         for name in crate::theme::names().split(", ") {
             let theme = crate::theme::builtin(name).unwrap();
-            // The config holds a copy of the built-in theme.
-            assert!(height_free(&theme.clone()));
             let o = Opts { theme, base: Path::new("/"), pad_x: 0.0, pad_y: 0.0, math: false, mermaid: false, engine: config::Mermaid::Pele, wrap: false, runtime: None };
             assert!(!uses_height(&build("", &o)), "{name} lays out the same at any height");
         }

@@ -105,17 +105,24 @@ pub fn dress(body: &NodeRef, front: Option<&str>) {
     }
 }
 
-fn front_matter_html(raw: &str) -> Option<String> {
-    let mut rows = String::new();
-    for line in raw.lines().skip(1).take_while(|l| l.trim_end() != "---") {
+/// The top-level `key: value` lines of YAML front matter, without its `---` lines, as GitHub's table shows them.
+pub fn front_matter_rows(yaml: &str) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    for line in yaml.lines().take_while(|l| l.trim_end() != "---") {
         let Some((k, v)) = line.split_once(':') else { continue };
         if k.starts_with([' ', '\t', '-', '#']) || k.trim().is_empty() {
             continue;
         }
         let v = v.trim();
         let v = v.strip_prefix('"').and_then(|x| x.strip_suffix('"')).or_else(|| v.strip_prefix('\'').and_then(|x| x.strip_suffix('\''))).unwrap_or(v);
-        rows.push_str(&format!("<tr>\n<th>{}</th>\n<td>{}</td>\n</tr>\n", escape(k.trim()), escape(v)));
+        rows.push((k.trim().to_string(), v.to_string()));
     }
+    rows
+}
+
+fn front_matter_html(raw: &str) -> Option<String> {
+    let yaml = raw.split_once('\n').map_or("", |(_, rest)| rest);
+    let rows: String = front_matter_rows(yaml).iter().map(|(k, v)| format!("<tr>\n<th>{}</th>\n<td>{}</td>\n</tr>\n", escape(k), escape(v))).collect();
     (!rows.is_empty()).then(|| format!("<markdown-accessiblity-table data-catalyst=\"\"><table>\n<tbody>\n{rows}</tbody>\n</table></markdown-accessiblity-table>\n"))
 }
 
@@ -177,9 +184,46 @@ fn scripts(o: &Opts) -> String {
     out
 }
 
-/// The `<style>` layers of a theme's whole stack (see `Theme::layers`): GitHub's theme of its mode first, so a theme only has to set what it changes, then each base, then the theme.
-fn theme_layers(t: &Theme) -> String {
-    t.layers().iter().map(|l| format!("<style>{}</style>", l.css.replace("</", "<\\/"))).collect()
+const PRIMER_LIGHT: &str = include_str!("../../assets/primer-light.css");
+const PRIMER_DARK: &str = include_str!("../../assets/primer-dark.css");
+
+/// The theme as WebKit's page CSS: Primer's colors of its mode, then its tokens in place of the Primer variables and type that github.css reads.
+fn theme_css(t: &Theme) -> String {
+    let c = |name: &str| theme::hex(t.color(name));
+    let fonts = |name: &str| t.fonts(name).iter().map(|f| if f.contains(' ') { format!("\"{f}\"") } else { f.clone() }).collect::<Vec<_>>().join(",");
+    let mut out = String::from(if t.dark { PRIMER_DARK } else { PRIMER_LIGHT });
+    out.push_str(&format!(
+        ":root{{color-scheme:{};--fgColor-default:{text};--fgColor-muted:{muted};--fgColor-accent:{link};--bgColor-default:{bg};--bgColor-muted:{pre};--bgColor-neutral-muted:{code};--borderColor-default:{rule};--borderColor-muted:{rule};--color-prettylights-syntax-comment:{};--color-prettylights-syntax-keyword:{};--color-prettylights-syntax-string:{};--color-prettylights-syntax-constant:{};--color-prettylights-syntax-entity:{};--color-prettylights-syntax-markup-inserted-text:{};--color-prettylights-syntax-markup-deleted-text:{};--fontStack-monospace:{mono}}}",
+        if t.dark { "dark" } else { "light" },
+        c("pl-comment"),
+        c("pl-keyword"),
+        c("pl-string"),
+        c("pl-constant"),
+        c("pl-entity"),
+        c("pl-inserted"),
+        c("pl-deleted"),
+        text = c("text"),
+        muted = c("text-muted"),
+        link = c("link"),
+        bg = c("bg"),
+        pre = c("pre-bg"),
+        code = c("code-bg"),
+        rule = c("rule"),
+        mono = fonts("font-code"),
+    ));
+    let scale = t.heading_scale();
+    out.push_str(&format!(".markdown-body{{font-family:{};line-height:{}}}", fonts("font-body"), t.number("line-height")));
+    // Headings 1 to 5 take the heading color, and 6 keeps GitHub's muted one.
+    for (i, em) in scale.iter().enumerate() {
+        let color = if i < 5 { c("heading") } else { c("text-muted") };
+        out.push_str(&format!(".markdown-body h{}{{font-size:{em}em;color:{color}}}", i + 1));
+    }
+    out.push_str(&format!(
+        ".markdown-body code,.markdown-body tt,.markdown-body pre,.markdown-body .highlight pre{{font-size:{}em}}.markdown-body pre code{{font-size:100%}}.markdown-body table tr:nth-child(2n){{background-color:{}}}",
+        t.number("code-size"),
+        c("alt-bg")
+    ));
+    out
 }
 
 pub fn page(article: &str, o: &Opts) -> String {
@@ -190,12 +234,11 @@ pub fn page(article: &str, o: &Opts) -> String {
     let open: String = CHAIN.concat();
     let close: String = CHAIN.iter().map(|t| if t.starts_with("<main") { "</main>" } else { "</div>" }).collect();
     format!(
-        r#"<!DOCTYPE html><html lang="en" data-color-mode="auto" data-light-theme="light" data-dark-theme="dark" data-a11y-animated-images="system" data-a11y-link-underlines="true"{wrap}><head><meta charset="utf-8"><base href="file://{}"><style>{CSS}</style><style>{extra}</style>{scripts}{layers}<style>:root{{--mddog-bg:{bg}}}html,body{{margin:0!important;padding:0!important;background:{bg}!important;min-width:0!important}}body>div,body>div div:not(.markdown-body *),body main{{margin:0!important;padding:0!important;border:0!important;max-width:none!important;width:auto!important;background:{bg}!important}}article.markdown-body{{margin:0!important;padding:{py}px {px}px!important;max-width:none!important}}</style><style>{user}</style></head><body class="logged-out env-production page-responsive">{open}<article class="markdown-body entry-content container-lg" itemprop="text">{article}</article>{close}</body></html>"#,
+        r#"<!DOCTYPE html><html lang="en" data-color-mode="auto" data-light-theme="light" data-dark-theme="dark" data-a11y-animated-images="system" data-a11y-link-underlines="true"{wrap}><head><meta charset="utf-8"><base href="file://{}"><style>{CSS}</style><style>{extra}</style>{scripts}<style>{theme}</style><style>:root{{--mddog-bg:{bg}}}html,body{{margin:0!important;padding:0!important;background:{bg}!important;min-width:0!important}}body>div,body>div div:not(.markdown-body *),body main{{margin:0!important;padding:0!important;border:0!important;max-width:none!important;width:auto!important;background:{bg}!important}}article.markdown-body{{margin:0!important;padding:{py}px {px}px!important;max-width:none!important}}</style></head><body class="logged-out env-production page-responsive">{open}<article class="markdown-body entry-content container-lg" itemprop="text">{article}</article>{close}</body></html>"#,
         percent_path(&base),
         scripts = scripts(o),
         extra = EXTRA_CSS,
-        layers = theme_layers(o.theme),
-        user = crate::config::get().css.replace("</", "<\\/"),
+        theme = theme_css(o.theme),
         wrap = if o.wrap { r#" class="mddog-wrap""# } else { "" },
         bg = theme::hex(o.theme.palette.bg),
         px = o.pad_x,
@@ -214,18 +257,15 @@ mod tests {
     }
 
     #[test]
-    fn other_themes_sit_on_github_colors_of_their_mode() {
+    fn themes_sit_on_primer_colors_of_their_mode() {
         let light = theme::builtin("github-light").unwrap();
-        let dark = theme::builtin("github-dark").unwrap();
-        assert_eq!(built(light).matches(&*light.css).count(), 1);
-        assert!(!built(light).contains(&*dark.css));
-        let mine = theme::parse("mine.css", ":root{color-scheme:dark;--mddog-bg:#101010}".into()).unwrap();
+        let html = built(light);
+        assert!(html.contains(PRIMER_LIGHT) && !html.contains(PRIMER_DARK));
+        let mine = theme::parse("mine.css", ":root{color-scheme:dark;--mddog-bg:#101010;--mddog-link:#abcdef;--mddog-font-body:\"My Font\", system-ui}").unwrap();
         let html = built(&mine);
-        let (under, own) = (html.find(&*dark.css).unwrap(), html.find(&*mine.css).unwrap());
-        assert!(under < own && !html.contains(&*light.css));
-        // A theme can't close its style element, whatever the case.
-        let sneaky = theme::parse("x.css", ":root{color-scheme:dark}</STYLE><script>x()</script>".into()).unwrap();
-        assert!(!built(&sneaky).to_ascii_lowercase().contains("</style><script>x()"));
+        let (under, own) = (html.find(PRIMER_DARK).unwrap(), html.find("--fgColor-accent:#abcdef").unwrap());
+        assert!(under < own && !html.contains(PRIMER_LIGHT));
+        assert!(html.contains("--bgColor-default:#101010") && html.contains("font-family:\"My Font\",system-ui"));
     }
 
     #[test]

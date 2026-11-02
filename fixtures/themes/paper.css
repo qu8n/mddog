@@ -1,0 +1,16 @@
+/* A theme that sets type: serif body text, larger headings, looser lines, on warm paper. */
+:root {
+  color-scheme: light;
+  --mddog-bg: #fbf7ef;
+  --mddog-bar-bg: #f1ebdf;
+  --mddog-pre-bg: #f3ede1;
+  --mddog-alt-bg: #f6f1e7;
+  --mddog-text: #2b2620;
+  --mddog-heading: #1a1612;
+  --mddog-link: #9c3d10;
+  --mddog-font-body: "New York", Georgia, serif;
+  --mddog-font-code: Menlo;
+  --mddog-heading-scale: 2.2 1.6 1.3 1.1 1 0.9;
+  --mddog-line-height: 1.7;
+  --mddog-code-size: 0.8;
+}

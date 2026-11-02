@@ -11,6 +11,7 @@ use super::{emoji, highlight, octicons, sanitize};
 
 pub const RUN_ID: &str = "0f23d3dd37596070b592c1adaa9bf6c8";
 
+#[derive(Default)]
 pub struct Doc {
     pub html: String,
     pub math: bool,
@@ -33,7 +34,7 @@ fn escape_math(s: &str) -> String {
     s.replace('\\', "\\\\").replace('*', "\\*").replace('_', "\\_")
 }
 
-const HELD_DOLLAR: char = '\u{e024}';
+pub(crate) const HELD_DOLLAR: char = '\u{e024}';
 
 fn hold_dollars(text: &str, masked: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -57,7 +58,7 @@ enum Fence {
     Inside,
 }
 
-fn protect_math(src: &str) -> String {
+pub(crate) fn protect_math(src: &str) -> String {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src);
     let delim = |line: &str| {
         let u = unquote(line).0;
@@ -400,6 +401,16 @@ fn local_media(url: &str, dir: &Path, root: &Path) -> Option<String> {
     if t.is_empty() || t.starts_with('#') || is_remote(t) {
         return Some(url.to_string());
     }
+    media_path(t, dir, root)?;
+    match t.strip_prefix('/') {
+        Some(rest) => Some(format!("{}{rest}", "../".repeat(dir.strip_prefix(root).ok()?.components().count()))),
+        None => Some(url.to_string()),
+    }
+}
+
+/// The file a local media URL opens, once canonical, when it is inside `root`. A `/` path starts at `root`, any
+/// other at `dir`. The query and fragment don't name a file, so `?raw=1` is dropped.
+fn media_path(t: &str, dir: &Path, root: &Path) -> Option<PathBuf> {
     if t.starts_with("//") || t.contains(|c: char| c == '\\' || c.is_control()) {
         return None;
     }
@@ -424,13 +435,24 @@ fn local_media(url: &str, dir: &Path, root: &Path) -> Option<String> {
             c => full.push(c),
         }
     }
-    if !std::fs::canonicalize(full).ok()?.starts_with(root) {
+    std::fs::canonicalize(full).ok().filter(|p| p.starts_with(root))
+}
+
+/// The file a local image URL in a Markdown file in `dir` may show, by the same rules as WebKit's page: inside the
+/// repo, else the home folder, else `dir`. None for a remote or empty URL, or one that leaves that folder.
+pub fn confined_media(url: &str, dir: &Path) -> Option<PathBuf> {
+    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let root = media_root(&dir, std::env::var_os("HOME").map(PathBuf::from).as_deref());
+    let t = url.trim();
+    if t.is_empty() || t.starts_with('#') || is_remote(t) {
         return None;
     }
-    match t.strip_prefix('/') {
-        Some(rest) => Some(format!("{}{rest}", "../".repeat(dir.strip_prefix(root).ok()?.components().count()))),
-        None => Some(url.to_string()),
+    // A `file://` URL names an absolute path, which must still be inside the root.
+    if let Some(rest) = t.get(..7).filter(|p| p.eq_ignore_ascii_case("file://")).map(|_| &t[7..]) {
+        let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+        return rest.starts_with('/').then(|| media_path(&format!("/{}", rest.trim_start_matches('/')), Path::new("/"), Path::new("/"))).flatten().filter(|p| p.starts_with(&root));
     }
+    media_path(t, &dir, &root)
 }
 
 /// None when the bytes aren't UTF-8, since the path checked must be the one WebKit opens.
@@ -1103,6 +1125,30 @@ mod tests {
         assert!(html.contains("src=\"img/a%20b.png\"") && html.contains("src=\"../logo.png\"") && html.contains("src=\"https://x.test/r.png\""), "{html}");
         assert!(!html.contains("src=\"..\\") && !html.contains("src=\".\t") && !html.contains(&format!("src=\"{outside}")) && !html.contains("src=\"//host"), "{html}");
         assert!(html.contains("srcset=\"img/a%20b.png 1x\""), "{html}");
+    }
+
+    #[test]
+    fn native_images_follow_the_same_rules() {
+        let top = std::fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("mddog-native-media-{}", std::process::id()));
+        let repo = top.join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("docs/img")).unwrap();
+        std::fs::write(repo.join("docs/img/a b.png"), b"x").unwrap();
+        std::fs::write(repo.join("logo.png"), b"x").unwrap();
+        std::fs::write(top.join("secret.png"), b"x").unwrap();
+        let dir = repo.join("docs");
+        let at = |u: &str| confined_media(u, &dir);
+        let in_repo = |f: &str| Some(repo.join(f));
+        assert_eq!(at("img/a%20b.png"), in_repo("docs/img/a b.png"));
+        assert_eq!(at("img/a%20b.png?raw=1"), in_repo("docs/img/a b.png"));
+        assert_eq!(at("/logo.png"), in_repo("logo.png"));
+        assert_eq!(at(&format!("file://{}/docs/img/a%20b.png", repo.display())), in_repo("docs/img/a b.png"));
+        for out in ["../../secret.png", "//host/x.png", "https://x.test/r.png", "", "img/a%2Fb.png"] {
+            assert_eq!(at(out), None, "{out}");
+        }
+        assert_eq!(at(&format!("file://{}/secret.png", top.display())), None);
+        assert_eq!(at(&format!("file://{}/../secret.png", repo.display())), None);
+        let _ = std::fs::remove_dir_all(&top);
     }
 
     #[test]

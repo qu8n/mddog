@@ -5,8 +5,9 @@
 
 # One theme, such as "github-dark", or one for each macOS appearance as below.
 # A theme is a built-in name (github-light, github-dark, obsidian-light, obsidian-dark)
-# or a path to a .css file (any value that ends in .css or contains /). "light:obsidian-light,dark:obsidian-dark" looks like Obsidian.
-# A relative path starts from the config folder, and ~/ is your home. To write one, see docs/themes.md.
+# or a path to a theme file (any value that ends in .css or contains /). "light:obsidian-light,dark:obsidian-dark" looks like Obsidian.
+# A theme file sets colors, fonts and sizes as tokens. A relative path starts from the config folder,
+# and ~/ is your home. To write one, see docs/themes.md.
 theme = "light:github-light,dark:github-dark"
 
 # Reload the preview when the file changes.
@@ -38,6 +39,3 @@ extensions = ["md", "markdown"]
 # pele (GitHub's frame and buttons, its own layout) or obsidian (draws like Obsidian).
 # Unset, the theme's --mddog-mermaid picks: obsidian under the Obsidian themes, pele otherwise.
 # engine = "pele"
-
-# For other changes, put CSS in style.css next to config.toml. It loads after the theme.
-# See docs/themes.md.

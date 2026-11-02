@@ -17,6 +17,8 @@ pub mod engine;
 #[doc(hidden)]
 pub mod headless;
 #[doc(hidden)]
+pub mod native;
+#[doc(hidden)]
 pub mod page;
 #[doc(hidden)]
 pub mod sweep;

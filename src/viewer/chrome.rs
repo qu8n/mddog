@@ -153,9 +153,12 @@ fn help_lines(cols: usize) -> Vec<String> {
     let full = app::KEYS.lines().map(|l| term::width(l.trim_end())).max().unwrap_or(0) + 2;
     let mut lines = vec!["mddog keys. Press ? or Esc to go back to the page".to_string(), String::new()];
     for l in app::KEYS.lines().map(str::trim_end) {
-        match l.trim_start().split_once("  ").filter(|_| full > cols && l.starts_with("  ")) {
+        let t = l.trim_start();
+        match (full > cols && l.starts_with("  ")).then(|| t.split_once("  ").unwrap_or(("", t))) {
             Some((k, d)) => {
-                lines.push(format!("  {k}"));
+                if !k.is_empty() {
+                    lines.push(format!("  {k}"));
+                }
                 let mut line = String::from("     ");
                 for w in d.split_whitespace() {
                     if term::width(&line) + 1 + term::width(w) > cols.saturating_sub(2) && !line.trim().is_empty() {
@@ -304,5 +307,9 @@ mod tests {
         let mut top = 10_000;
         help(&mut String::new(), 80, 10, &mut top, &dark());
         assert_eq!(top as usize, help_lines(80).len() - 9);
+        for cols in [40, 80] {
+            let long = help_lines(cols).into_iter().skip(1).find(|l| term::width(l) > cols - 2);
+            assert!(long.is_none(), "{long:?} doesn't fit {cols} columns");
+        }
     }
 }

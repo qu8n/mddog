@@ -111,7 +111,7 @@ pub fn no_prewarm_at_login() -> Result<bool, String> {
 }
 
 pub fn spawn() {
-    if off() {
+    if off() || super::native() {
         return;
     }
     let Ok(exe) = std::env::current_exe() else { return };

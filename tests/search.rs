@@ -31,10 +31,10 @@ fn load_unstarted(eng: &mut Engine, md: &str, width: f64, wrap: bool, engine: Me
 }
 fn load_themed(eng: &mut Engine, md: &str, width: f64, wrap: bool, engine: Mermaid, theme: &str) -> bool {
     let doc = render(md);
-    let runtime = doc.mermaid.then(assets::runtime_dir);
+    let runtime = (doc.math || doc.mermaid).then(assets::runtime_dir);
     let html = page::build(
         &doc.html,
-        &page::Opts { theme: mddog::theme::builtin(theme).unwrap(), base: Path::new("/tmp"), pad_x: 0.0, pad_y: 0.0, math: false, mermaid: doc.mermaid, engine, wrap, runtime: runtime.as_deref() },
+        &page::Opts { theme: mddog::theme::builtin(theme).unwrap(), base: Path::new("/tmp"), pad_x: 0.0, pad_y: 0.0, math: doc.math, mermaid: doc.mermaid, engine, wrap, runtime: runtime.as_deref() },
     );
     // The viewer's own load, so the diagram checks also cover what it does with the page file.
     let tmp = std::env::temp_dir().join(format!("mddog-search-test-{}.html", std::process::id()));
@@ -45,7 +45,7 @@ fn load_themed(eng: &mut Engine, md: &str, width: f64, wrap: bool, engine: Merma
 }
 fn matches(eng: &mut Engine, md: &str, width: f64, query: &str) -> Vec<Vec<script::Rect>> {
     load(eng, md, width);
-    serde_json::from_str(&eng.eval(&script::search(query, None)).unwrap()).unwrap_or_default()
+    eng.search(query, None)
 }
 fn center(eng: &Engine, selector: &str) -> (f64, f64) {
     let json =
@@ -171,6 +171,12 @@ fn main() {
 
     let m = matches(&mut eng, "first para ends\n\nwith next para\n", 600.0, "ends with");
     check("no_match_across_blocks", m.is_empty());
+
+    // MathJax gets the math as text, so `<b` is a less-than sign, not a tag that swallows the rest.
+    load(&mut eng, "$a<b$ and $a < b > c$ and $x &lt; y$.\n", 600.0);
+    wait(&eng, script::MATH_DONE);
+    let math = eng.eval("JSON.stringify([...document.querySelectorAll('math-renderer')].map((m) => m.querySelector('math')?.textContent.replace(/\\s/g, '')))").unwrap();
+    check("math_keeps_html_like_text", math == r#"["a<b","a<b>c","x<y"]"#);
 
     // Remote images go through the app's scheme handler, which refuses private hosts and says so in the placeholder.
     let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -318,6 +324,11 @@ fn main() {
         eng.eval("(() => { const r = document.querySelector('section').getBoundingClientRect(); return JSON.stringify([r.left + scrollX, r.top + scrollY, r.width, r.height]); })()").unwrap();
     check("p4_zoom_button_repaints_section", pressed == format!(r#"["rect",{zoomed_section}]"#));
     check("p4_zoom_in_zooms", eng.eval(viewbox).unwrap() != before);
+    // A zoom puts its own layout on the diagram, which the expanded copy must leave behind.
+    eng.eval("mddogMouse.expand(0, 0, 400)").unwrap();
+    let zoom_style = "(() => { const s = document.querySelector('mddog-expanded svg').style; return JSON.stringify(['margin', 'display', 'cursor', 'user-select', 'touch-action', 'outline'].filter((p) => s.getPropertyValue(p))); })()";
+    check("p4_expanded_drops_zoom_layout", eng.eval(zoom_style).unwrap() == "[]");
+    eng.eval("mddogMouse.collapse()").unwrap();
     check("p4_zoom_reset_pointer", hover_at(&eng, center(&eng, ".pele-zoom-reset")) == ("pointer".into(), vec![]));
     press_at(&eng, center(&eng, ".pele-zoom-reset"));
     check("p4_reset_restores_view", eng.eval(viewbox).unwrap() == before);
@@ -325,6 +336,13 @@ fn main() {
     load(&mut eng, "```mermaid\nflowchart LR\n  A --> B\n```\n", 600.0);
     wait(&eng, "mddog.state.mermaid === true");
     check("p6_pele_expands", eng.eval("mddogMouse.expand(0, 0, 200)").unwrap() != "[]" && eng.eval("String(!!document.querySelector('mddog-expanded svg'))").unwrap() == "true");
+    // Pele keeps its colors in the SVG's style attribute, so the copy must keep them too.
+    let paint = |root: &str| {
+        eng.eval(&format!("JSON.stringify([...document.querySelectorAll('{root} svg.pele :is(rect, path, text)')].map((n) => {{ const s = getComputedStyle(n); return [s.fill, s.stroke]; }}))"))
+            .unwrap()
+    };
+    let (page_paint, expanded_paint) = (paint("section"), paint("mddog-expanded"));
+    check("p6_expanded_keeps_colors", expanded_paint.len() > 2 && expanded_paint == page_paint);
     eng.eval("mddogMouse.collapse()").unwrap();
     load(&mut eng, "```mermaid\nflowchart LR\n  A --> B -->\n```\n", 600.0);
     wait(&eng, "mddog.state.mermaid === true");
@@ -523,7 +541,7 @@ fn main() {
     let copy = center(&eng, "clipboard-copy");
     hover_at(&eng, copy);
     press_at(&eng, copy);
-    eng.eval(&script::search("text", None)).unwrap();
+    eng.search("text", None);
     eng.eval("getSelection().selectAllChildren(document.body); mddog.state.remote = true; ''").unwrap();
     page::swap(&eng, &render(&next).html).unwrap();
     check("l1_swap_lays_out_as_a_load", eng.eval("mddogLayout()").unwrap() == fresh);

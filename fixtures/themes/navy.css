@@ -1,0 +1,12 @@
+/* A theme on a base: Obsidian dark on a navy page, with its own link and code colors. */
+:root {
+  --mddog-base: obsidian-dark;
+  --mddog-bg: #1b2238;
+  --mddog-bar-bg: #232b45;
+  --mddog-pre-bg: #232b45;
+  --mddog-code-bg: #2c3553;
+  --mddog-alt-bg: #20283f;
+  --mddog-rule: #3a4566;
+  --mddog-link: #7fb4ff;
+  --mddog-pl-keyword: #ff9e64;
+}

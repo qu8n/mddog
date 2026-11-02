@@ -1,7 +1,5 @@
 use serde::Deserialize;
 
-use crate::engine::Engine;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 /// A block of the page: its source lines and where it sits, in CSS pixels.
 pub struct Block {
@@ -36,19 +34,11 @@ pub enum Press {
     Other,
 }
 
-pub fn search(query: &str, keep: Option<usize>) -> String {
-    format!("mddogSearch.run({}, {})", serde_json::Value::from(query), keep.map_or(-1, |k| k as i64))
-}
-
-pub fn measure(engine: &Engine) -> Layout {
-    layout(&engine.eval("mddogLayout()").unwrap_or_default())
-}
-
 pub fn rects(json: &str) -> Vec<Rect> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
-fn layout(json: &str) -> Layout {
+pub fn layout(json: &str) -> Layout {
     let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
     let blocks = v["blocks"].as_array().cloned().unwrap_or_default();
     Layout {

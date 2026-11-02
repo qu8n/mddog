@@ -13,9 +13,9 @@ use super::loading::Loader;
 use super::picker::{self, Pick, Picker};
 use super::position;
 use super::sizes::Sizes;
-use crate::engine::{self, Bitmap, Engine};
-use crate::page::script::{self, Layout, Press, Rect};
-use crate::page::{self, remote};
+use crate::engine::{self, Bitmap, Engine, Late, Pointer, Select};
+use crate::page;
+use crate::page::script::{Layout, Press, Rect};
 use crate::render::markdown;
 use crate::term::kitty;
 use crate::term::{self, Click, Event, Key, Probe, Size, Tty};
@@ -204,7 +204,7 @@ pub struct Preview {
     theme: &'static Theme,
     /// A click changed the page (a copy, a disclosure, a button) since it loaded, which a reload undoes.
     touched: bool,
-    late: Option<(String, Instant)>,
+    late: Option<(Late, Instant)>,
     /// Read from disk at the first obsidian-engine diagram.
     sizes: Option<Sizes>,
     /// Read from disk at the first page with remote images. The natural size of each remote image seen so far, by URL, so its loading box opens at that size.
@@ -245,7 +245,8 @@ pub fn browse(root: PathBuf) -> i32 {
 
 fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     trace::start();
-    let spare = engine::spare::connect();
+    let native = engine::native();
+    let spare = if native { None } else { engine::spare::connect() };
     let (tx, rx) = mpsc::channel();
     let paused = Arc::new(AtomicBool::new(false));
     // Whether a Ctrl-C came while the screen was ours. Checked at delivery, not when the thread
@@ -287,7 +288,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         std::thread::Builder::new().stack_size(crate::render::STACK).spawn(move || {
             let bytes = std::fs::read(&f2);
             let _ = worker_tx.send(bytes.map(|b| {
-                let (src, doc) = page::doc(&b, &page::base_dir(&f2, stdin), |s, d| remote.and_then(|mut r| engine::spare::render(&mut r, s, d)));
+                let (src, doc) = page::doc(&b, &page::base_dir(&f2, stdin), |s, d| if native { Some(markdown::Doc::default()) } else { remote.and_then(|mut r| engine::spare::render(&mut r, s, d)) });
                 (b, src, doc)
             }));
         })
@@ -323,14 +324,18 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let _ = kitty::shm_write(&shm_name, &[0, 0, 0]);
     let _ = crate::sweep::write_private(Path::new(&temp), &[0, 0, 0]);
     trace::mark("tty ready");
-    let engine = spare.map_or_else(
-        || {
-            let e = Engine::new(800.0);
-            e.load_blank();
-            e
-        },
-        Engine::Remote,
-    );
+    let engine = if native {
+        Engine::new_native(800.0)
+    } else {
+        spare.map_or_else(
+            || {
+                let e = Engine::new(800.0);
+                e.load_blank();
+                e
+            },
+            Engine::Remote,
+        )
+    };
     trace::mark("engine created");
     let (probe, leftover) = tty.probe(&shm_name, &temp, PROBE_WAIT);
     if probe.pixel_mouse {
@@ -707,8 +712,9 @@ impl Preview {
             }
             Action::Search(q) => {
                 self.glide = None;
-                let json = self.search_js(&script::search(&q, None));
-                self.set_matches(serde_json::from_str(&json).unwrap_or_default());
+                self.frame_due = true;
+                let m = self.engine.search(&q, None);
+                self.set_matches(m);
                 let rows = self.match_rows();
                 for b in self.app.set_matches(rows) {
                     self.act(b);
@@ -716,15 +722,17 @@ impl Preview {
                 true
             }
             Action::Current(i) => {
-                let json = self.search_js(&format!("mddogSearch.setCurrent({i})"));
-                self.invalidate(&script::rects(&json));
+                self.frame_due = true;
+                let rects = self.engine.search_current(i);
+                self.invalidate(&rects);
                 if let Some(r) = self.matches.get(i).and_then(|m| m.first()) {
                     trace::log_match(i, self.matches.len(), *r);
                 }
                 true
             }
             Action::ClearSearch => {
-                self.search_js("mddogSearch.clear()");
+                self.frame_due = true;
+                self.engine.search_clear();
                 self.set_matches(Vec::new());
                 true
             }
@@ -738,7 +746,8 @@ impl Preview {
                 false
             }
             Action::ToggleWrap => {
-                self.search_js(&format!("mddogCode.wrap({})", self.app.wrap));
+                self.frame_due = true;
+                self.engine.set_wrap(self.app.wrap);
                 self.relayout();
                 false
             }
@@ -746,7 +755,8 @@ impl Preview {
                 let (top, height) = self.view_css();
                 let bottom = top + height;
                 let dx = f64::from(cells) * f64::from(self.cell_w) / self.scale;
-                let moved = self.select_js(&format!("mddogCode.scrollView ? mddogCode.scrollView({top},{bottom},{dx}) : '[]'"));
+                let rects = self.engine.code_scroll_view(top, bottom, dx);
+                let moved = self.redraw(&rects);
                 if !moved {
                     self.notify("Nothing on screen scrolls further sideways");
                 }
@@ -763,7 +773,10 @@ impl Preview {
                 false
             }
             Action::Help => true,
-            Action::Collapse => self.select_js("mddogMouse.collapse()"),
+            Action::Collapse => {
+                let rects = self.engine.collapse();
+                self.redraw(&rects)
+            }
             Action::CopySelection => {
                 self.copy_selection();
                 false
@@ -778,7 +791,8 @@ impl Preview {
                 }
                 let (x, y) = self.grid().point(Spot { cell: (col, row), sub: None }, 0.5);
                 let dx = f64::from(cells) * f64::from(self.cell_w) / self.scale;
-                self.select_js(&format!("mddogCode.scroll({x},{y},{dx})"))
+                let rects = self.engine.code_scroll(x, y, dx);
+                self.redraw(&rects)
             }
             Action::Editor if self.stdin => {
                 self.notify("Can't edit standard input");
@@ -879,11 +893,10 @@ impl Preview {
                     return self.act_all(actions);
                 }
                 let (x, y) = grid.point(spot, 0.5);
-                let hit = self.search_js(&format!("mddogCode.grab({x},{y},{})", f64::from(self.cell_h) / self.scale / 2.0));
-                if !hit.is_empty() {
+                self.frame_due = true;
+                if let Some(rects) = self.engine.code_grab(x, y, f64::from(self.cell_h) / self.scale / 2.0) {
                     self.bar_held = true;
                     self.last_press = None;
-                    let rects = script::rects(&hit);
                     self.invalidate(&rects);
                     return !rects.is_empty();
                 }
@@ -891,7 +904,7 @@ impl Preview {
                 self.last_press = (!double).then(|| (Instant::now(), col, row));
                 self.drag = Some(Drag { from: spot, at: spot, moved: double });
                 if double {
-                    return self.selection_js(&format!("mddogMouse.word({x},{y})"));
+                    return self.select(Select::Word(x, y));
                 }
                 false
             }
@@ -906,12 +919,13 @@ impl Preview {
             }
             Click::Drag if self.bar_held => {
                 let (x, _) = grid.point(spot, 0.5);
-                self.select_js(&format!("mddogCode.drag({x})"))
+                let rects = self.engine.code_drag(x);
+                self.redraw(&rects)
             }
             Click::Release if self.bar_held => {
                 let shown = self.mouse_event(Click::Drag, spot);
                 self.bar_held = false;
-                let _ = self.engine.eval("mddogCode.release()");
+                self.engine.code_release();
                 shown
             }
             Click::Drag => {
@@ -927,7 +941,7 @@ impl Preview {
                 let forward = order(at) >= order(d.from);
                 let (ax, ay) = grid.point(d.from, if forward { 0.0 } else { 1.0 });
                 let (fx, fy) = grid.point(at, if forward { 1.0 } else { 0.0 });
-                self.selection_js(&format!("mddogMouse.select({ax},{ay},{fx},{fy})"))
+                self.select(Select::Range(ax, ay, fx, fy))
             }
             Click::Release => {
                 if self.drag.is_none() {
@@ -941,10 +955,9 @@ impl Preview {
                     }
                     return shown;
                 }
-                let cleared = self.selection_js("mddogMouse.clear()");
+                let cleared = self.select(Select::Clear);
                 let (x, y) = grid.point(d.from, 0.5);
-                let hit = self.engine.eval(&format!("mddogMouse.link({x},{y})")).unwrap_or_default();
-                let target = serde_json::from_str::<(String, String)>(&hit).ok();
+                let target = self.engine.link(x, y);
                 let link = target.as_ref().and_then(|(raw, resolved)| classify_link(raw, resolved));
                 if target.is_some() && link.is_none() {
                     self.notify("Links to local files don't open in the preview");
@@ -969,7 +982,7 @@ impl Preview {
 
     /// Copies the page's selection, if there is one.
     fn copy_selection(&mut self) {
-        let text = self.engine.eval("getSelection().toString()").unwrap_or_default();
+        let text = self.engine.selection_text();
         if !text.is_empty() {
             self.copy_text(&text);
             self.notify("Copied the selection");
@@ -990,12 +1003,11 @@ impl Preview {
         }
         self.hover_page = page;
         let (x, y) = if page { self.grid().point(spot, 0.5) } else { (-1.0, -1.0) };
-        let json = self.engine.eval(&format!("mddogMouse.hover({x},{y},{})", f64::from(self.cell_h) / self.scale / 2.0)).unwrap_or_default();
-        let (shape, rects) = serde_json::from_str::<(String, Vec<Rect>)>(&json).unwrap_or_default();
-        self.set_pointer(match shape.as_str() {
-            "text" => "xterm",
-            "pointer" => self.probe.hand(),
-            _ => DEFAULT_POINTER,
+        let (pointer, rects) = self.engine.hover(x, y, f64::from(self.cell_h) / self.scale / 2.0);
+        self.set_pointer(match pointer {
+            Pointer::Text => "xterm",
+            Pointer::Hand => self.probe.hand(),
+            Pointer::Default => DEFAULT_POINTER,
         });
         if rects.is_empty() {
             return false;
@@ -1020,8 +1032,8 @@ impl Preview {
     }
 
     fn press(&mut self, x: f64, y: f64) -> bool {
-        let json = self.search_js(&format!("mddogMouse.press({x},{y})"));
-        let hit = script::press(&json);
+        self.frame_due = true;
+        let hit = self.engine.press(x, y);
         if hit != Press::Nothing {
             self.last_press = None;
         }
@@ -1037,7 +1049,8 @@ impl Preview {
             }
             Press::Expand(i) => {
                 let (top, height) = self.view_css();
-                let shown = self.select_js(&format!("mddogMouse.expand({i},{top},{height})"));
+                let rects = self.engine.expand(i, top, height);
+                let shown = self.redraw(&rects);
                 self.app.expanded = shown;
                 shown
             }
@@ -1057,7 +1070,8 @@ impl Preview {
             return false;
         }
         self.copy_until = None;
-        self.select_js("mddogMouse.resetCopy()")
+        let rects = self.engine.reset_copy();
+        self.redraw(&rects)
     }
 
     fn open_link(&mut self, link: Link) -> bool {
@@ -1068,8 +1082,7 @@ impl Preview {
                 false
             }
             Link::Anchor(id) => {
-                let top = self.engine.eval(&format!("mddogMouse.anchorY({})", serde_json::to_string(&id).unwrap_or_default())).ok().and_then(|s| s.parse::<f64>().ok());
-                let Some(y) = top.filter(|y| *y >= 0.0) else { return false };
+                let Some(y) = self.engine.anchor_y(&id) else { return false };
                 let row = self.row_of(y);
                 let actions = self.app.jump(row);
                 let show = self.act_all(actions);
@@ -1079,30 +1092,24 @@ impl Preview {
         }
     }
 
-    fn select_js(&mut self, js: &str) -> bool {
-        let json = self.search_js(js);
-        let rects = script::rects(&json);
-        self.invalidate(&rects);
+    /// Redraws `rects` after a page change. Returns whether there were any.
+    fn redraw(&mut self, rects: &[Rect]) -> bool {
+        self.frame_due = true;
+        self.invalidate(rects);
         !rects.is_empty()
     }
 
-    fn selection_js(&mut self, js: &str) -> bool {
+    fn select(&mut self, sel: Select) -> bool {
+        let (n, all) = self.engine.select(sel);
         if !self.cache.bands() {
-            return self.select_js(js);
+            return self.redraw(&all);
         }
-        let json =
-            self.search_js(&format!("(() => {{ const s = getSelection(); const n = s.rangeCount ? s.getRangeAt(0).getClientRects().length : 0; return JSON.stringify([n, JSON.parse({js})]); }})()"));
-        let (n, all) = serde_json::from_str::<(usize, Vec<Rect>)>(&json).unwrap_or_default();
+        self.frame_due = true;
         let (before, after) = all.split_at(n.min(all.len()));
         let row = f64::from(self.cell_h) / self.scale;
         let rects: Vec<Rect> = changed_rects(before, after).into_iter().map(|r| [r[0], r[1] - row, r[2], r[3] + 2.0 * row]).collect();
         self.invalidate(&rects);
         !rects.is_empty()
-    }
-
-    fn search_js(&mut self, js: &str) -> String {
-        self.frame_due = true;
-        self.engine.eval(js).unwrap_or_default()
     }
 
     fn set_matches(&mut self, m: Vec<Vec<Rect>>) {
@@ -1233,7 +1240,7 @@ impl Preview {
         self.save_sizes(engine::CALL_LIMIT);
         let anchor = if keep { self.anchor() } else { None };
         let back = if keep { self.back_anchors() } else { Vec::new() };
-        let code = if keep { self.engine.eval("mddogCode.positions ? mddogCode.positions() : '[]'").unwrap_or_default() } else { String::new() };
+        let code = if keep { self.engine.code_positions() } else { String::new() };
         let mut old_src = std::mem::take(&mut self.src);
         let mut anchor = anchor;
         if let Some((a, src)) = self.restore_at.take() {
@@ -1250,15 +1257,15 @@ impl Preview {
         let simple = |d: &markdown::Doc| !d.math && !d.mermaid;
         let swap = self.doc.as_ref().is_some_and(simple) && simple(&doc) && shell == self.shell && (self.engine.width() - css_width).abs() < 1.0;
         self.shell = shell;
-        // A load lays out at the view's height. A swap on a page whose CSS can't tell keeps the page's full
-        // height, which saves two relayouts.
+        // A load lays out at the view's height. A swap keeps the page's full height, which saves two relayouts: a
+        // theme is tokens, so no page CSS depends on the height.
         let vp_css = self.view_css().1.max(100.0);
-        if !swap || !page::height_free(theme) {
+        if !swap {
             self.engine.resize(css_width, vp_css);
         }
         self.app.expanded = false;
         self.touched = false;
-        let loaded = if swap && page::swap(&self.engine, &doc.html).is_ok() {
+        let loaded = if self.engine.load_markdown(&src, &base, self.app.wrap, theme) || (swap && page::swap(&self.engine, &doc.html).is_ok()) {
             Ok(())
         } else {
             self.engine.resize(css_width, vp_css);
@@ -1268,26 +1275,21 @@ impl Preview {
         if doc.mermaid && config::mermaid(theme) == config::Mermaid::Obsidian {
             let sizes = self.sizes.get_or_insert_with(|| Sizes::open("diagram-sizes.json"));
             if !sizes.is_empty() {
-                let _ = self.engine.eval(&format!("mddog.guess({}); ''", sizes.json()));
+                self.engine.guess_diagrams(&sizes.json());
             }
         }
         if doc.html.contains("data-mddog-src") {
             let sizes = self.image_sizes.get_or_insert_with(|| Sizes::open("image-sizes.json"));
             if !sizes.is_empty() {
-                let _ = self.engine.eval(&format!("mddog.guessImages({}); ''", sizes.json()));
+                self.engine.guess_images(&sizes.json());
             }
         }
-        let mut late = Vec::new();
-        if doc.math && !self.engine.wait_js(script::MATH_DONE, Duration::from_secs(1)) {
-            late.push(script::MATH_DONE);
-        }
+        let math = doc.math && !self.engine.wait_late(Late { math: true, ..Late::default() }, Duration::from_secs(1));
         // Obsidian-engine diagrams start after the first paint, below; the re-send shows them.
-        if doc.mermaid && !self.engine.wait_js(script::MERMAID_DONE, Duration::ZERO) {
-            late.push(script::MERMAID_DONE);
-        }
+        let mermaid = doc.mermaid && !self.engine.wait_late(Late { mermaid: true, ..Late::default() }, Duration::ZERO);
         trace::mark("layout ready");
         if !code.is_empty() && code != "[]" {
-            let _ = self.engine.eval(&format!("mddogCode.restore && mddogCode.restore({})", serde_json::Value::from(code)));
+            self.engine.code_restore(&code);
         }
         self.measure();
         // The stamp keeps the source even when the load failed: stdin and live_reload = false
@@ -1314,15 +1316,13 @@ impl Preview {
             self.app.notice = Some(format!("{}{}", e[..1].to_uppercase(), &e[1..]));
             self.notice_until = Some(Instant::now() + NOTICE);
         }
-        if remote::load(&self.engine, REMOTE_LIMIT) {
-            late.push(script::REMOTE_DONE);
-        }
-        let start = late.contains(&script::MERMAID_DONE);
-        self.late = (!late.is_empty()).then(|| (format!("String({})", late.join(" && ")), Instant::now() + LATE_LIMIT));
+        let late = Late { math, mermaid, remote: self.engine.load_remote(REMOTE_LIMIT) };
+        let start = late.mermaid;
+        self.late = late.any().then(|| (late, Instant::now() + LATE_LIMIT));
         self.stale_hover();
         self.show();
         if start {
-            let _ = self.engine.eval(script::START_MERMAID);
+            self.engine.start_mermaid();
         }
         loaded.is_ok()
     }
@@ -1356,7 +1356,7 @@ impl Preview {
         if self.app.expanded || self.touched || !std::ptr::eq(config::theme(), self.theme) || self.doc.is_none() {
             return false;
         }
-        if self.engine.eval("String(!getSelection().isCollapsed || !!document.querySelector('picture, img[srcset]'))").as_deref() != Ok("false") {
+        if self.engine.resize_needs_reload() {
             return false;
         }
         if self.live() && std::fs::read(&self.file).ok().is_none_or(|b| b != self.stamp) {
@@ -1367,12 +1367,9 @@ impl Preview {
         let old = (self.size, self.cell_w, self.cell_h);
         let (toc, css_width) = self.fit();
         self.engine.resize(css_width, self.view_css().1.max(100.0));
-        let mut sized = self.engine.wait_js(&format!("Math.abs(innerWidth - {css_width}) < 1"), Duration::from_millis(100));
+        let mut sized = self.engine.wait_size(Some(css_width), None);
         if sized && self.doc.as_ref().is_some_and(|d| d.mermaid) {
-            // Pele refits each diagram in a ResizeObserver callback. Those run in the next
-            // rendering update, after its animation frame callbacks, so wait for a task after it.
-            let _ = self.engine.eval("window.mddogFrame = false; requestAnimationFrame(() => setTimeout(() => { window.mddogFrame = true; })); ''");
-            sized = self.engine.wait_js("window.mddogFrame", Duration::from_millis(100));
+            sized = self.engine.wait_refit();
         }
         if !sized {
             // The reload takes the reading position from the old geometry.
@@ -1405,8 +1402,8 @@ impl Preview {
         if self.app.query.is_empty() {
             return;
         }
-        let json = self.search_js(&script::search(&self.app.query, Some(self.app.current)));
-        self.matches = serde_json::from_str(&json).unwrap_or_default();
+        self.frame_due = true;
+        self.matches = self.engine.search(&self.app.query, Some(self.app.current));
         self.app.matches = self.match_rows();
         if self.app.current >= self.app.matches.len() {
             self.app.current = 0;
@@ -1414,7 +1411,7 @@ impl Preview {
     }
 
     fn measure(&mut self) {
-        self.layout = script::measure(&self.engine);
+        self.layout = self.engine.layout();
         self.doc_px = (self.layout.height * self.scale).ceil() as u32;
         if trace::enabled() {
             trace::mark(&format!("page height {} px", self.layout.height));
@@ -1438,7 +1435,7 @@ impl Preview {
         engine::spin(1.0);
         // A snapshot taken before the page has its new size comes back blank. Seeing the new
         // innerHeight takes about 2 ms, where waiting for a frame takes 15 to 25 ms.
-        let sized = self.engine.wait_js(&format!("Math.abs(innerHeight - {height}) < 1"), Duration::from_millis(100));
+        let sized = self.engine.wait_size(None, Some(height));
         self.frame_due |= !sized;
     }
 
@@ -1647,9 +1644,9 @@ impl Preview {
                 self.rerender_keep();
             }
         }
-        if let Some((cond, until)) = &self.late {
+        if let Some((late, until)) = self.late {
             engine::spin(2.0);
-            if Instant::now() > *until || self.engine.eval(cond).as_deref() == Ok("true") {
+            if Instant::now() > until || self.engine.late_done(late) {
                 self.late = None;
                 self.save_sizes(engine::CALL_LIMIT);
                 self.relayout();
@@ -1676,9 +1673,9 @@ impl Preview {
         if self.doc.is_none() || self.engine.stalled() {
             return;
         }
-        for (sizes, js) in [(&mut self.sizes, "JSON.stringify(mddog.state.sizes)"), (&mut self.image_sizes, "JSON.stringify(mddog.state.images)")] {
+        for (sizes, images) in [(&mut self.sizes, false), (&mut self.image_sizes, true)] {
             if let Some(sizes) = sizes
-                && let Ok(json) = self.engine.eval_within(js, limit)
+                && let Some(json) = self.engine.recorded_sizes(images, limit)
             {
                 sizes.merge(&json);
             }
