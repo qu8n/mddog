@@ -73,6 +73,20 @@ pub fn load(engine: &Engine, path: &Path, html: &str, dark: bool, wait: Duration
     Ok(())
 }
 
+/// Puts `article` in the loaded page in place of its article, then gives its images up to 500 ms, as `load` does.
+pub fn swap(engine: &Engine, article: &str) -> Result<(), String> {
+    engine.eval(&format!("mddog.swap({})", serde_json::Value::from(article)))?;
+    trace::mark("page swapped");
+    engine.wait_js(script::READY, Duration::from_millis(500));
+    Ok(())
+}
+
+/// Whether the page lays out the same at any view height: a built-in theme (no `vh` unit or height media query,
+/// which a test checks) and no `css` setting. A custom theme or `css` may depend on the height.
+pub fn height_free(theme: &Theme) -> bool {
+    config::get().css.is_empty() && crate::theme::builtin(&theme.name).is_some_and(|b| b == theme)
+}
+
 pub fn build(article: &str, o: &Opts) -> String {
     (crate::style::DEFAULT.page)(article, o)
 }
@@ -91,6 +105,27 @@ pub(crate) fn percent_path(p: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn built_in_themes_are_height_free() {
+        // A viewport-height unit or a height media query in any letter case.
+        let uses_height = |css: &str| {
+            let css = css.to_ascii_lowercase();
+            let b = css.as_bytes();
+            let unit = ["vh", "vb", "vmin", "vmax", "svh", "lvh", "dvh", "svb", "lvb", "dvb", "svmin", "lvmin", "dvmin", "svmax", "lvmax", "dvmax"]
+                .iter()
+                .any(|u| css.match_indices(u).any(|(i, _)| i > 0 && b[i - 1].is_ascii_digit()));
+            unit || css.match_indices("@media").any(|(i, _)| css[i..].split('{').next().is_some_and(|q| ["height", "aspect-ratio", "orientation"].iter().any(|w| q.contains(w))))
+        };
+        assert!(uses_height("p{min-height:100dvb}") && uses_height("body{min-height:100VH}") && uses_height("@media (max-height: 600px){p{}}") && !uses_height("@media (max-width: 600px){.vh{}}"));
+        for name in crate::theme::names().split(", ") {
+            let theme = crate::theme::builtin(name).unwrap();
+            // The config holds a copy of the built-in theme.
+            assert!(height_free(&theme.clone()));
+            let o = Opts { theme, base: Path::new("/"), pad_x: 0.0, pad_y: 0.0, math: false, mermaid: false, engine: config::Mermaid::Pele, wrap: false, runtime: None };
+            assert!(!uses_height(&build("", &o)), "{name} lays out the same at any height");
+        }
+    }
 
     #[test]
     fn doc_fills_an_empty_file_and_takes_the_spare_render() {

@@ -402,6 +402,12 @@ impl Engine {
     }
 
     fn snap(&self, y: f64, h: f64, width: usize, height: usize, dst: &mut [u8]) -> Option<()> {
+        // The snapshot's image is autoreleased, and nothing else drains a pool on this thread, so without this
+        // pool every snapshot stayed in memory until exit: 8 MiB a tile in both mdd and WebContent.
+        objc2::rc::autoreleasepool(|_| self.snap_in(y, h, width, height, dst))
+    }
+
+    fn snap_in(&self, y: f64, h: f64, width: usize, height: usize, dst: &mut [u8]) -> Option<()> {
         // SAFETY: plain init and setters on the main thread, on a configuration nothing else holds yet.
         let config = unsafe {
             let c = WKSnapshotConfiguration::new(self.mtm);

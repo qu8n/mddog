@@ -197,6 +197,8 @@ pub struct Preview {
     img_col: u16,
     img_cols: u16,
     tmp_html: PathBuf,
+    /// The loaded page without its article, which a reload compares to swap the article in place.
+    shell: String,
     doc: Option<markdown::Doc>,
     /// The loaded page's theme.
     theme: &'static Theme,
@@ -400,6 +402,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         img_col: 0,
         img_cols: size.cols,
         tmp_html: crate::sweep::temp_path("mddog-", ".html"),
+        shell: String::new(),
         doc: None,
         theme: &config::get().themes.light,
         touched: false,
@@ -539,16 +542,6 @@ impl Preview {
                 }
             }
             need_show |= self.copy_due();
-            // The page moved or changed under a still pointer, so what it hovers may have changed.
-            if let Some((spot, px)) = self.hover_at
-                && px != self.shown_px()
-                && !self.listing
-                && self.drag.is_none()
-                && !self.bar_held
-                && !self.app.toc_bar_held()
-            {
-                need_show |= self.hover(spot);
-            }
             if self.notice_until.is_some_and(|due| Instant::now() >= due) {
                 self.notice_until = None;
                 self.app.notice = None;
@@ -558,6 +551,20 @@ impl Preview {
                 self.show();
             }
             self.tick();
+            // The page moved or changed under a still pointer, so what it hovers may have changed.
+            // The hit test is a WebKit round trip of a few ms, so it runs after the frame went out,
+            // and not at all during a glide. It comes after `tick`, which draws a glide's last frame.
+            if let Some((spot, px)) = self.hover_at
+                && px != self.shown_px()
+                && self.glide.is_none()
+                && !self.listing
+                && self.drag.is_none()
+                && !self.bar_held
+                && !self.app.toc_bar_held()
+                && self.hover(spot)
+            {
+                self.show();
+            }
         }
     }
 
@@ -1236,11 +1243,27 @@ impl Preview {
         let base = self.base();
         let (html, theme) = page::html(&doc, &base, self.app.wrap);
         self.theme = theme;
-        let vp_css = self.view_css().1;
-        self.engine.resize(css_width, vp_css.max(100.0));
+        // Everything but the article: the theme, the base folder, the wrap mode, the scripts.
+        let shell = html.replacen(&doc.html, "", 1);
+        // A page with no math and no diagrams runs no script of its own, so the new article can go into the
+        // loaded page, at the same width, and give what a load gives in about half the time.
+        let simple = |d: &markdown::Doc| !d.math && !d.mermaid;
+        let swap = self.doc.as_ref().is_some_and(simple) && simple(&doc) && shell == self.shell && (self.engine.width() - css_width).abs() < 1.0;
+        self.shell = shell;
+        // A load lays out at the view's height. A swap on a page whose CSS can't tell keeps the page's full
+        // height, which saves two relayouts.
+        let vp_css = self.view_css().1.max(100.0);
+        if !swap || !page::height_free(theme) {
+            self.engine.resize(css_width, vp_css);
+        }
         self.app.expanded = false;
         self.touched = false;
-        let loaded = page::load(&self.engine, &self.tmp_html, &html, theme.dark, Duration::from_secs(3));
+        let loaded = if swap && page::swap(&self.engine, &doc.html).is_ok() {
+            Ok(())
+        } else {
+            self.engine.resize(css_width, vp_css);
+            page::load(&self.engine, &self.tmp_html, &html, theme.dark, Duration::from_secs(3))
+        };
         trace::mark("page loaded");
         if doc.mermaid && config::mermaid(theme) == config::Mermaid::Obsidian {
             let sizes = self.sizes.get_or_insert_with(|| Sizes::open("diagram-sizes.json"));
@@ -1602,6 +1625,8 @@ impl Preview {
                 self.glide = None;
             } else {
                 let (px, done) = g.at(Instant::now());
+                // The eased position reaches `to` a frame or two before the clock runs out, so the glide ends there.
+                let done = done || px == g.to();
                 self.glide = (!done).then_some((g, px));
                 // Near the end the eased position rounds to the same pixel for a few frames.
                 if px != last || done {

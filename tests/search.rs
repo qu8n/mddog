@@ -515,6 +515,27 @@ fn main() {
     let m = matches(&mut eng, "Apple apple APPLE\n", 600.0, "Apple");
     check("v6_smart_case", m.len() == 1);
 
+    // A reload of a simple page swaps its article in place, which must give what a fresh load of it gives.
+    let next = format!("# Two\n\n{}| a | b |\n|---|---|\n| [x](https://example.com) | y |\n\n```\nplain\n```\n", page(40));
+    load(&mut eng, &next, 600.0);
+    let fresh = eng.eval("mddogLayout()").unwrap();
+    load(&mut eng, "# One\n\n```rust\nfn main() {}\n```\n\nsome text\n", 600.0);
+    let copy = center(&eng, "clipboard-copy");
+    hover_at(&eng, copy);
+    press_at(&eng, copy);
+    eng.eval(&script::search("text", None)).unwrap();
+    eng.eval("getSelection().selectAllChildren(document.body); mddog.state.remote = true; ''").unwrap();
+    page::swap(&eng, &render(&next).html).unwrap();
+    check("l1_swap_lays_out_as_a_load", eng.eval("mddogLayout()").unwrap() == fresh);
+    let reset = "String(getSelection().isCollapsed && mddogMouse.resetCopy() === '[]' && CSS.highlights.get('mddog-match').size === 0 && mddog.state.remote === false)";
+    check("l1_swap_drops_page_state", eng.eval(reset).unwrap() == "true");
+    // The old article's images keep loading after a swap, and must not mark the new page's remote images done.
+    load(&mut eng, "![x](http://127.0.0.1/x.png)\n", 600.0);
+    eng.eval("mddog.loadRemote(5000); ''").unwrap();
+    page::swap(&eng, &render("plain\n").html).unwrap();
+    std::thread::sleep(Duration::from_millis(1500));
+    check("l1_swap_ignores_old_images", eng.eval("String(mddog.state.remote)").unwrap() == "false");
+
     let md = "# Spare\n\nSome *text* and `code`.\n";
     load(&mut eng, md, 600.0);
     let local = eng.snapshot(0.0, 100.0, s).unwrap().rgba.to_vec();

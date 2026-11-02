@@ -455,7 +455,14 @@ window.mddogMouse = (() => {
 
   const clear = () => change(() => getSelection().removeAllRanges());
 
-  return { at, link, press, hover, resetCopy, expand, collapse, anchorY, select, word, clear };
+  // A page swapped in place drops the old article's elements, as a load would.
+  function forget() {
+    copied = null;
+    hovered = null;
+    collapse();
+  }
+
+  return { at, link, press, hover, resetCopy, expand, collapse, anchorY, select, word, clear, forget };
 })();
 
 window.mddogCode = (() => {
@@ -647,12 +654,27 @@ window.mddog.guessImages = (sizes) => {
   }
 };
 
+// Puts a new article in the loaded page, for a reload that needs no new page (see Preview::render_doc). It leaves
+// the page as a load of the same HTML would: no selection, no search marks, no remote images loaded yet.
+window.mddog.swap = (html) => {
+  getSelection().removeAllRanges();
+  mddogSearch.clear();
+  mddogMouse.forget();
+  mddogCode.release();
+  window.mddog.state.remote = false;
+  // The old article's images still load after they leave the page, so their callbacks must not count.
+  window.mddog.generation = (window.mddog.generation || 0) + 1;
+  document.querySelector('article.markdown-body').innerHTML = html;
+  return '';
+};
+
 window.mddog.loadRemote = (timeout) => {
   const imgs = [...document.querySelectorAll('img[data-mddog-src]')];
   const posters = [...document.querySelectorAll('video[data-mddog-poster]')];
   const videos = [...document.querySelectorAll('video')].filter((v) => v.matches('[data-mddog-media]') || v.querySelector('source[data-mddog-media]'));
   let left = imgs.length + posters.length + videos.length;
-  const settle = () => { if (--left <= 0) window.mddog.state.remote = true; };
+  const generation = window.mddog.generation;
+  const settle = () => { if (generation === window.mddog.generation && --left <= 0) window.mddog.state.remote = true; };
   if (!left) { window.mddog.state.remote = true; return; }
   for (const video of posters) {
     const url = viaApp(video.dataset.mddogPoster);
