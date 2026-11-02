@@ -24,11 +24,6 @@ glide_ms_per_page = 200
 # Copy the text you select with a mouse drag or a double-click, as soon as you let go.
 copy_on_select = false
 
-# Keep a hidden mdd running with WebKit loaded, so the next preview opens faster.
-# With false, mddog starts no background process, and each preview takes longer to open.
-# mdd --prewarm-at-login then refuses to run.
-prewarm = true
-
 [file_list]
 # The file extensions the file list (mdd, mdd FOLDER, Ctrl-p) shows, and that
 # "Did you mean" picks from. This is the full list. Write each one without the dot.
@@ -36,6 +31,6 @@ prewarm = true
 extensions = ["md", "markdown"]
 
 [mermaid]
-# pele (GitHub's frame and buttons, its own layout) or obsidian (draws like Obsidian).
+# How Mermaid diagrams look: pele (GitHub's frame and buttons) or obsidian (as Obsidian draws them).
 # Unset, the theme's --mddog-mermaid picks: obsidian under the Obsidian themes, pele otherwise.
 # engine = "pele"

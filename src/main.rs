@@ -18,40 +18,12 @@ Usage
 Options
   -h, --help                show this help
   -V, --version             show the version
-      --prewarm-at-login    start a prewarmed mdd at login so previews open faster
-      --no-prewarm-at-login undo --prewarm-at-login
 
 In the preview, press ? to list the keys.
 ";
 
 fn main() {
     trace::start();
-    if std::env::args().nth(1).as_deref() == Some("--spare") {
-        let _ = config::load();
-        std::process::exit(engine::spare::serve());
-    }
-    if std::env::args().nth(1).as_deref() == Some("--prewarm-at-login") {
-        config::load().unwrap_or_else(|e| fail(&format!("config: {e}")));
-        if !config::get().prewarm {
-            let file = config::dir().map_or("config.toml".into(), |d| d.join("config.toml").display().to_string());
-            eprintln!("{}", fit(&format!("mdd: prewarm is false in {}, so there is nothing to start at login. Set it to true first.", term::printable(&file))));
-            // install.sh lets this one refusal through and stops on every other failure.
-            std::process::exit(3);
-        }
-        match engine::spare::prewarm_at_login() {
-            Ok(_) => println!("mdd: launchd now starts a prewarmed mdd at login, so your first preview opens faster. Undo with: mdd --no-prewarm-at-login"),
-            Err(e) => fail(&e),
-        }
-        return;
-    }
-    if std::env::args().nth(1).as_deref() == Some("--no-prewarm-at-login") {
-        match engine::spare::no_prewarm_at_login() {
-            Ok(true) => println!("mdd: launchd no longer starts mdd at login"),
-            Ok(false) => println!("mdd: nothing to undo, launchd wasn't starting mdd at login"),
-            Err(e) => fail(&e),
-        }
-        return;
-    }
     let mut files: Vec<String> = Vec::new();
     let mut options = true;
     let mut headless: Option<u16> = None;

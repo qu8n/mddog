@@ -133,7 +133,7 @@ impl Images {
             wanted.push(src.to_string());
             return Status::Pending;
         }
-        // The same confinement and URL rules as WebKit's page: inside the repo or home, `/` from its root, no query.
+        // Confined to the repo, else home, else the folder; `/` starts at that root, and the query is dropped.
         let path = crate::render::markdown::confined_media(src, &self.dir);
         let r = path.filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file())).and_then(|p| std::fs::read(p).ok()).and_then(|d| decode(&d));
         match r {

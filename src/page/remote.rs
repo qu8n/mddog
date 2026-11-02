@@ -1,6 +1,4 @@
-//! Fetches remote images and media for the web view, so WebKit never reaches the network for them. The page asks
-//! for `mddog-https://…` or `mddog-http://…` (see `mddog.loadRemote`), and the scheme handler in `engine::webview`
-//! calls `fetch` on `spawn`'s small pool of worker threads. Each connection goes only to addresses checked here, so
+//! Fetches remote images for the page. `native::images` calls `fetch` on `spawn`'s small pool of worker threads. Each connection goes only to addresses checked here, so
 //! a redirect to a name that resolves to a private address, or a DNS answer that changes between check and connect,
 //! can't reach one.
 
@@ -14,24 +12,12 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ureq::unversioned::resolver::{ResolvedSocketAddrs, Resolver};
 
-use crate::engine::Engine;
-
-/// The page asks for `PREFIX` + the remote URL, one scheme for each of http and https.
-pub const PREFIX: &str = "mddog-";
-pub const SCHEMES: [&str; 2] = ["mddog-http", "mddog-https"];
 const HOPS: u32 = 5;
 const PER_HOST: usize = 6;
 const MAX_BODY: u64 = 32 << 20;
 const CACHE_BYTES: usize = 64 << 20;
 const CHUNK: usize = 256 << 10;
 const BLOCK: u64 = 2 << 20;
-
-/// The http(s) URL behind the page's `mddog-http(s)://` URL, without the fragment, which is never sent. READMEs
-/// often add one, as in GitHub's `#gh-dark-mode-only`.
-pub fn target(url: &str) -> &str {
-    let url = url.strip_prefix(PREFIX).unwrap_or(url);
-    url.split_once('#').map_or(url, |(u, _)| u)
-}
 
 fn private_ip(ip: IpAddr) -> bool {
     match ip {
@@ -284,7 +270,16 @@ fn store(entry: Arc<Entry>) {
 /// hash of its URL, holding a JSON line of the URL, type, and expiry, then the body. The sweep removes files past
 /// the longest lifetime and keeps the folder under `DISK_BYTES`.
 pub fn disk_dir() -> PathBuf {
-    crate::assets::cache_dir().join("remote")
+    cache_dir().join("remote")
+}
+
+/// The cache root: `MDDOG_CACHE_DIR` when set, so tests keep out of the real one, else `~/Library/Caches/mddog`.
+fn cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("MDDOG_CACHE_DIR").filter(|d| !d.is_empty()) {
+        return std::path::absolute(&dir).unwrap_or_else(|_| PathBuf::from(dir));
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    home.join("Library/Caches/mddog")
 }
 
 /// The longest any response is kept; also the age at which the sweep removes a file.
@@ -386,13 +381,6 @@ fn media_type(mime: &str) -> bool {
     ["image/", "video/", "audio/"].iter().any(|p| m.starts_with(p)) || m == "application/octet-stream" || m == "binary/octet-stream"
 }
 
-/// Answers from the memory cache alone, with no disk or network, so a hit never waits for a worker: a live reload
-/// re-requests every image, and a video's range requests come from one block. Returns false on a miss.
-pub fn answer_cached(url: &str, range: Option<&str>, on: &mut dyn FnMut(Event)) -> bool {
-    let want = range.and_then(parse_range);
-    cached(url, want).map(|e| answer(&e, want, on)).is_some()
-}
-
 /// Fetches `url` (http or https) and reports its response through `on`, ending with `Done` or `Fail`. Stops
 /// early, silently, once `stop` is set. `range` is the page's `Range` header, which video playback sends; it
 /// fetches a block of at least `BLOCK` bytes, so the next small ranges come from the cache.
@@ -456,21 +444,6 @@ pub fn fetch(agent: &ureq::Agent, url: &str, range: Option<&str>, stop: &AtomicB
     }
 }
 
-/// A WebKit content rule that blocks every http and https image and media load, so the page can reach remote
-/// media only through the scheme handler, even if a remote URL got past `markdown::render_in`'s deferral.
-pub fn content_rules() -> String {
-    serde_json::json!([{ "trigger": { "url-filter": "^https?:", "resource-type": ["image", "media"] }, "action": { "type": "block" } }]).to_string()
-}
-
-/// Starts loading the page's remote images and media, each given up after `timeout`. Returns false when it has none.
-pub fn load(engine: &Engine, timeout: Duration) -> bool {
-    if engine.eval("String(document.querySelectorAll('img[data-mddog-src], video[data-mddog-poster], [data-mddog-media]').length)").is_ok_and(|n| n == "0") {
-        return false;
-    }
-    let _ = engine.eval(&format!("mddog.loadRemote({})", timeout.as_millis()));
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,12 +462,6 @@ mod tests {
         }
         assert!(private_name("router") && private_name("nas.home.arpa") && private_name("wiki.internal"));
         assert!(!private_name("img.shields.io"));
-    }
-
-    #[test]
-    fn targets() {
-        assert_eq!(target("mddog-https://x.test/a.svg#gh-dark-mode-only"), "https://x.test/a.svg");
-        assert_eq!(target("mddog-http://x.test/a.png?s=1"), "http://x.test/a.png?s=1");
     }
 
     #[test]

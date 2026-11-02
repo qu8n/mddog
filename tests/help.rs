@@ -70,7 +70,6 @@ fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::
     }
     cmd.args(args)
         .env("TERM_PROGRAM", "herdr")
-        .env("MDDOG_NO_SPARE", "1")
         .env("MDDOG_CACHE_DIR", test_cache())
         .envs(env.iter().copied())
         .stdin(Stdio::from(slave.try_clone().unwrap()))
@@ -372,6 +371,15 @@ fn closing_help_sends_the_page_again() {
 }
 
 /// Waits for the page to be placed again after `before`, and says whether the screen was cleared on the way.
+/// Waits until `trace` holds `mark`, so a test acts on what the viewer has done rather than on a guess of how long it takes.
+fn wait_trace(trace: &std::path::Path, mark: &str) {
+    let end = Instant::now() + Duration::from_secs(10);
+    while !std::fs::read_to_string(trace).unwrap_or_default().contains(mark) {
+        assert!(Instant::now() < end, "no {mark:?} in the trace");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn cleared_before_placing(out: &Mutex<Vec<u8>>, before: usize) -> bool {
     let place = wait_for(out, before, b"a=p,");
     find(&out.lock().unwrap()[before..place], b"\x1b[2J").is_some()
@@ -394,16 +402,34 @@ fn closing_the_contents_clears_its_text() {
 
 #[test]
 fn a_resize_clears_the_old_status_row() {
-    let Viewer { mut child, tty, out } = open(GFM, 100, &[]);
-    wait_for(&out, 0, b"a=p,");
-    std::thread::sleep(Duration::from_millis(1500));
+    let dir = scratch("resize");
+    let trace = dir.join("trace.log");
+    let Viewer { mut child, tty, out } = open(GFM, 100, &[("MDDOG_TRACE", trace.to_str().unwrap())]);
+    wait_trace(&trace, "mark first paint sent");
     let before = out.lock().unwrap().len();
     let size = libc::winsize { ws_row: 30, ws_col: 90, ws_xpixel: 90 * 18, ws_ypixel: 30 * 38 };
     resize(&tty, size);
-    let cleared = cleared_before_placing(&out, before);
+    // The tiles the viewer prefetches while idle can go out between the read above and the resize, so this
+    // waits for the resize's frame: a clear, then a placement.
+    wait_trace(&trace, "mark resize");
+    let end = Instant::now() + Duration::from_secs(10);
+    let cleared = loop {
+        let o = out.lock().unwrap();
+        if let Some(c) = find(&o[before..], b"\x1b[2J")
+            && find(&o[before + c..], b"a=p,").is_some()
+        {
+            break true;
+        }
+        if Instant::now() > end {
+            break false;
+        }
+        drop(o);
+        std::thread::sleep(Duration::from_millis(20));
+    };
     let mut tty = tty;
     tty.write_all(b"q").unwrap();
     let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(cleared, "the status row stayed at its old row after a resize");
 }
 
@@ -461,7 +487,7 @@ fn help_follows_an_appearance_change() {
 
 #[test]
 fn help_flag_points_to_the_key_screen() {
-    let out = Command::new(env!("CARGO_BIN_EXE_mdd")).arg("--help").env("MDDOG_NO_SPARE", "1").env("MDDOG_CACHE_DIR", test_cache()).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_mdd")).arg("--help").env("MDDOG_CACHE_DIR", test_cache()).output().unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(out.status.success());
     assert!(text.contains("press ? to list the keys"), "{text}");
@@ -576,19 +602,27 @@ fn a_pixel_click_in_the_list_follows_a_font_size_change() {
     resize(&tty, size);
     // The list can redraw before the debounced resize is taken, and a click then uses the old cell height.
     // Only the trace tells the resize was taken.
-    let end = Instant::now() + Duration::from_secs(10);
-    while !std::fs::read_to_string(&trace).unwrap_or_default().contains("mark resize") {
-        assert!(Instant::now() < end, "the resize was never taken");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    wait_trace(&trace, "mark resize");
     wait_for(&out, before, b"Title 5");
     // Row 6 holds the third file, f2.md.
     let (x, y) = (10 * 24 + 12, 5 * 50 + 25);
     let mut tty = tty;
     tty.write_all(format!("\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m").as_bytes()).unwrap();
     let opened = wait_for(&out, before, b"a=p,");
-    std::thread::sleep(Duration::from_millis(300));
-    let f2 = find(&out.lock().unwrap()[opened..], b" f2.md ").is_some();
+    // The status row names the file that opened.
+    let end = Instant::now() + Duration::from_secs(10);
+    let named = loop {
+        let o = out.lock().unwrap();
+        if let Some(i) = (0..6).find(|i| find(&o[opened..], format!(" f{i}.md ").as_bytes()).is_some()) {
+            break Some(i);
+        }
+        if Instant::now() > end {
+            break None;
+        }
+        drop(o);
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let f2 = named == Some(2);
     tty.write_all(b"q").unwrap();
     let _ = exits_within(&mut child, Duration::from_secs(5));
     let _ = std::fs::remove_dir_all(&dir);
@@ -662,9 +696,9 @@ fn stitched(dir: &std::path::Path) -> Vec<Vec<u8>> {
 
 #[test]
 fn tiles_line_up_at_an_odd_cell_height() {
-    // At an odd cell height and scale 2, every other tile starts on a half CSS pixel. WebKit snaps such a rect, so
-    // without care those tiles come out a device pixel off, and a heading in one looks cut at the top. The page the
-    // tiles make must be the same pixels as at an even cell height.
+    // At an odd cell height and scale 2, every other tile starts on a half CSS pixel. A tile drawn from a snapped
+    // rect comes out a device pixel off, and a heading in one looks cut at the top. The page the tiles make must be
+    // the same pixels as at an even cell height.
     let dir = scratch("tiles");
     let md = dir.join("doc.md");
     let body: String = (1..=40).map(|i| format!("## Heading {i}\n\nA paragraph of text under heading {i}, long enough to wrap once.\n\n")).collect();
@@ -849,7 +883,7 @@ fn buttons_show_the_hand() {
     std::fs::write(&file, "```rust\nfn main() {}\n```\n\n```mermaid\ngraph LR\n  A --> B\n```\n").unwrap();
     std::fs::create_dir_all(dir.join("mddog")).unwrap();
     std::fs::write(dir.join("mddog/config.toml"), "theme = \"github-dark\"\n").unwrap();
-    // The cells below are WebKit's geometry; the native page sits about a row lower.
+    // The cells below are where the buttons sit at 80 columns.
     let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &[("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
     let drawn = wait_for(&out, 0, b"a=p,");
     // Text, then the code copy, Mermaid copy and Mermaid expand buttons, with text between.

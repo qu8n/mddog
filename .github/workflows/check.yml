@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   check:
-    # The WebKit and pty tests need macOS.
+    # The CoreText, CoreGraphics and pty tests need macOS.
     runs-on: macos-latest
     timeout-minutes: 30
     steps:

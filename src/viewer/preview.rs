@@ -12,21 +12,15 @@ use super::chrome::{self, Chrome};
 use super::loading::Loader;
 use super::picker::{self, Pick, Picker};
 use super::position;
-use super::sizes::Sizes;
-use crate::engine::{self, Bitmap, Engine, Late, Pointer, Select};
+use crate::engine::{self, Bitmap, Engine, Layout, Pointer, Press, Rect, Select};
 use crate::page;
-use crate::page::script::{Layout, Press, Rect};
-use crate::render::markdown;
 use crate::term::kitty;
 use crate::term::{self, Click, Event, Key, Probe, Size, Tty};
 use crate::theme::Theme;
 use crate::{config, editor, trace, watch};
 
+/// How long the page waits on its remote images before it stops laying out again for them.
 const LATE_LIMIT: Duration = Duration::from_secs(60);
-/// How long a quit waits on WebKit for the sizes the page recorded.
-const QUIT_SAVE: Duration = Duration::from_millis(20);
-/// How long a remote image may take before it shows as failed. Under `LATE_LIMIT`, so it settles before the last re-send.
-const REMOTE_LIMIT: Duration = Duration::from_secs(15);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const COPY_FEEDBACK: Duration = Duration::from_secs(2);
 const NOTICE: Duration = Duration::from_secs(3);
@@ -114,14 +108,9 @@ fn open_url(url: String) {
     });
 }
 
-/// Snapshots `height` device pixels from `top`, after the frame that a page change asked for.
-fn snapper<'a>(engine: &'a Engine, scale: f64, frame_due: &'a mut bool) -> impl FnMut(u32, u32) -> Option<Bitmap> + 'a {
-    move |top, height| {
-        if std::mem::take(frame_due) {
-            engine.wait_frame();
-        }
-        engine.snapshot(f64::from(top) / scale, f64::from(height) / scale, scale)
-    }
+/// Snapshots `height` device pixels from `top`.
+fn snapper(engine: &Engine, scale: f64) -> impl FnMut(u32, u32) -> Option<Bitmap> + '_ {
+    move |top, height| engine.snapshot(f64::from(top) / scale, f64::from(height) / scale, scale)
 }
 
 fn pasteable(text: &str) -> String {
@@ -196,20 +185,14 @@ pub struct Preview {
     cache: Cache,
     img_col: u16,
     img_cols: u16,
-    tmp_html: PathBuf,
-    /// The loaded page without its article, which a reload compares to swap the article in place.
-    shell: String,
-    doc: Option<markdown::Doc>,
+    /// Whether the page loaded. A missing page makes the next re-render or file event try again.
+    loaded: bool,
     /// The loaded page's theme.
     theme: &'static Theme,
     /// A click changed the page (a copy, a disclosure, a button) since it loaded, which a reload undoes.
     touched: bool,
-    late: Option<(Late, Instant)>,
-    /// Read from disk at the first obsidian-engine diagram.
-    sizes: Option<Sizes>,
-    /// Read from disk at the first page with remote images. The natural size of each remote image seen so far, by URL, so its loading box opens at that size.
-    image_sizes: Option<Sizes>,
-    frame_due: bool,
+    /// Until when the page lays out again as its remote images arrive.
+    late: Option<Instant>,
     resize: app::Debounce,
     quit: bool,
     /// Whether a file is loaded. False while the list that `mdd` started with is up.
@@ -245,8 +228,6 @@ pub fn browse(root: PathBuf) -> i32 {
 
 fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     trace::start();
-    let native = engine::native();
-    let spare = if native { None } else { engine::spare::connect() };
     let (tx, rx) = mpsc::channel();
     let paused = Arc::new(AtomicBool::new(false));
     // Whether a Ctrl-C came while the screen was ours. Checked at delivery, not when the thread
@@ -279,7 +260,6 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     }
     let (worker_tx, worker_rx) = mpsc::channel();
     let f2 = file.clone();
-    let remote = spare.as_ref().and_then(engine::spare::Client::renderer);
     let mut picker = list.map(Picker::new);
     if let Some(p) = picker.as_mut() {
         p.list(tx.clone());
@@ -288,17 +268,17 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         std::thread::Builder::new().stack_size(crate::render::STACK).spawn(move || {
             let bytes = std::fs::read(&f2);
             let _ = worker_tx.send(bytes.map(|b| {
-                let (src, doc) = page::doc(&b, &page::base_dir(&f2, stdin), |s, d| if native { Some(markdown::Doc::default()) } else { remote.and_then(|mut r| engine::spare::render(&mut r, s, d)) });
-                (b, src, doc)
+                let src = String::from_utf8_lossy(&b).into_owned();
+                (b, src)
             }));
         })
     });
     // The first read of the macOS appearance takes about 2 ms, so make it while the file renders.
     std::thread::spawn(config::theme);
+    std::thread::spawn(engine::display_scale);
     let mut tty = match Tty::open() {
         Ok(t) => t,
         Err(e) => {
-            engine::spare::spawn();
             eprintln!("mdd: needs a terminal to show the preview ({}). It can't write to a pipe or a file. Run it in a terminal window.", term::io_error(&e));
             return 1;
         }
@@ -309,7 +289,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let name = if stdin { "standard input".to_string() } else { file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned()) };
     let loader = match picker.as_mut() {
         Some(p) => {
-            // The list shows before WebKit starts, so it is up at once.
+            // The list shows before the engine starts, so it is up at once.
             p.first_batch(Duration::from_millis(50));
             let mut out = String::new();
             p.draw(&mut out, tty.size().cols, tty.size().rows, std::time::SystemTime::now(), &config::theme().palette);
@@ -324,18 +304,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let _ = kitty::shm_write(&shm_name, &[0, 0, 0]);
     let _ = crate::sweep::write_private(Path::new(&temp), &[0, 0, 0]);
     trace::mark("tty ready");
-    let engine = if native {
-        Engine::new_native(800.0)
-    } else {
-        spare.map_or_else(
-            || {
-                let e = Engine::new(800.0);
-                e.load_blank();
-                e
-            },
-            Engine::Remote,
-        )
-    };
+    let engine = Engine::new(800.0, engine::SCALE_GUESS);
     trace::mark("engine created");
     let (probe, leftover) = tty.probe(&shm_name, &temp, PROBE_WAIT);
     if probe.pixel_mouse {
@@ -355,12 +324,11 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         tty.write(term::leave().as_bytes());
         tty.flush();
         tty.restore();
-        engine::spare::spawn();
         eprintln!("{}", term::wrap(&refusal, usize::from(tty.size().cols)));
         return 1;
     }
     let size = tty.size();
-    let scale = engine.scale();
+    let scale = engine.scale.get();
     let (cell_w, cell_h) = probe.cell_px(size, scale);
     if let Some(l) = &loader {
         l.tune(scale, (cell_w, cell_h));
@@ -406,19 +374,14 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         cache,
         img_col: 0,
         img_cols: size.cols,
-        tmp_html: crate::sweep::temp_path("mddog-", ".html"),
-        shell: String::new(),
-        doc: None,
+        loaded: false,
         theme: &config::get().themes.light,
         touched: false,
         late: None,
-        sizes: None,
-        image_sizes: None,
         glide: None,
         drawn: 0,
         path: vec![],
         last_jump: None,
-        frame_due: false,
         resize: app::Debounce::default(),
         quit: false,
         opened: picker.is_none(),
@@ -429,7 +392,6 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     };
     let mut leftover = leftover;
     if p.listing {
-        engine::spare::spawn();
         p.show();
         crate::sweep::spawn();
         p.start_threads(leftover);
@@ -443,13 +405,11 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
             Ok(Ok(v)) => break v,
             Ok(Err(e)) => {
                 p.shutdown();
-                engine::spare::spawn();
                 eprintln!("mdd: {}: {}", term::printable(&p.file.display().to_string()), term::io_error(&e));
                 return 1;
             }
             Err(RecvTimeoutError::Disconnected) => {
                 p.shutdown();
-                engine::spare::spawn();
                 eprintln!("mdd: can't render {}", term::printable(&p.file.display().to_string()));
                 return 1;
             }
@@ -459,18 +419,14 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         p.tty.read_timeout(&mut leftover, Instant::now() + Duration::from_millis(1), quits);
         if quit || quits(&leftover) {
             p.shutdown();
-            engine::spare::spawn();
             return 0;
         }
     };
     trace::mark("markdown rendered");
-    let loaded = p.render_doc(first.0, first.1, first.2, false);
+    p.render_doc(first.0, first.1, false);
     trace::mark("first paint sent");
-    engine::spare::spawn();
     crate::sweep::spawn();
-    // A failed load already put its reason in the status row.
-    if !loaded {
-    } else if !p.probe.answered {
+    if !p.probe.answered {
         p.notify("The terminal did not answer. A blank page means it can't show images");
         p.notice_until = Some(Instant::now() + Duration::from_secs(15));
     } else if std::str::from_utf8(&p.stamp).is_err() {
@@ -481,8 +437,6 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     p.start_threads(leftover);
     p.event_loop();
     p.shutdown();
-    // After the terminal is back, so a slow page delays only the exit.
-    p.save_sizes(QUIT_SAVE);
     std::mem::forget(p);
     0
 }
@@ -508,7 +462,7 @@ impl Preview {
     }
 
     fn event_loop(&mut self) {
-        while !self.quit && !self.engine.stalled() {
+        while !self.quit {
             let busy = self.late.is_some() || self.resize.pending() || self.prefetch_target().is_some();
             let mut timeout = if self.glide.is_some() {
                 GLIDE_FRAME
@@ -557,8 +511,7 @@ impl Preview {
             }
             self.tick();
             // The page moved or changed under a still pointer, so what it hovers may have changed.
-            // The hit test is a WebKit round trip of a few ms, so it runs after the frame went out,
-            // and not at all during a glide. It comes after `tick`, which draws a glide's last frame.
+            // The hit test runs after the frame went out, and not at all during a glide. It comes after `tick`, which draws a glide's last frame.
             if let Some((spot, px)) = self.hover_at
                 && px != self.shown_px()
                 && self.glide.is_none()
@@ -712,7 +665,6 @@ impl Preview {
             }
             Action::Search(q) => {
                 self.glide = None;
-                self.frame_due = true;
                 let m = self.engine.search(&q, None);
                 self.set_matches(m);
                 let rows = self.match_rows();
@@ -722,7 +674,6 @@ impl Preview {
                 true
             }
             Action::Current(i) => {
-                self.frame_due = true;
                 let rects = self.engine.search_current(i);
                 self.invalidate(&rects);
                 if let Some(r) = self.matches.get(i).and_then(|m| m.first()) {
@@ -731,7 +682,6 @@ impl Preview {
                 true
             }
             Action::ClearSearch => {
-                self.frame_due = true;
                 self.engine.search_clear();
                 self.set_matches(Vec::new());
                 true
@@ -746,7 +696,6 @@ impl Preview {
                 false
             }
             Action::ToggleWrap => {
-                self.frame_due = true;
                 self.engine.set_wrap(self.app.wrap);
                 self.relayout();
                 false
@@ -893,7 +842,6 @@ impl Preview {
                     return self.act_all(actions);
                 }
                 let (x, y) = grid.point(spot, 0.5);
-                self.frame_due = true;
                 if let Some(rects) = self.engine.code_grab(x, y, f64::from(self.cell_h) / self.scale / 2.0) {
                     self.bar_held = true;
                     self.last_press = None;
@@ -1003,7 +951,7 @@ impl Preview {
         }
         self.hover_page = page;
         let (x, y) = if page { self.grid().point(spot, 0.5) } else { (-1.0, -1.0) };
-        let (pointer, rects) = self.engine.hover(x, y, f64::from(self.cell_h) / self.scale / 2.0);
+        let (pointer, rects) = self.engine.hover(x, y);
         self.set_pointer(match pointer {
             Pointer::Text => "xterm",
             Pointer::Hand => self.probe.hand(),
@@ -1012,7 +960,6 @@ impl Preview {
         if rects.is_empty() {
             return false;
         }
-        self.frame_due = true;
         self.invalidate(&rects);
         true
     }
@@ -1032,7 +979,6 @@ impl Preview {
     }
 
     fn press(&mut self, x: f64, y: f64) -> bool {
-        self.frame_due = true;
         let hit = self.engine.press(x, y);
         if hit != Press::Nothing {
             self.last_press = None;
@@ -1053,10 +999,6 @@ impl Preview {
                 let shown = self.redraw(&rects);
                 self.app.expanded = shown;
                 shown
-            }
-            Press::Rect(rect) => {
-                self.invalidate(rect.as_slice());
-                true
             }
             Press::Other => {
                 self.relayout();
@@ -1094,7 +1036,6 @@ impl Preview {
 
     /// Redraws `rects` after a page change. Returns whether there were any.
     fn redraw(&mut self, rects: &[Rect]) -> bool {
-        self.frame_due = true;
         self.invalidate(rects);
         !rects.is_empty()
     }
@@ -1104,7 +1045,6 @@ impl Preview {
         if !self.cache.bands() {
             return self.redraw(&all);
         }
-        self.frame_due = true;
         let (before, after) = all.split_at(n.min(all.len()));
         let row = f64::from(self.cell_h) / self.scale;
         let rects: Vec<Rect> = changed_rects(before, after).into_iter().map(|r| [r[0], r[1] - row, r[2], r[3] + 2.0 * row]).collect();
@@ -1184,17 +1124,15 @@ impl Preview {
             return;
         };
         let was_missing = std::mem::take(&mut self.app.missing);
-        if bytes == self.stamp && self.doc.is_some() {
+        if bytes == self.stamp && self.loaded {
             if was_missing {
                 self.draw_chrome();
             }
             return;
         }
-        let base = self.base();
-        let (src, doc) = page::doc(&bytes, &base, |s, d| self.engine.render(s, d));
-        if self.render_doc(bytes, src, doc, true) {
-            self.notify("Reloaded");
-        }
+        let src = String::from_utf8_lossy(&bytes).into_owned();
+        self.render_doc(bytes, src, true);
+        self.notify("Reloaded");
         trace::mark("reloaded");
     }
 
@@ -1216,17 +1154,9 @@ impl Preview {
     }
 
     fn rerender(&mut self, read: bool) {
-        // Before the take, since `save_sizes` reads only a page that loaded.
-        self.save_sizes(engine::CALL_LIMIT);
         let bytes = read.then(|| std::fs::read(&self.file).ok()).flatten().unwrap_or_else(|| self.stamp.clone());
-        let (src, doc) = match self.doc.take() {
-            Some(doc) if bytes == self.stamp => (self.src.clone(), doc),
-            _ => {
-                let base = self.base();
-                page::doc(&bytes, &base, |s, d| self.engine.render(s, d))
-            }
-        };
-        self.render_doc(bytes, src, doc, true);
+        let src = if bytes == self.stamp { self.src.clone() } else { String::from_utf8_lossy(&bytes).into_owned() };
+        self.render_doc(bytes, src, true);
     }
 
     fn notify(&mut self, msg: &str) {
@@ -1235,9 +1165,8 @@ impl Preview {
         self.draw_chrome();
     }
 
-    /// Returns false when the page did not load, after it put the reason in the status row.
-    fn render_doc(&mut self, bytes: Vec<u8>, src: String, doc: markdown::Doc, keep: bool) -> bool {
-        self.save_sizes(engine::CALL_LIMIT);
+    /// Lays out `src` in place of the page, keeping the reading position when `keep` is set.
+    fn render_doc(&mut self, bytes: Vec<u8>, src: String, keep: bool) {
         let anchor = if keep { self.anchor() } else { None };
         let back = if keep { self.back_anchors() } else { Vec::new() };
         let code = if keep { self.engine.code_positions() } else { String::new() };
@@ -1248,54 +1177,20 @@ impl Preview {
         }
         let (toc, css_width) = self.fit();
         let base = self.base();
-        let (html, theme) = page::html(&doc, &base, self.app.wrap);
+        let theme = config::theme();
         self.theme = theme;
-        // Everything but the article: the theme, the base folder, the wrap mode, the scripts.
-        let shell = html.replacen(&doc.html, "", 1);
-        // A page with no math and no diagrams runs no script of its own, so the new article can go into the
-        // loaded page, at the same width, and give what a load gives in about half the time.
-        let simple = |d: &markdown::Doc| !d.math && !d.mermaid;
-        let swap = self.doc.as_ref().is_some_and(simple) && simple(&doc) && shell == self.shell && (self.engine.width() - css_width).abs() < 1.0;
-        self.shell = shell;
-        // A load lays out at the view's height. A swap keeps the page's full height, which saves two relayouts: a
-        // theme is tokens, so no page CSS depends on the height.
-        let vp_css = self.view_css().1.max(100.0);
-        if !swap {
-            self.engine.resize(css_width, vp_css);
-        }
+        self.engine.resize(css_width);
         self.app.expanded = false;
         self.touched = false;
-        let loaded = if self.engine.load_markdown(&src, &base, self.app.wrap, theme) || (swap && page::swap(&self.engine, &doc.html).is_ok()) {
-            Ok(())
-        } else {
-            self.engine.resize(css_width, vp_css);
-            page::load(&self.engine, &self.tmp_html, &html, theme.dark, Duration::from_secs(3))
-        };
+        self.engine.load(&src, &base, self.app.wrap, theme);
+        self.settle_scale();
         trace::mark("page loaded");
-        if doc.mermaid && config::mermaid(theme) == config::Mermaid::Obsidian {
-            let sizes = self.sizes.get_or_insert_with(|| Sizes::open("diagram-sizes.json"));
-            if !sizes.is_empty() {
-                self.engine.guess_diagrams(&sizes.json());
-            }
-        }
-        if doc.html.contains("data-mddog-src") {
-            let sizes = self.image_sizes.get_or_insert_with(|| Sizes::open("image-sizes.json"));
-            if !sizes.is_empty() {
-                self.engine.guess_images(&sizes.json());
-            }
-        }
-        let math = doc.math && !self.engine.wait_late(Late { math: true, ..Late::default() }, Duration::from_secs(1));
-        // Obsidian-engine diagrams start after the first paint, below; the re-send shows them.
-        let mermaid = doc.mermaid && !self.engine.wait_late(Late { mermaid: true, ..Late::default() }, Duration::ZERO);
-        trace::mark("layout ready");
         if !code.is_empty() && code != "[]" {
             self.engine.code_restore(&code);
         }
         self.measure();
-        // The stamp keeps the source even when the load failed: stdin and live_reload = false
-        // re-render from it, and the missing doc makes the next re-render or file event try again.
         self.stamp = bytes;
-        self.doc = loaded.is_ok().then_some(doc);
+        self.loaded = true;
         self.src = src;
         let mut scroll_px = 0u32;
         if let Some(a) = anchor {
@@ -1310,21 +1205,28 @@ impl Preview {
         }
         if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
-            return self.doc.is_some();
+            return;
         }
-        if let Err(e) = &loaded {
-            self.app.notice = Some(format!("{}{}", e[..1].to_uppercase(), &e[1..]));
-            self.notice_until = Some(Instant::now() + NOTICE);
-        }
-        let late = Late { math, mermaid, remote: self.engine.load_remote(REMOTE_LIMIT) };
-        let start = late.mermaid;
-        self.late = late.any().then(|| (late, Instant::now() + LATE_LIMIT));
+        self.late = (self.engine.pending_images() > 0).then(|| Instant::now() + LATE_LIMIT);
         self.stale_hover();
         self.show();
-        if start {
-            self.engine.start_mermaid();
+    }
+
+    /// The first native page lays out at a guessed scale while a thread reads the real one. A wrong
+    /// guess lays the page out again here, before anything of it is drawn.
+    fn settle_scale(&mut self) {
+        let real = engine::display_scale();
+        if real == self.scale {
+            return;
         }
-        loaded.is_ok()
+        trace::mark("scale guess was wrong");
+        self.scale = real;
+        (self.cell_w, self.cell_h) = self.probe.cell_px(self.size, real);
+        let (_, css_width) = self.fit();
+        self.engine.rescale(real, css_width);
+        if let Some(l) = &self.loader {
+            l.tune(real, (self.cell_w, self.cell_h));
+        }
     }
 
     /// Takes the terminal's size in cells and, when it tells, in pixels: a font size change keeps
@@ -1350,13 +1252,9 @@ impl Preview {
 
     /// Lays the loaded page out again at the new terminal size, without a reload. Returns false
     /// when only a reload gives the right result: the file changed, the macOS appearance changed
-    /// under a light and dark theme pair, a diagram is expanded, a click or a selection changed the page, an
-    /// image can pick its source by width, or the page did not take its new size in time.
+    /// under a light and dark theme pair, a diagram is expanded, or a click or a selection changed the page.
     fn resize_in_place(&mut self) -> bool {
-        if self.app.expanded || self.touched || !std::ptr::eq(config::theme(), self.theme) || self.doc.is_none() {
-            return false;
-        }
-        if self.engine.resize_needs_reload() {
+        if self.app.expanded || self.touched || !std::ptr::eq(config::theme(), self.theme) || !self.loaded || self.engine.has_selection() {
             return false;
         }
         if self.live() && std::fs::read(&self.file).ok().is_none_or(|b| b != self.stamp) {
@@ -1364,18 +1262,8 @@ impl Preview {
         }
         let anchor = self.anchor();
         let back = self.back_anchors();
-        let old = (self.size, self.cell_w, self.cell_h);
         let (toc, css_width) = self.fit();
-        self.engine.resize(css_width, self.view_css().1.max(100.0));
-        let mut sized = self.engine.wait_size(Some(css_width), None);
-        if sized && self.doc.as_ref().is_some_and(|d| d.mermaid) {
-            sized = self.engine.wait_refit();
-        }
-        if !sized {
-            // The reload takes the reading position from the old geometry.
-            (self.size, self.cell_w, self.cell_h) = old;
-            return false;
-        }
+        self.engine.resize(css_width);
         self.measure();
         self.stale_hover();
         let scroll_px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(0, |y| (y * self.scale).round() as u32);
@@ -1402,7 +1290,6 @@ impl Preview {
         if self.app.query.is_empty() {
             return;
         }
-        self.frame_due = true;
         self.matches = self.engine.search(&self.app.query, Some(self.app.current));
         self.app.matches = self.match_rows();
         if self.app.current >= self.app.matches.len() {
@@ -1428,15 +1315,8 @@ impl Preview {
     fn retile(&mut self) {
         let mut out = String::new();
         let total = self.phase + self.app.doc_rows.max(1) * self.cell_h + app::PADDING_ROWS * self.cell_h;
-        let top = self.cache.retile(&mut out, self.phase, total, self.tile_height(), self.cell_h);
+        self.cache.retile(&mut out, self.phase, total, self.tile_height(), self.cell_h);
         self.tty.write(out.as_bytes());
-        let height = (f64::from(top) / self.scale).max(self.layout.height);
-        self.engine.resize(self.engine.width(), height);
-        engine::spin(1.0);
-        // A snapshot taken before the page has its new size comes back blank. Seeing the new
-        // innerHeight takes about 2 ms, where waiting for a frame takes 15 to 25 ms.
-        let sized = self.engine.wait_size(None, Some(height));
-        self.frame_due |= !sized;
     }
 
     fn invalidate(&mut self, rects: &[Rect]) {
@@ -1501,7 +1381,7 @@ impl Preview {
         if std::mem::take(&mut self.help_drawn) {
             frees.push_str(&format!("{}\x1b[2J", self.theme.palette.reset()));
         }
-        let mut snap = snapper(&self.engine, self.scale, &mut self.frame_due);
+        let mut snap = snapper(&self.engine, self.scale);
         let first = !keep.is_empty();
         keep.extend(&vis);
         let mut b = Batch { keep: &keep, scroll_px: v.scroll_px, snap: &mut snap, bytes: Vec::new(), cmds: frees };
@@ -1603,7 +1483,7 @@ impl Preview {
 
     /// Sends the tiles `todo` now, keeping `keep` from eviction.
     fn send_tiles(&mut self, todo: &[usize], keep: &[usize], scroll_px: u32) {
-        let mut snap = snapper(&self.engine, self.scale, &mut self.frame_due);
+        let mut snap = snapper(&self.engine, self.scale);
         let mut b = Batch { keep, scroll_px, snap: &mut snap, bytes: Vec::new(), cmds: String::new() };
         let mut sent = false;
         for &i in todo {
@@ -1644,11 +1524,9 @@ impl Preview {
                 self.rerender_keep();
             }
         }
-        if let Some((late, until)) = self.late {
-            engine::spin(2.0);
-            if Instant::now() > until || self.engine.late_done(late) {
+        if let Some(until) = self.late {
+            if Instant::now() > until || self.engine.images_done() {
                 self.late = None;
-                self.save_sizes(engine::CALL_LIMIT);
                 self.relayout();
             }
             return;
@@ -1661,25 +1539,10 @@ impl Preview {
     }
 
     fn prefetch_target(&self) -> Option<usize> {
-        if self.app.help || self.listing || self.engine.stalled() || self.glide.is_some() {
+        if self.app.help || self.listing || self.glide.is_some() {
             return None;
         }
         self.cache.prefetch(self.scroll_px(), u32::from(self.img_cols) * self.cell_w)
-    }
-
-    /// Saves the diagram and image sizes the page has recorded so far. Late content saves them when it
-    /// settles, so a quit, a reload, or another file before then calls this to keep them.
-    fn save_sizes(&mut self, limit: Duration) {
-        if self.doc.is_none() || self.engine.stalled() {
-            return;
-        }
-        for (sizes, images) in [(&mut self.sizes, false), (&mut self.image_sizes, true)] {
-            if let Some(sizes) = sizes
-                && let Some(json) = self.engine.recorded_sizes(images, limit)
-            {
-                sizes.merge(&json);
-            }
-        }
     }
 
     fn relayout(&mut self) {
@@ -1735,7 +1598,7 @@ impl Preview {
         self.enter_screen(true);
         match result {
             Err(e) => self.notify(&e),
-            Ok(()) if self.stamp != before && self.doc.is_some() => self.notify("Reloaded"),
+            Ok(()) if self.stamp != before && self.loaded => self.notify("Reloaded"),
             Ok(()) => {}
         }
         trace::mark("editor reload");
@@ -1801,11 +1664,10 @@ impl Preview {
 
     fn switch(&mut self, file: PathBuf, stdin: bool, name: String, bytes: Vec<u8>, at: Option<(position::Anchor, String)>) {
         self.base = page::base_dir(&file, stdin);
-        self.save_sizes(engine::CALL_LIMIT);
         (self.file, self.stdin, self.name) = (file, stdin, name);
         self.matches.clear();
         self.late = None;
-        self.doc = None;
+        self.loaded = false;
         self.src.clear();
         self.stamp.clear();
         self.restore_at = at;
@@ -1814,9 +1676,8 @@ impl Preview {
         }
         self.listing = false;
         self.opened = true;
-        let base = self.base();
-        let (src, doc) = page::doc(&bytes, &base, |s, d| self.engine.render(s, d));
-        self.render_doc(bytes, src, doc, false);
+        let src = String::from_utf8_lossy(&bytes).into_owned();
+        self.render_doc(bytes, src, false);
         self.watch();
         trace::mark("file opened");
     }
@@ -1829,11 +1690,7 @@ impl Preview {
         self.tty.write(term::leave().as_bytes());
         self.tty.flush();
         self.tty.restore();
-        let _ = std::fs::remove_file(&self.tmp_html);
         self.watcher = None;
-        if self.engine.stalled() {
-            eprintln!("mdd: WebKit stopped responding");
-        }
     }
 }
 

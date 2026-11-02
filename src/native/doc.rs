@@ -877,10 +877,8 @@ impl B {
                 Event::Text(t) => yaml.push_str(&t),
                 // GitHub shows front matter as a table of its top-level keys.
                 Event::End(TagEnd::MetadataBlock(_)) => {
-                    let rows: Vec<Vec<Vec<Inl>>> = crate::style::github::front_matter_rows(yaml)
-                        .into_iter()
-                        .map(|(k, v)| vec![vec![Inl::Text(k, Sty { bold: true, ..Sty::default() })], vec![Inl::Text(v, Sty::default())]])
-                        .collect();
+                    let rows: Vec<Vec<Vec<Inl>>> =
+                        front_matter_rows(yaml).into_iter().map(|(k, v)| vec![vec![Inl::Text(k, Sty { bold: true, ..Sty::default() })], vec![Inl::Text(v, Sty::default())]]).collect();
                     *meta = None;
                     if !rows.is_empty() {
                         // Its keys are `th` cells, which browsers center.
@@ -1143,3 +1141,18 @@ fn heading_level(l: HeadingLevel) -> u8 {
 
 #[allow(dead_code)]
 fn _unused(_: LinkType) {}
+
+/// The top-level `key: value` lines of YAML front matter, without its `---` lines, as GitHub's table shows them.
+pub fn front_matter_rows(yaml: &str) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    for line in yaml.lines().take_while(|l| l.trim_end() != "---") {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        if k.starts_with([' ', '\t', '-', '#']) || k.trim().is_empty() {
+            continue;
+        }
+        let v = v.trim();
+        let v = v.strip_prefix('"').and_then(|x| x.strip_suffix('"')).or_else(|| v.strip_prefix('\'').and_then(|x| x.strip_suffix('\''))).unwrap_or(v);
+        rows.push((k.trim().to_string(), v.to_string()));
+    }
+    rows
+}

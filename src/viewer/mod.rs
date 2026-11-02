@@ -6,4 +6,3 @@ pub mod loading;
 pub mod picker;
 pub mod position;
 pub mod preview;
-pub mod sizes;

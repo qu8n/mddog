@@ -53,6 +53,7 @@ impl Shm {
         shm
     }
 
+    #[cfg(test)]
     pub fn open(name: &str) -> Option<Shm> {
         let file = shm_open(&CString::new(name).ok()?, libc::O_RDWR)?;
         let len = file.metadata().map_or(0, |m| m.len() as usize);
@@ -92,8 +93,7 @@ unsafe impl Send for Shm {}
 impl std::ops::Deref for Shm {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
-        // SAFETY: ptr maps len bytes until drop. Other mappings are in other processes (the spare, the terminal),
-        // and the snap request and reply keep the spare from writing while this side holds a slice.
+        // SAFETY: ptr maps len bytes until drop. The only other mapping is the terminal's, which only reads it.
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
 }

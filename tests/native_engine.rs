@@ -1,8 +1,6 @@
 //! Regressions in the native engine's answers to the viewer's calls.
 
-use mddog::engine::native::Engine;
-use mddog::engine::{Pointer, Select};
-use mddog::page::script::Press;
+use mddog::engine::{Engine, Pointer, Press, Select};
 
 fn engine(src: &str) -> Engine {
     let e = Engine::new(640.0, 2.0);

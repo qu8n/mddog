@@ -1,13 +1,8 @@
 #[cfg(not(target_os = "macos"))]
 compile_error!("mddog runs on macOS only");
 
-pub use render::{Doc, render};
-
 mod render;
-mod style;
 
-#[doc(hidden)]
-pub mod assets;
 #[doc(hidden)]
 pub mod config;
 #[doc(hidden)]

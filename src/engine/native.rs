@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use super::{Bitmap, Pointer, Select, snapshot_size};
+use super::{Bitmap, Block, Layout, Pointer, Press, Select, snapshot_size};
 use crate::native::doc::{self, Doc};
 use crate::native::images::Images;
 use crate::native::layout::{self, Opts};
@@ -14,12 +14,11 @@ use crate::native::page::{BtnKind, Kind, Page};
 use crate::native::raster::{self, Ctx, Expanded, Overlay};
 use crate::native::text::Fonts;
 use crate::native::theme::Theme;
-use crate::page::script::{Block, Layout, Press};
 use crate::term::kitty::{self, Shm};
 
 pub struct Engine {
     pub width: Cell<f64>,
-    pub scale: f64,
+    pub scale: Cell<f64>,
     st: RefCell<St>,
 }
 
@@ -38,6 +37,8 @@ struct St {
     matches: Vec<(usize, usize)>,
     cur: Option<usize>,
     held: Option<usize>,
+    /// How far right of the held thumb's center the press was, so a drag keeps the thumb under the pointer.
+    grip: f32,
     pending: usize,
 }
 
@@ -60,9 +61,10 @@ impl Engine {
             matches: vec![],
             cur: None,
             held: None,
+            grip: 0.0,
             pending: 0,
         };
-        Engine { width: Cell::new(width), scale, st: RefCell::new(st) }
+        Engine { width: Cell::new(width), scale: Cell::new(scale), st: RefCell::new(st) }
     }
 
     /// Parses and lays out `src` in place of the page.
@@ -72,9 +74,12 @@ impl Engine {
         st.th = Theme::new(th);
         let (body, code) = (st.th.font_body.clone(), st.th.font_code.clone());
         st.fonts.set_families(body, code);
-        // The placeholder `page::doc` gives WebKit.
         st.doc = Some(doc::parse(if src.trim().is_empty() { "*This file is empty.*" } else { src }));
         crate::trace::mark("native parsed");
+        if let Some(doc) = &st.doc {
+            crate::native::highlight::prefetch(doc);
+            crate::trace::mark("code highlighted");
+        }
         st.images = Images::new(base.to_path_buf());
         st.wrap = wrap;
         st.toggled.clear();
@@ -91,7 +96,7 @@ impl Engine {
 
     fn relayout(&self, st: &mut St) {
         let Some(doc) = st.doc.take() else { return };
-        let o = Opts { width: (self.width.get() * self.scale) as f32, scale: self.scale as f32, wrap_code: st.wrap, toggled: st.toggled.clone(), zoom: st.zoom.clone() };
+        let o = Opts { width: (self.width.get() * self.scale.get()) as f32, scale: self.scale.get() as f32, wrap_code: st.wrap, toggled: st.toggled.clone(), zoom: st.zoom.clone() };
         let St { fonts, th, images, .. } = st;
         st.page = layout::layout(fonts, th, &o, &doc, images);
         st.doc = Some(doc);
@@ -128,6 +133,13 @@ impl Engine {
         }
     }
 
+    pub fn rescale(&self, scale: f64, width: f64) {
+        self.scale.set(scale);
+        self.width.set(width);
+        let mut st = self.st.borrow_mut();
+        self.relayout(&mut st);
+    }
+
     pub fn resize(&self, width: f64) {
         if (width - self.width.get()).abs() < 0.5 {
             return;
@@ -148,13 +160,13 @@ impl Engine {
         let (width, height) = snapshot_size(self.width.get(), h, scale);
         let dst = dst.get_mut(..width * height * 4)?;
         let mut st = self.st.borrow_mut();
-        let s = self.scale as f32;
+        let s = self.scale.get() as f32;
         let (top, bottom) = (y as f32 * s, (y + h) as f32 * s);
         let page = &st.page;
         let items: Vec<u32> = page.items.iter().enumerate().filter(|(_, it)| it.y <= bottom && it.y + it.h >= top - 2.0).map(|(i, _)| i as u32).collect();
         let St { fonts, page, th, ov, .. } = &mut *st;
         let cx = Ctx { page, th, scale: s, ov };
-        raster::render_into(fonts, &cx, top, height, width, &items, scale / self.scale, dst);
+        raster::render_into(fonts, &cx, top, height, width, &items, scale / self.scale.get(), dst);
         Some(())
     }
 
@@ -170,7 +182,7 @@ impl Engine {
     }
 
     fn css(&self, r: (f32, f32, f32, f32)) -> R {
-        let s = self.scale;
+        let s = self.scale.get();
         [f64::from(r.0) / s, f64::from(r.1) / s, f64::from(r.2) / s, f64::from(r.3) / s]
     }
 
@@ -182,14 +194,14 @@ impl Engine {
         st.sel.map(|(a, b)| self.rects_of(st, a, b)).unwrap_or_default()
     }
 
-    /// Shows diagram `i` over the view from CSS `top`, `height` tall, drawn again to fill it as WebKit's
-    /// `mddog-expanded` does: 16 px padding, the full width, centered. Returns the old box and the new one.
+    /// Shows diagram `i` over the view from CSS `top`, `height` tall, drawn again to fill it as GitHub's
+    /// expanded view does: 16 px padding, the full width, centered. Returns the old box and the new one.
     pub fn expand(&self, i: usize, top: f64, height: f64) -> Vec<R> {
         let mut out = self.collapse();
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
         let Some(d) = st.page.diagrams.get(i) else { return out };
-        let s = self.scale as f32;
+        let s = self.scale.get() as f32;
         let y = top as f32 * s;
         let h = (height as f32 * s).min(st.page.h - y).max(0.0);
         let pad = 16.0 * s;
@@ -213,20 +225,20 @@ impl Engine {
     }
 
     fn btn_rect(&self, st: &St, b: usize) -> R {
-        let s = self.scale as f32;
+        let s = self.scale.get() as f32;
         let b = &st.page.buttons[b];
         self.css((b.x - 4.0 * s, b.y - 4.0 * s, b.w + 8.0 * s, b.h + 8.0 * s))
     }
 
     /// Device pixels from CSS pixels.
     fn px(&self, v: f64) -> f32 {
-        (v * self.scale) as f32
+        (v * self.scale.get()) as f32
     }
 
     pub fn layout(&self) -> Layout {
         let st = self.st.borrow();
         let p = &st.page;
-        let s = self.scale;
+        let s = self.scale.get();
         Layout {
             blocks: p.blocks.iter().map(|b| Block { start: b.start, end: b.end, top: f64::from(b.top) / s, height: f64::from(b.h) / s }).collect(),
             texts: p.blocks.iter().map(|b| p.text_str(b.tx.0, b.tx.1.min(b.tx.0 + 200))).collect(),
@@ -249,9 +261,31 @@ impl Engine {
         let st = &mut *st;
         let mut out = st.cur.and_then(|c| st.matches.get(c).copied()).map(|(a, b)| self.rects_of(st, a, b)).unwrap_or_default();
         st.cur = Some(i);
-        self.overlay(st);
+        match self.reveal(st, i) {
+            Some(region) => out.push(region),
+            None => self.overlay(st),
+        }
         out.extend(st.cur.and_then(|c| st.matches.get(c).copied()).map(|(a, b)| self.rects_of(st, a, b)).unwrap_or_default());
         out
+    }
+
+    /// Scrolls the wide block that holds match `i` sideways until the match shows. Returns the block's rect
+    /// when it moved.
+    fn reveal(&self, st: &mut St, i: usize) -> Option<R> {
+        let (a, b) = st.matches.get(i).copied()?;
+        let r = match_rects(st, a, b).into_iter().next()?;
+        let k = usize::from(r.4).checked_sub(1)?;
+        let (hs, off) = (&st.page.hscroll[k], st.ov.hoff[k]);
+        let pad = 16.0 * self.scale.get() as f32;
+        let (x0, x1) = (r.0 - hs.x, r.0 + r.2 - hs.x);
+        let want = if x0 < off {
+            x0 - pad
+        } else if x1 > off + hs.w {
+            x1 - hs.w + pad
+        } else {
+            return None;
+        };
+        self.shift(st, k, want - off).then(|| self.region(st, k))
     }
 
     pub fn search_clear(&self) {
@@ -294,7 +328,7 @@ impl Engine {
         let st = self.st.borrow();
         let id = id.to_lowercase();
         let y = st.page.anchors.get(&id).copied().or_else(|| st.page.anchors.get(&doc::slug(&id)).copied())?;
-        Some(f64::from(y) / self.scale)
+        Some(f64::from(y) / self.scale.get()).filter(|y| *y >= 0.0)
     }
 
     /// Changes the selection. Returns how many rects the old selection had, then its rects and the new one's.
@@ -343,12 +377,15 @@ impl Engine {
     pub fn code_grab(&self, x: f64, y: f64, slack: f64) -> Option<Vec<R>> {
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
-        let s = self.scale as f32;
+        let s = self.scale.get() as f32;
         st.held = None;
         let (x, y, slack) = (self.px(x), self.px(y), self.px(slack));
         let i = st.page.hscroll.iter().position(|h| h.max > 0.0 && x >= h.x && x <= h.x + h.w && y + slack >= h.bar_y && y - slack <= h.bar_y + 6.0 * s)?;
         st.held = Some(i);
-        self.bar_set(st, i, x);
+        // A press on the thumb holds it where it is. A press on the track centers the thumb there first.
+        let (left, width) = self.thumb(st, i);
+        st.grip = if x >= left && x <= left + width { x - (left + width / 2.0) } else { 0.0 };
+        self.bar_set(st, i, x - st.grip);
         Some(vec![self.region(st, i)])
     }
 
@@ -356,7 +393,7 @@ impl Engine {
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
         let Some(i) = st.held else { return vec![] };
-        self.bar_set(st, i, self.px(x));
+        self.bar_set(st, i, self.px(x) - st.grip);
         vec![self.region(st, i)]
     }
 
@@ -429,7 +466,7 @@ impl Engine {
                     let label = if kind == BtnKind::CopyCode { "the code" } else { "the diagram source" };
                     Press::Copy { text: st.page.copies.get(data).cloned().unwrap_or_default(), rects, label: label.into() }
                 }
-                BtnKind::Expand => Press::Expand(data as i64),
+                BtnKind::Expand => Press::Expand(data),
                 BtnKind::ZoomIn => {
                     let z = st.zoom.get(&data).copied().unwrap_or(1.0);
                     st.zoom.insert(data, (z * 1.25).min(4.0));
@@ -455,7 +492,7 @@ impl Engine {
 
     fn region(&self, st: &St, i: usize) -> R {
         let h = &st.page.hscroll[i];
-        self.css((h.x, h.y, h.w, (h.bar_y + 8.0 * self.scale as f32 - h.y).max(h.h)))
+        self.css((h.x, h.y, h.w, (h.bar_y + 8.0 * self.scale.get() as f32 - h.y).max(h.h)))
     }
 
     fn shift(&self, st: &mut St, i: usize, d: f32) -> bool {
@@ -469,14 +506,27 @@ impl Engine {
         moved
     }
 
-    fn bar_set(&self, st: &mut St, i: usize, x: f32) {
-        let s = self.scale as f32;
+    /// The track of block `i`'s scroll bar, its left end and width, and the thumb's width, in page pixels.
+    fn track(&self, st: &St, i: usize) -> (f32, f32, f32) {
+        let s = self.scale.get() as f32;
         let hs = &st.page.hscroll[i];
-        let tx = hs.x + 4.0 * s;
         let tw = hs.w - 8.0 * s;
-        let thumb = (tw * hs.w / (hs.w + hs.max)).max(16.0 * s);
+        (hs.x + 4.0 * s, tw, (tw * hs.w / (hs.w + hs.max)).max(16.0 * s))
+    }
+
+    /// The thumb's left end and width, in page pixels.
+    fn thumb(&self, st: &St, i: usize) -> (f32, f32) {
+        let (tx, tw, thumb) = self.track(st, i);
+        let max = st.page.hscroll[i].max;
+        let r = if max > 0.0 { st.ov.hoff[i] / max } else { 0.0 };
+        (tx + r * (tw - thumb), thumb)
+    }
+
+    /// Puts the thumb's center at `x`.
+    fn bar_set(&self, st: &mut St, i: usize, x: f32) {
+        let (tx, tw, thumb) = self.track(st, i);
         let r = ((x - tx - thumb / 2.0) / (tw - thumb).max(1.0)).clamp(0.0, 1.0);
-        st.ov.hoff[i] = r * hs.max;
+        st.ov.hoff[i] = r * st.page.hscroll[i].max;
         self.overlay(st);
     }
 }
@@ -622,11 +672,13 @@ fn find_all(t: &[char], q: &str) -> Vec<(usize, usize)> {
         let (mut j, mut qi, mut ok) = (i, 0, true);
         while qi < qc.len() {
             if qc[qi].is_whitespace() {
-                if j >= t.len() || !t[j].is_whitespace() {
+                // A space in the query spans spaces and soft breaks, not a block or table cell boundary.
+                let gap = |c: char| c.is_whitespace() && c != '\n' && c != '\t';
+                if j >= t.len() || !gap(t[j]) {
                     ok = false;
                     break;
                 }
-                while j < t.len() && t[j].is_whitespace() {
+                while j < t.len() && gap(t[j]) {
                     j += 1;
                 }
                 while qi < qc.len() && qc[qi].is_whitespace() {

@@ -16,8 +16,6 @@ pub struct Config {
     pub glide_ms_per_page: u32,
     /// Releasing a drag or double-click selection copies it.
     pub copy_on_select: bool,
-    /// Keep a prewarmed mdd so the next preview opens faster.
-    pub prewarm: bool,
     pub mermaid: MermaidConfig,
     pub file_list: FileListConfig,
     /// The `theme` key's themes, read.
@@ -29,17 +27,7 @@ impl Default for Config {
     fn default() -> Config {
         let theme = ThemeSpec::default();
         let themes = theme.load(Path::new("")).expect("built-in themes");
-        Config {
-            theme,
-            live_reload: true,
-            smooth_scroll: true,
-            glide_ms_per_page: 200,
-            copy_on_select: false,
-            prewarm: true,
-            mermaid: MermaidConfig::default(),
-            file_list: FileListConfig::default(),
-            themes,
-        }
+        Config { theme, live_reload: true, smooth_scroll: true, glide_ms_per_page: 200, copy_on_select: false, mermaid: MermaidConfig::default(), file_list: FileListConfig::default(), themes }
     }
 }
 
@@ -120,17 +108,12 @@ pub struct MermaidConfig {
     pub engine: Option<Mermaid>,
 }
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Mermaid {
+    #[default]
     Pele,
     Obsidian,
-}
-
-impl Default for Mermaid {
-    fn default() -> Self {
-        crate::style::DEFAULT.mermaid
-    }
 }
 
 /// The Mermaid engine for a page in this theme: the config's, else the theme's, else the style's.
@@ -274,7 +257,6 @@ mod tests {
         assert!(Config::default().live_reload);
         assert!(Config::default().smooth_scroll);
         assert!(!Config::default().copy_on_select);
-        assert!(Config::default().prewarm);
         assert_eq!(Config::default().glide_ms_per_page, 200);
         assert_eq!(Config::default().mermaid.engine, None);
         assert_eq!(Config::default().file_list.extensions, ["md", "markdown"]);
@@ -289,13 +271,12 @@ mod tests {
 
     #[test]
     fn full() {
-        let c = parse("theme = \"github-dark\"\nlive_reload = false\nsmooth_scroll = false\nglide_ms_per_page = 100\ncopy_on_select = true\nprewarm = false\n[mermaid]\nengine = \"pele\"\n").unwrap();
+        let c = parse("theme = \"github-dark\"\nlive_reload = false\nsmooth_scroll = false\nglide_ms_per_page = 100\ncopy_on_select = true\n[mermaid]\nengine = \"pele\"\n").unwrap();
         assert_eq!(c.theme, ThemeSpec::One(Source::Builtin(theme::builtin("github-dark").unwrap())));
         assert_eq!((c.themes.light.name.as_str(), c.themes.dark), ("github-dark", None));
         assert!(!c.live_reload);
         assert!(!c.smooth_scroll);
         assert!(c.copy_on_select);
-        assert!(!c.prewarm);
         assert_eq!(c.glide_ms_per_page, 100);
         assert_eq!(c.mermaid.engine, Some(Mermaid::Pele));
         assert_eq!(parse("[mermaid]\nengine = \"obsidian\"\n").unwrap().mermaid.engine, Some(Mermaid::Obsidian));
@@ -347,8 +328,9 @@ mod tests {
         assert!(e.starts_with("line 1: background: unknown field `background`"), "{e}");
         let e = one_line("live_reload = \"yes\"\n");
         assert!(e.starts_with("line 1: live_reload: invalid type"), "{e}");
-        let e = one_line("prewarm = 0\n");
-        assert!(e.starts_with("line 1: prewarm: invalid type"), "{e}");
+        // Removed keys get the unknown-key error like any other.
+        let e = one_line("prewarm = false\n");
+        assert!(e.starts_with("line 1: prewarm: unknown field `prewarm`"), "{e}");
         let e = one_line("[file_list]\nextensions = [\".md\"]\n");
         assert!(e.starts_with("line 2: file_list.extensions: \".md\" is not an extension"), "{e}");
         let e = one_line("[file_list]\nextensions = [\"md\", \"\"]\n");

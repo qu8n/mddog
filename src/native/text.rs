@@ -132,6 +132,10 @@ fn family(names: &[String], size: f64, mono: bool) -> CTFont {
     if mono { new_from_name("Menlo-Regular", size).unwrap_or_else(|_| new_ui_font_for_language(2, size, None)) } else { new_ui_font_for_language(2, size, None) }
 }
 
+// `NSFont` lives in AppKit, which nothing else links.
+#[link(name = "AppKit", kind = "framework")]
+unsafe extern "C" {}
+
 /// SF Mono, which only AppKit names.
 fn system_mono(size: f64) -> Option<CTFont> {
     objc2::rc::autoreleasepool(|_| {

@@ -1,6 +1,6 @@
 use similar::{ChangeTag, TextDiff};
 
-use crate::page::script::Block;
+use crate::engine::Block;
 
 pub fn top_text(blocks: &[Block], texts: &[String], y: f64) -> String {
     match capture(blocks, y) {

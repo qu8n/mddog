@@ -2,19 +2,17 @@ use std::collections::VecDeque;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::thread::{JoinHandle, ScopedJoinHandle};
+use std::thread::ScopedJoinHandle;
 use std::time::Duration;
 
-use crate::Doc;
-use crate::engine::{self, Engine, Late};
+use crate::engine::{self, Engine};
 use crate::page;
 use crate::term;
 use crate::term::kitty;
 use crate::watch;
 
 const TILE_ROWS: u32 = 100;
-const LATE_WAIT: Duration = Duration::from_secs(5);
-/// Under `LATE_WAIT`, so a slow image shows as failed in the tiles rather than as a loading box.
+/// How long remote images may take. A slower one shows as failed in the tiles.
 const REMOTE_LIMIT: Duration = Duration::from_secs(4);
 const ENCODERS: usize = 4;
 /// Rows per WebP tile: 160 CSS px at the 16 px row, a fine step for the desktop pane's window of tiles, so
@@ -27,8 +25,6 @@ const WEBP_MAX_BYTES: usize = 96_000;
 const WEBP_SMALL_MAX: usize = 20_000;
 /// A tile under this is text: no lossy copy can save enough to matter.
 const WEBP_LOSSY_FROM: usize = 12_000;
-
-type FirstRender = JoinHandle<Option<(Vec<u8>, Doc)>>;
 
 pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
     let dir = crate::sweep::temp_path("mddog-tiles-", "");
@@ -51,49 +47,15 @@ pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
         eprintln!("mdd: can't watch {} for changes", term::printable(&file.display().to_string()));
         return 1;
     };
-    let native = engine::native();
-    let spare = if native { None } else { engine::spare::connect() };
-    // With no spare, the first render runs while WebKit starts.
-    let first = if spare.is_none() {
-        let file = file.clone();
-        std::thread::Builder::new()
-            .stack_size(crate::render::STACK)
-            .spawn(move || {
-                let bytes = std::fs::read(&file).ok()?;
-                let (_, doc) = page::doc(&bytes, &page::base_dir(&file, false), |_, _| native.then(crate::Doc::default));
-                Some((bytes, doc))
-            })
-            .ok()
-    } else {
-        None
-    };
-    let engine = if native {
-        Engine::new_native(800.0)
-    } else {
-        spare.map_or_else(
-            || {
-                let e = Engine::new(800.0);
-                e.load_blank();
-                e
-            },
-            Engine::Remote,
-        )
-    };
-    let scale = engine.scale();
+    let engine = Engine::new(800.0, engine::display_scale());
+    let scale = engine.scale.get();
     let (cell_w, cell_h) = cell_size(scale).unwrap_or(((8.0 * scale) as u32, (16.0 * scale) as u32));
-    let mut r = Renderer { engine, file, first, dir, html: PathBuf::new(), scale, cell_w, cell_h, cols: u32::from(cols.max(1)), round: 0, stamp: None, gone: false, webp };
-    r.html = r.dir.join("page.html");
-    if !native {
-        engine::spare::spawn();
-    }
+    let mut r = Renderer { engine, file, dir, scale, cell_w, cell_h, cols: u32::from(cols.max(1)), round: 0, stamp: None, gone: false, webp };
     let mut swept = false;
     let code = loop {
         if let Err(e) = r.render() {
             eprintln!("mdd: {e}");
             r.drop_rounds(|g| g > r.round);
-            if r.engine.stalled() {
-                break 1;
-            }
         }
         // Claude Code SIGKILLs this process on each width change, so the sweep is what removes the old tile folders.
         if !std::mem::replace(&mut swept, true) {
@@ -123,9 +85,7 @@ fn cell_size(scale: f64) -> Option<(u32, u32)> {
 struct Renderer {
     engine: Engine,
     file: PathBuf,
-    first: Option<FirstRender>,
     dir: PathBuf,
-    html: PathBuf,
     scale: f64,
     cell_w: u32,
     cell_h: u32,
@@ -150,32 +110,19 @@ impl Renderer {
 
     fn render(&mut self) -> Result<(), String> {
         let last = self.stamp.take();
-        let (bytes, first) = match self.first.take().and_then(|h| h.join().ok().flatten()) {
-            Some((bytes, doc)) => (bytes, Some(doc)),
-            None => (std::fs::read(&self.file).map_err(|e| format!("{}: {}", term::printable(&self.file.display().to_string()), term::io_error(&e)))?, None),
-        };
+        let bytes = std::fs::read(&self.file).map_err(|e| format!("{}: {}", term::printable(&self.file.display().to_string()), term::io_error(&e)))?;
         if last.as_ref() == Some(&bytes) {
             self.stamp = last;
             return Ok(());
         }
-        let base = page::base_dir(&self.file, false);
-        let doc = first.unwrap_or_else(|| page::doc(&bytes, &base, |s, d| self.engine.render(s, d)).1);
-        let (html, theme) = page::html(&doc, &base, false);
         let width_px = self.cols * self.cell_w;
-        self.engine.resize(f64::from(width_px) / self.scale, 600.0);
-        if !self.engine.load_markdown(&String::from_utf8_lossy(&bytes), &base, false, theme) {
-            page::load(&self.engine, &self.html, &html, theme.dark, Duration::from_secs(3))?;
+        self.engine.resize(f64::from(width_px) / self.scale);
+        self.engine.load(&String::from_utf8_lossy(&bytes), &page::base_dir(&self.file, false), false, crate::config::theme());
+        if self.engine.pending_images() > 0 {
+            self.engine.wait_images(REMOTE_LIMIT);
         }
-        if doc.mermaid {
-            self.engine.start_mermaid();
-        }
-        let late = Late { math: doc.math, mermaid: doc.mermaid, remote: self.engine.load_remote(REMOTE_LIMIT) };
-        self.engine.wait_late(late, LATE_WAIT);
         let bottom = self.engine.layout().height;
         let rows = ((bottom * self.scale).ceil() as u32).div_ceil(self.cell_h).max(1);
-        self.engine.resize(f64::from(width_px) / self.scale, f64::from(rows * self.cell_h) / self.scale);
-        engine::spin(1.0);
-        self.engine.wait_frame();
         let round = self.round + 1;
         let tile_rows = TILE_ROWS.min(kitty::TILE_BYTES as u32 / (width_px.max(1) * 4) / self.cell_h).max(1);
         let tiles = if self.webp {
@@ -188,7 +135,7 @@ impl Renderer {
                 let mut top = 0;
                 while top < rows {
                     let n = tile_rows.min(rows - top);
-                    let mut bmp = self.engine.snapshot(f64::from(top * self.cell_h) / self.scale, f64::from(n * self.cell_h) / self.scale, self.scale).ok_or("WebKit couldn't capture the page")?;
+                    let mut bmp = self.engine.snapshot(f64::from(top * self.cell_h) / self.scale, f64::from(n * self.cell_h) / self.scale, self.scale).ok_or("can't draw the page")?;
                     // Claude Code kills this process on every width change, and a named object outlives it.
                     bmp.rgba.unlink();
                     let path = self.dir.join(format!("{round}-{}.png", tiles.len()));
@@ -234,9 +181,9 @@ impl Renderer {
                 if top < rows && encoding.len() < ahead {
                     let at = n.min(rows - top);
                     let (y, h) = (f64::from(top * self.cell_h) / self.scale, f64::from(at * self.cell_h) / self.scale);
-                    let mut bmp = self.engine.snapshot(y, h, self.scale).ok_or("WebKit couldn't capture the page")?;
+                    let mut bmp = self.engine.snapshot(y, h, self.scale).ok_or("can't draw the page")?;
                     bmp.rgba.unlink();
-                    let mut low = self.engine.snapshot(y, h, (self.scale / 2.0).max(1.0)).ok_or("WebKit couldn't capture the page")?;
+                    let mut low = self.engine.snapshot(y, h, (self.scale / 2.0).max(1.0)).ok_or("can't draw the page")?;
                     low.rgba.unlink();
                     encoding.push_back((top, at, s.spawn(move || webp_tile(&bmp, &low, at == 1))));
                     (top, n) = (top + at, WEBP_ROWS);
@@ -244,7 +191,7 @@ impl Renderer {
                 }
                 let Some((at, got, h)) = encoding.pop_front() else { break };
                 let Some(t) = h.join().unwrap_or_else(|e| std::panic::resume_unwind(e))? else {
-                    // Wait out the dropped tiles, or each halving adds threads that starve WebKit's snapshots.
+                    // Wait out the dropped tiles, or each halving adds threads that starve the snapshots.
                     for (_, _, h) in encoding.drain(..) {
                         let _ = h.join();
                     }

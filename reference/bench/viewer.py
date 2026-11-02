@@ -135,7 +135,7 @@ def run_one(binary, mode, rel, tag):
     if os.path.exists(trace):
         os.remove(trace)
     doc = os.path.join(BENCH, rel)
-    env = "MDDOG_NO_SPARE=1 " if mode == "cold" else ""
+    env = ""
     dump = os.environ.get("VP_DUMP")
     if dump:
         d = os.path.join(dump, tag)
@@ -239,7 +239,7 @@ def main():
     if "resize" in SCEN and not TTY:
         sys.exit("set VP_TTY to the test pane's tty (run `tty` in it)")
     setup()
-    # Warm-up: one warm run per binary so a spare exists and caches are filled.
+    # Warm-up: one run per binary so the file system caches are filled.
     for b in bins:
         run_one(b, "warm", FILES[0], "warmup")
         time.sleep(2)
@@ -254,8 +254,7 @@ def main():
                         f.write(json.dumps(r) + "\n")
                         f.flush()
                         print(json.dumps(r), flush=True)
-                        # A warm run starts the next spare; give it time to warm.
-                        time.sleep(2.0 if mode == "warm" else 0.5)
+                        time.sleep(0.5)
 
 
 if __name__ == "__main__":

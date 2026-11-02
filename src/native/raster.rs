@@ -254,7 +254,7 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
         set_fill(&ctx, cx.th.sel_bg, 0.6);
         ctx.fill_rect(CGRect::new(&CGPoint::new(x as f64, y as f64), &CGSize::new(w as f64, hh as f64)));
     }
-    // An expanded diagram covers the page under it, as WebKit's overlay does.
+    // An expanded diagram covers the page under it.
     if let Some(e) = &cx.ov.expanded {
         if e.y <= top + h as f32 && e.y + e.h >= top {
             set_fill(&ctx, cx.th.bg, 1.0);

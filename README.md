@@ -16,7 +16,7 @@
 
 https://github.com/user-attachments/assets/dbb4fddc-95a9-47dd-afcf-ce04fe8b5002
 
-mddog fetches the Markdown (pun intended), turns it into a styled HTML page, renders the page in an off-screen [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) window, and sends the result to the terminal, so you see and use the Markdown as you would in a browser.
+mddog fetches the Markdown (pun intended), lays it out and draws it with macOS's own text and graphics engines in GitHub's style, and sends the result to the terminal, so you see and use the Markdown as you would in a browser.
 
 ## Features
 
@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 <details>
 <summary>What this script does</summary>
 
-The script installs the latest release of mddog. It also registers a small launchd job that starts mddog with WebKit loaded at login, so the first preview after login opens faster. To opt out of this, run `mdd --no-prewarm-at-login` after installing or set the environment variable `MDDOG_NO_PREWARM_AT_LOGIN=1` before running the script. To run mddog with no background process at all, set `prewarm = false` in its [config](#config-optional).
+The script downloads the latest release of mddog, checks its checksum, and puts `mdd` in `~/.local/bin`. Set `MDDOG_INSTALL_DIR` to pick another folder. mddog doesn't leave anything running in the background.
 
 If you want to build from source instead, install [Rust](https://rust-lang.org/tools/install/) first, then run the following commands:
 
@@ -51,7 +51,6 @@ If you want to build from source instead, install [Rust](https://rust-lang.org/t
 git clone https://github.com/qu8n/mddog.git
 cd mddog
 cargo install --path .
-mdd --prewarm-at-login
 ```
 
 </details>
@@ -100,7 +99,7 @@ Note: Claude Code only shows images in the terminals it knows, like Ghostty, kit
 
 Configure your mddog at `~/.config/mddog/config.toml`, or `$XDG_CONFIG_HOME/mddog/config.toml` when that is set. See [`config.example.toml`](config.example.toml) for every option.
 
-Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`. By default mddog uses the GitHub pair and follows the macOS appearance. The Obsidian themes restyle the whole page like Obsidian's reading view and draw Mermaid diagrams the way Obsidian does. To tweak the current theme, add CSS to `~/.config/mddog/style.css`, which loads after the theme. To write your own theme, see [docs/themes.md](docs/themes.md).
+Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`. By default mddog uses the GitHub pair and follows the macOS appearance. The Obsidian themes restyle the whole page like Obsidian's reading view and draw Mermaid diagrams the way Obsidian does. A theme is a token file that sets colors, fonts and sizes. `style.css` and themes written in arbitrary CSS are no longer read. To write your own theme, see [docs/themes.md](docs/themes.md).
 
 ## Limitations
 

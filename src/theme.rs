@@ -282,7 +282,7 @@ fn value_of(kind: Kind, v: &str) -> Option<Value> {
         Kind::Color => rgb(v).filter(|_| matches!(v.len(), 4 | 7)).map(Value::Color),
         Kind::Fonts => {
             let names: Vec<String> = v.split(',').map(|f| f.trim().trim_matches(['"', '\'']).trim().to_string()).collect();
-            // A name is plain text, so it can't break out of the CSS WebKit builds from it.
+            // A font name is plain text: letters, digits, spaces and `-_.`.
             names.iter().all(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || " -_.".contains(c))).then_some(Value::Fonts(names))
         }
         Kind::Scale => {

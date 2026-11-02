@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
-use super::markdown::escape;
+use super::escape;
 
 const CAPTURES: &[(&str, &str)] = &[
     ("comment", "pl-c"),
@@ -96,25 +96,11 @@ pub fn block(info: &str, code: &str) -> String {
         let entry = c.entry(lang.clone()).or_insert_with(|| ts_config(&lang).map(|(scope, config)| Lang { scope, config }));
         entry.as_ref().map(|l| (l.scope, tree_sitter_html_spans(&l.config, code)))
     });
-    if let Some((scope, Some(body))) = ts {
-        return wrap(scope, &body, code);
-    }
-    if let Some((scope, body)) = super::textmate::highlight(&lang, code) {
-        return wrap(&scope, &body, code);
-    }
-    copy_box("snippet-clipboard-content", &format!("<pre lang=\"{}\" class=\"notranslate\"><code class=\"notranslate\">{}\n</code></pre>", escape(&lang), escape(code)), code)
-}
-
-fn wrap(scope: &str, body: &str, code: &str) -> String {
-    copy_box(&format!("highlight highlight-{}", scope.replace('.', "-")), &format!("<pre class=\"notranslate\">{body}</pre>"), code)
-}
-
-pub fn copy_box(class: &str, pre: &str, code: &str) -> String {
-    format!(
-        "<div class=\"{class} notranslate position-relative overflow-auto\">{pre}<div class=\"zeroclipboard-container\"><clipboard-copy aria-label=\"Copy code to clipboard\" class=\"ClipboardButton btn btn-invisible js-clipboard-copy m-2 p-0 d-flex flex-justify-center flex-items-center\" data-copy-feedback=\"Copied!\" data-tooltip-direction=\"w\" value=\"{}\" tabindex=\"0\" role=\"button\">{}</clipboard-copy></div></div>",
-        escape(code),
-        super::octicons::CODE_COPY
-    )
+    let body = match ts {
+        Some((_, Some(body))) => body,
+        _ => super::textmate::highlight(&lang, code).map_or_else(|| escape(code), |(_, body)| body),
+    };
+    format!("<pre>{body}</pre>")
 }
 
 fn tree_sitter_html_spans(config: &HighlightConfiguration, code: &str) -> Option<String> {

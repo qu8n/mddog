@@ -11,16 +11,11 @@ name = "mdd"
 path = "src/main.rs"
 
 [dependencies]
-comrak = { version = "0.56", default-features = false }
-emojis = "0.9.0"
-html5ever = "0.35"
-include_dir = "0.7.4"
+miniz_oxide = "0.9"
 irosashi = { version = "=0.3.0", default-features = false }
-kuchikiki = "0.8.9-speedreader"
 notify = "8"
 png = "0.18.1"
 webp = { version = "0.3", default-features = false }
-regex = "1"
 serde_json = "1"
 similar = "3.2.0"
 tree-sitter = "0.27"
@@ -37,19 +32,13 @@ tree-sitter-typescript = "0.23.2"
 unicode-width = "0.2"
 libc = "0.2"
 signal-hook = "0.4.5"
-block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["objc2-core-graphics", "objc2-core-foundation", "NSApplication", "NSImageRep", "NSGraphics", "NSGraphicsContext", "NSRunningApplication", "NSScreen"] }
-objc2-core-foundation = { version = "0.3", default-features = false }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGBitmapContext", "CGDataProvider"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSRunLoop", "NSURLRequest", "NSURLResponse", "NSUserDefaults"] }
-objc2-web-kit = { version = "0.3", default-features = false, features = ["objc2-core-foundation", "WKWebView", "WKWebViewConfiguration", "WKSnapshotConfiguration", "WKWebsiteDataStore", "WKNavigation", "WKPreferences", "WKContentRuleList", "WKContentRuleListStore", "WKURLSchemeHandler", "WKURLSchemeTask", "WKUserContentController", "block2", "objc2-app-kit"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSUserDefaults"] }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
 ignore = "0.4.33"
 nucleo-matcher = "0.3.1"
 ureq = { version = "=3.5.0", default-features = false, features = ["native-tls-no-default"] }
-dispatch2 = { version = "0.3", default-features = false, features = ["std"] }
 
 pulldown-cmark = { version = "0.13", default-features = false }
 core-graphics = "0.25"
@@ -59,17 +48,18 @@ resvg = { version = "0.49", default-features = false, features = ["text", "raste
 mermaid-rs-renderer = { version = "0.3", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
+[build-dependencies]
+miniz_oxide = "0.9"
+
 [dev-dependencies]
 regex = "1.13.1"
 
 [profile.release]
-lto = "thin"
-codegen-units = 4
+# Full LTO with one codegen unit: 2.4 MB smaller than thin LTO. Unwinding stays on: the remote image
+# pool catches a panicking fetch so it keeps its worker, and headless keeps going past a failed tile.
+lto = "fat"
+codegen-units = 1
 strip = true
-
-[[test]]
-name = "search"
-harness = false
 
 # Pedantic and nursery lints that pass cleanly and catch real waste. The rest of those groups
 # mostly flag pixel-math casts and `#[must_use]`/`const fn` noise, so they stay off.
