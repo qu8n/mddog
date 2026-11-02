@@ -24,7 +24,7 @@ Related docs:
 ```
 src/
   lib.rs             crate root: exports render, the other modules are hidden and serve the binary
-  main.rs            CLI: options, file and stdin checks, --spare, --start-at-login, --no-start-at-login
+  main.rs            CLI: options, file and stdin checks, --spare, --prewarm-at-login, --no-prewarm-at-login
   config.rs          optional config file: theme, live reload, smooth scroll, glide time, copy on select, Mermaid engine
   theme.rs           themes: built-in list, mode and --mddog-* chrome colors read from a theme's CSS
   headless.rs        --headless: render to PNG or WebP files, for the Claude Code plugin
@@ -156,7 +156,7 @@ A SIGINT that arrives while the editor runs is ignored. The signal handler check
 | `smooth_scroll` | `true` | Jump keys glide. `false` makes every jump instant. |
 | `glide_ms_per_page` | `200` | How long a glide over one screen takes. |
 | `copy_on_select` | `false` | Copy a selection when the mouse button is released. |
-| `fast_start` | `true` | Keep a warm spare (see Warm spare). `false` makes each preview open slower. |
+| `prewarm` | `true` | Keep a warm spare (see Warm spare). `false` makes each preview open slower. |
 | `file_list.extensions` | `["md", "markdown"]` | Which files the file list shows, and which ones "Did you mean" suggests. The full list, without dots, in any case. `mdd FILE` opens any text file, whatever its extension. |
 | `mermaid.engine` | the theme's, else `pele` | `pele` or `obsidian`. A theme names its engine with `--mddog-mermaid`, or takes its base's. |
 
@@ -249,7 +249,7 @@ Local media is confined to a root folder (see Security).
 
 - It hands the article to the style's `page`, which adds the CSS layers, `mddog.js` and MathJax from `page::scripts`, and the Mermaid scripts.
 - `page::load` writes the page, waits for the load event, then gives fonts and images up to 500 ms.
-- If the load event never comes, it returns an error. The viewer keeps the source, shows `The page did not load`, and tries again on the next re-render.
+- If the load event never comes, it returns an error. The viewer keeps the source, shows `WebKit couldn't load the page`, and tries again on the next re-render.
 - The runtime files are extracted once to `~/Library/Caches/mddog/runtime-<hash>/`. `build.rs` computes the hash.
 - WebKit's fallback draws the footnote back-link `↩` from a text font, where Chrome uses Apple Color Emoji, so `EXTRA_CSS` forces the emoji font.
 
@@ -305,7 +305,7 @@ A cold first paint takes about 200 ms, most of it AppKit and WebKit startup. A w
 
 **Finding the spare.**
 
-- The socket is in the per-user temp dir. Its name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. It also hashes the cache root, so a viewer with another `MDDOG_CACHE_DIR` never reaches a spare that reads its runtime from elsewhere. The spare inherits the variable, and `--start-at-login` writes it into the launchd job, along with `XDG_CONFIG_HOME` so the login spare reads the same config.
+- The socket is in the per-user temp dir. Its name hashes the binary's path, size, and mtime, so a rebuilt binary never reaches an old spare. It also hashes the cache root, so a viewer with another `MDDOG_CACHE_DIR` never reaches a spare that reads its runtime from elsewhere. The spare inherits the variable, and `--prewarm-at-login` writes it into the launchd job, along with `XDG_CONFIG_HOME` so the login spare reads the same config.
 - So each binary path, cache root, and temp dir gets its own spare, and each idles up to 12 hours.
 - macOS limits a Unix socket path to 104 bytes. Under a long `TMPDIR` the spare fails to bind and exits 1 at once, so there is no warm start.
 - The viewer connects only to a socket its own user owns, and each side talks only to a peer with its own uid (`getpeereid`). The spare ignores a connection that never sends hello.
@@ -319,8 +319,8 @@ A cold first paint takes about 200 ms, most of it AppKit and WebKit startup. A w
 - A spare serves one viewer, then exits. An unused spare exits after 12 hours.
 - Every 3 s, an unused spare checks that its binary and its socket are unchanged, and exits if either changed. So a rebuild or reinstall retires the old spare rather than leaving it for 12 hours. That includes the login spare, which launchd doesn't restart.
 - It forks once more and the middle process exits, so launchd adopts it. Claude Code kills the plugin's child and all its descendants on each width change, and the next child would otherwise use a dying spare.
-- `--start-at-login` adds a launchd job that starts one spare at login. The job has no `KeepAlive`, so after that first spare the viewers start their own. `--no-start-at-login` stops and removes the job.
-- `fast_start = false` turns the spare off. The viewer and headless mode don't start or use one, and say hello to a spare left from before the change and hang up, so it exits. `mdd --spare` exits at once, and `--start-at-login` refuses with a line that names the key and the config file. The config is a file and not an environment variable because launchd doesn't read the user's shell environment. The spare reads the key before warm-up.
+- `--prewarm-at-login` adds a launchd job that starts one spare at login. The job has no `KeepAlive`, so after that first spare the viewers start their own. `--no-prewarm-at-login` stops and removes the job.
+- `prewarm = false` turns the spare off. The viewer and headless mode don't start or use one, and say hello to a spare left from before the change and hang up, so it exits. `mdd --spare` exits at once, and `--prewarm-at-login` refuses with a line that names the key and the config file. The config is a file and not an environment variable because launchd doesn't read the user's shell environment. The spare reads the key before warm-up.
 - `MDDOG_NO_SPARE` keeps the viewer, headless mode, and `mdd --spare` from using a spare. The tests set it.
 
 ## Drawing in the terminal
@@ -590,7 +590,7 @@ Claude Code decides whether a pane is placed, not the plugin. It seats a pane th
 - State is per surface. `views` is keyed by `e.surface`, and each view holds its own child, tiles, Svg sources, row size, and scroll timer. So the terminal and the mobile app can draw the pane at once without restarting each other's child.
 - Links and text selection don't work here. Pages over about 100,000 rows need so many gap Svgs that the drawing could pass its limit.
 
-**Stopping.** Closing the pane and `session.end` stop the child. `session.end` also clears the pane, because `/clear` ends the session without unloading the module. If the child stream fails, the plugin restarts it up to 3 times, then shows `could not run mdd: ...`. When the child exits, the pane shows `mddog stopped. Run /mddog again to restart it.`
+**Stopping.** Closing the pane and `session.end` stop the child. `session.end` also clears the pane, because `/clear` ends the session without unloading the module. If the child stream fails, the plugin restarts it up to 3 times, then shows `couldn't run mdd: ...`. When the child exits, the pane shows `mddog stopped. Run /mddog again to restart it.`
 
 ## Data and files
 
@@ -600,16 +600,16 @@ There is no database. The binary reads `config.toml` and `style.css` from its co
 |---|---|
 | `~/Library/Caches/mddog/runtime-<hash>/` | MathJax, mermaid, and Pele. Unpacked into `runtime-<hash>.tmp<pid>`, then renamed into place. Each page build that uses it sets its mtime, so the sweep can tell which folders are in use. |
 | `~/Library/Caches/mddog/content-rules/` | WebKit's compiled content rule. Each run compiles it again over the same file. |
-| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>-<n>`, a name of its own per write, and a rename. The sweep removes it. |
+| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>` and a rename. The sweep removes it. |
 | `~/Library/Caches/mddog/diagram-sizes.json` | The last 512 obsidian-engine diagram sizes, oldest dropped first. Written through `diagram-sizes.tmp<pid>` and a rename. Read and write errors are ignored, since a missing size only brings back the jump. |
-| `~/Library/Caches/mddog/image-sizes.json` | The natural sizes of the last 512 remote images with no `height`, by URL (up to 2048 characters), oldest dropped first. Read at the first page with remote images, and written like `diagram-sizes.json`. WebKit gives an SVG wider than the page the page-fit size as its natural size, so such an SVG is remembered smaller than it is. |
+| `~/Library/Caches/mddog/image-sizes.json` | The natural sizes of the last 512 remote images with no `height`, by URL (up to 2048 characters), oldest dropped first. Read at the first page with remote images, and written like `diagram-sizes.json`. |
 | `$TMPDIR/mddog-<pid>-<hex>.html` | The page. Kept until the viewer exits, because the obsidian engine's frame loads `file:` scripts after the page loads, and WebKit refuses them once the page file is gone. |
 | `$TMPDIR/mddog-<pid>-<hex>-warm.html` | The spare's warm-up page. Removed once the warm-up ends. |
 | `$TMPDIR/mddog-<pid>-<hex>-stdin.md` | A copy of standard input. Removed when the viewer exits. |
 | `$TMPDIR/tty-graphics-protocol-mddog-<pid>-<hex>-<tag>` | A tile sent by temp file. The terminal deletes it. |
 | `$TMPDIR/mddog-<uid>-<hash>.sock` | The spare's socket, mode 0700. Removed when a client connects, when the binary changes, or when the spare exits unused after 12 hours. |
 | `$TMPDIR/mddog-tiles-<pid>-<hex>/` | Headless PNG or WebP tiles, mode 0700. Removed on a normal exit and on SIGTERM, SIGINT, or SIGHUP. |
-| `~/Library/LaunchAgents/dev.mddog.spare.plist` | The login spare's launchd job. Only with `--start-at-login`. |
+| `~/Library/LaunchAgents/dev.mddog.prewarm.plist` | The login spare's launchd job. Only with `--prewarm-at-login`. |
 
 Each temp name has the pid and a per-run hex nonce, and the files are private.
 
@@ -661,10 +661,9 @@ Opening a file fetches only what the document names: remote images, video poster
 
 ### Releasing
 
-1. Run `claude plugin test plugins/claude-code`, since `./check.sh` and CI don't run the plugin's tests.
-2. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
-3. Commit as `chore: release X.Y.Z`.
-4. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` checks that the tag matches both versions, then builds both architectures and publishes the release.
+1. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
+2. Commit as `chore: release X.Y.Z`.
+3. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` builds both architectures and publishes the release.
 
 ### Integration tests
 
@@ -680,7 +679,6 @@ Opening a file fetches only what the document names: remote images, video poster
 - Every wait in `tests/search.rs` goes through `wait`, `loaded`, or `next_frame`, which allow 30 s and panic on timeout. A check that runs on a page that is not ready fails later and points at the wrong thing. Pele's ResizeObserver resets the zoom on its first callback, so press its buttons only after `next_frame`.
 - Every test that launches mdd or a WebView sets `MDDOG_CACHE_DIR` to `$TMPDIR/mddog-test-cache`, so `./check.sh` leaves `~/Library/Caches/mddog/` alone. Unit tests skip the remote disk cache.
 - macOS limits a Unix socket path to 104 bytes, so `tests/headless.rs` keeps its `TMPDIR` short.
-- The pty tests in `tests/help.rs` that click at a cell and expect a given word or button set `MDDOG_SCALE=2`, since GitHub's macOS runners have a 1x screen. The others run at the screen's own scale, since a forced 2x on a 1x screen changes how tiles line up.
 - Every test that launches mdd sets `MDDOG_NO_SPARE`, except `the_spare_outlives_a_tree_kill` and `a_rebuild_retires_the_old_spare`. The first one's `StopSpares` guard stops the test binary's spares when the test ends, pass or fail, so no spare lives on for its 12-hour idle limit. The second runs a copy of the binary, so it kills its own child through a `Reap` guard.
 - A unit test in `src/render/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
 - `tests/math.rs` renders `fixtures/math/` and checks its math against `tests/math.golden` in the same way. `UPDATE_GOLDEN=1 cargo test --test math` rewrites it.
@@ -718,8 +716,7 @@ Opening a file fetches only what the document names: remote images, video poster
 
 | Variable | Read by | Effect |
 |---|---|---|
-| `MDDOG_NO_SPARE` | mdd, the spare | No warm spare, as with `fast_start = false`. For tests |
-| `MDDOG_SCALE` | mdd, the spare | Pixels per CSS pixel in place of the screen's, so pty tests click the same page points on a 1x CI runner. For tests |
+| `MDDOG_NO_SPARE` | mdd, the spare | No warm spare, as with `prewarm = false`. For tests |
 | `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, cell geometry, page height after each measure, and remote fetches |
 | `MDDOG_DUMP_VIEW=FILE` | mdd | With `MDDOG_TRACE`, write a PNG of the viewport after each frame |
 | `MDDOG_DUMP_TILES=DIR` | mdd | Write each tile as it is sent |
@@ -729,7 +726,7 @@ Opening a file fetches only what the document names: remote images, video poster
 | `EDITOR` | mdd | The editor for `e` |
 | `XDG_CONFIG_HOME` | mdd | Where to look for `mddog/config.toml` |
 | `MDDOG_BIN` | the plugin, `reference/e2e/` | The binary to run |
-| `MDDOG_NO_START_AT_LOGIN=1` | `install.sh` | Skip the login spare |
+| `MDDOG_NO_PREWARM_AT_LOGIN=1` | `install.sh` | Skip the login spare |
 | `MDDOG_INSTALL_DIR`, `MDDOG_RELEASE_URL` | `install.sh` | Where to install, and which release to fetch |
 | `MDDOG_PANE` | `reference/e2e/` | The herdr pane the checks drive |
 
@@ -745,6 +742,6 @@ Opening a file fetches only what the document names: remote images, video poster
 | Round | One render's set of tiles in headless mode. |
 | Resident set | The tile bytes the terminal holds at one time. |
 | Storage limit | The most tile bytes mddog lets the terminal hold: 56 MiB under herdr, 300 MiB elsewhere. The kitty spec calls this a storage quota, and Ghostty calls it `image-storage-limit`. |
-| Spare | A waiting `mdd --spare` process with WebKit already started. |
+| Spare | A waiting `mdd --spare` process with WebKit already started. Users see it as "prewarm": the `prewarm` key and `--prewarm-at-login`. |
 | herdr | A terminal multiplexer built on libghostty, with a 64 MiB image quota per screen. Its XTVERSION reply is `libghostty`. |
 | leaf | The terminal Markdown viewer whose keys mddog's behavior spec started from. |

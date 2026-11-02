@@ -621,24 +621,7 @@ function viaApp(u) {
   }
 }
 
-// Splits a srcset as browsers do: a URL runs to whitespace, so a comma inside one (`w_100,h_100`) stays in it.
-function viaAppSet(set) {
-  const out = [];
-  for (let rest = set.replace(/^[\s,]+/, ''); rest; rest = rest.replace(/^[\s,]+/, '')) {
-    let [url] = rest.match(/^\S+/);
-    rest = rest.slice(url.length);
-    let desc = '';
-    if (url.endsWith(',')) {
-      url = url.replace(/,+$/, '');
-    } else {
-      const end = rest.indexOf(',');
-      desc = (end < 0 ? rest : rest.slice(0, end)).trim();
-      rest = end < 0 ? '' : rest.slice(end + 1);
-    }
-    out.push(desc ? `${viaApp(url)} ${desc}` : viaApp(url));
-  }
-  return out.join(', ');
-}
+const viaAppSet = (set) => set.split(',').map((c) => c.trim().split(/\s+/)).map(([u, ...rest]) => [viaApp(u), ...rest].join(' ')).join(', ');
 
 // After a failed load, the scheme handler tells by status whether that URL was blocked (403) or just failed.
 async function blocked(u) {

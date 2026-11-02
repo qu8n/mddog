@@ -231,12 +231,7 @@ pub fn spin(ms: f64) {
     NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(ms / 1000.0));
 }
 
-/// The screen's pixels per CSS pixel. `MDDOG_SCALE` overrides it, so tests that click at terminal cells hit
-/// the same page points on a 1x CI runner as on a Retina Mac.
 pub fn backing_scale() -> f64 {
-    if let Some(s) = std::env::var("MDDOG_SCALE").ok().and_then(|s| s.parse().ok()).filter(|&s: &f64| s > 0.0) {
-        return s;
-    }
     let mtm = MainThreadMarker::new().expect("main thread");
     NSScreen::mainScreen(mtm).map_or(2.0, |s| s.backingScaleFactor())
 }

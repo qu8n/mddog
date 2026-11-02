@@ -25,8 +25,8 @@ copy_on_select = false
 
 # Keep a hidden mdd running with WebKit loaded, so the next preview opens faster.
 # With false, mddog starts no background process, and each preview takes longer to open.
-# mdd --start-at-login then refuses to run.
-fast_start = true
+# mdd --prewarm-at-login then refuses to run.
+prewarm = true
 
 [file_list]
 # The file extensions the file list (mdd, mdd FOLDER, Ctrl-p) shows, and that

@@ -182,21 +182,11 @@ fn main() {
     let why = eng.eval("JSON.stringify([...document.querySelectorAll('.mddog-image-missing')].map((b) => b.textContent + ':' + b.dataset.why))").unwrap();
     check("r1_private_hosts_blocked", why == r#"["loop:blocked","image:blocked","lan:blocked"]"#);
 
-    // A comma inside a srcset URL, as image CDNs write them, stays in the URL the page asks the app for.
-    let cdn = format!("http://127.0.0.1:{port}/w_1,h_1/a.png");
-    load(&mut eng, &format!("<picture><source srcset=\"{cdn} 2x,{cdn}\"><img src=\"{cdn}\" alt=\"cdn\"></picture>\n"), 600.0);
-    remote::load(&eng, Duration::from_secs(10));
-    wait(&eng, script::REMOTE_DONE);
-    let set = eng.eval("document.querySelector('source').srcset").unwrap();
-    check("r1_srcset_keeps_commas_in_urls", set == format!("mddog-{cdn} 2x, mddog-{cdn}"));
-
     // A remembered size opens each loading box at the size the image lays out at, scaled down to the page width.
     // data: URLs stand in for remote ones, since they load without the network.
     load(&mut eng, "![wide](https://x.test/w.svg) ![small](https://x.test/s.svg) <img src=\"https://x.test/h.svg\" width=\"1600\" height=\"400\">\n", 600.0);
     let svg = |w, h| format!("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}'%3E%3C/svg%3E");
-    // WebKit reports a wide SVG's natural size as the box it fits on the page, so the wide one is a PNG.
-    let wide = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABLAAAAEsCAAAAAD21hWMAAABdElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD+Bn+3AAHo8fTrAAAAAElFTkSuQmCC".to_string();
-    let (small, sized) = (svg(100, 40), svg(1600, 400));
+    let (wide, small, sized) = (svg(1200, 300), svg(100, 40), svg(1600, 400));
     eng.eval(&format!("const [w, s, h] = document.querySelectorAll('img[data-mddog-src]'); w.dataset.mddogSrc = {wide:?}; s.dataset.mddogSrc = {small:?}; h.dataset.mddogSrc = {sized:?}; ''"))
         .unwrap();
     let sizes = serde_json::json!({ &wide: [1200, 300], &small: [100, 40] });

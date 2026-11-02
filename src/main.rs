@@ -10,16 +10,16 @@ const USAGE: &str = "usage: mdd [file.md|folder]
 const HELP: &str = "Preview Markdown in your terminal the way a browser renders it.
 
 Usage
-  mdd                     list Markdown files from current repo or folder to preview
-  mdd file.md             preview a Markdown file
-  mdd folder              list Markdown files in a folder to preview
-  command | mdd           preview the output of a command in Markdown format
+  mdd                       list Markdown files from current repo or folder to preview
+  mdd file.md               preview a Markdown file
+  mdd folder                list Markdown files in a folder to preview
+  command | mdd             preview the output of a command in Markdown format
 
 Options
-  -h, --help              show this help
-  -V, --version           show the version
-      --start-at-login    start a prewarmed mdd at login so previews open faster
-      --no-start-at-login undo --start-at-login
+  -h, --help                show this help
+  -V, --version             show the version
+      --prewarm-at-login    start a prewarmed mdd at login so previews open faster
+      --no-prewarm-at-login undo --prewarm-at-login
 
 In the preview, press ? to list the keys.
 ";
@@ -30,22 +30,22 @@ fn main() {
         let _ = config::load();
         std::process::exit(engine::spare::serve());
     }
-    if std::env::args().nth(1).as_deref() == Some("--start-at-login") {
+    if std::env::args().nth(1).as_deref() == Some("--prewarm-at-login") {
         config::load().unwrap_or_else(|e| fail(&format!("config: {e}")));
-        if !config::get().fast_start {
+        if !config::get().prewarm {
             let file = config::dir().map_or("config.toml".into(), |d| d.join("config.toml").display().to_string());
-            eprintln!("{}", fit(&format!("mdd: fast_start = false in {}, so there is no spare to start at login", term::printable(&file))));
+            eprintln!("{}", fit(&format!("mdd: prewarm is false in {}, so there is nothing to start at login. Set it to true first.", term::printable(&file))));
             // install.sh lets this one refusal through and stops on every other failure.
             std::process::exit(3);
         }
-        match engine::spare::start_at_login() {
-            Ok(_) => println!("mdd: launchd now starts a prewarmed mdd at login, so your first preview opens faster. Undo with: mdd --no-start-at-login"),
+        match engine::spare::prewarm_at_login() {
+            Ok(_) => println!("mdd: launchd now starts a prewarmed mdd at login, so your first preview opens faster. Undo with: mdd --no-prewarm-at-login"),
             Err(e) => fail(&e),
         }
         return;
     }
-    if std::env::args().nth(1).as_deref() == Some("--no-start-at-login") {
-        match engine::spare::no_start_at_login() {
+    if std::env::args().nth(1).as_deref() == Some("--no-prewarm-at-login") {
+        match engine::spare::no_prewarm_at_login() {
             Ok(true) => println!("mdd: launchd no longer starts mdd at login"),
             Ok(false) => println!("mdd: nothing to undo, launchd wasn't starting mdd at login"),
             Err(e) => fail(&e),
@@ -85,7 +85,7 @@ fn main() {
         [] => "-".to_string(),
         [f] => f.clone(),
         _ if files.len() > 1 && Path::new(&joined).exists() => fail(&format!("got {} files, but \"{joined}\" is one file. Put quotes around a name that has spaces", files.len())),
-        _ => fail(&format!("opens one file at a time, but got {}: {}", files.len(), files.join(", "))),
+        _ => fail(&format!("can open only one file at a time, but got {}: {}", files.len(), files.join(", "))),
     };
     config::load().unwrap_or_else(|e| fail(&format!("config: {e}")));
     if webp && headless.is_none() {
@@ -134,7 +134,7 @@ fn looks_binary(head: &[u8]) -> bool {
 
 fn stdin_copy() -> Result<PathBuf, String> {
     let mut bytes = Vec::new();
-    std::io::stdin().read_to_end(&mut bytes).map_err(|e| format!("cannot read standard input: {}", term::io_error(&e)))?;
+    std::io::stdin().read_to_end(&mut bytes).map_err(|e| format!("can't read standard input: {}", term::io_error(&e)))?;
     if bytes.is_empty() {
         usage("no file given, and standard input is empty");
     }
@@ -142,14 +142,14 @@ fn stdin_copy() -> Result<PathBuf, String> {
         return Err("standard input looks like a binary file, not Markdown".into());
     }
     let path = sweep::temp_path("mddog-", "-stdin.md");
-    sweep::write_private(&path, &bytes).map_err(|e| format!("cannot keep standard input: {}", term::io_error(&e)))?;
+    sweep::write_private(&path, &bytes).map_err(|e| format!("can't save standard input to a temp file: {}", term::io_error(&e)))?;
     Ok(path)
 }
 
 fn check_file(path: &Path) -> Result<(), String> {
     let shown = term::printable(&path.display().to_string());
     if let Some(url) = ["http://", "https://"].iter().find(|p| shown.starts_with(*p)).map(|_| &shown) {
-        return Err(format!("shows local files only, not URLs. Download it first: curl -sL {url} | mdd"));
+        return Err(format!("can't open URLs, only local files. Download it first: curl -sL {url} | mdd"));
     }
     let meta = match std::fs::metadata(path) {
         Ok(m) => m,

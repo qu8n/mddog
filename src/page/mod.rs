@@ -63,11 +63,11 @@ pub(crate) fn scripts(o: &Opts) -> String {
 /// to 500 ms. The file must stay while the page is open: WebKit won't load the Mermaid frames' `file:` scripts once
 /// it is gone.
 pub fn load(engine: &Engine, path: &Path, html: &str, dark: bool, wait: Duration) -> Result<(), String> {
-    crate::sweep::write_private(path, html.as_bytes()).map_err(|e| format!("cannot write the page: {}", term::io_error(&e)))?;
+    crate::sweep::write_private(path, html.as_bytes()).map_err(|e| format!("can't write the page: {}", term::io_error(&e)))?;
     trace::mark("page written");
     engine.load_file(path, dark);
     if !engine.wait_loaded(wait) {
-        return Err("the page did not load".into());
+        return Err("WebKit couldn't load the page".into());
     }
     engine.wait_js(script::READY, Duration::from_millis(500));
     Ok(())

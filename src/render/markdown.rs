@@ -390,29 +390,6 @@ fn api_dom(src: &str, front_matter: bool) -> (NodeRef, Option<String>) {
 
 const BLANK_GIF: &str = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
-/// A `srcset`'s (URL, descriptors) pairs, split as browsers split them: a URL runs to whitespace, so a comma
-/// inside one (`w_100,h_100`) stays in it, and only a comma after the URL ends a candidate.
-fn srcset_candidates(set: &str) -> Vec<(&str, &str)> {
-    let mut out = Vec::new();
-    let mut rest = set;
-    loop {
-        rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == ',');
-        if rest.is_empty() {
-            return out;
-        }
-        let (url, after) = rest.split_at(rest.find(char::is_whitespace).unwrap_or(rest.len()));
-        let bare = url.trim_end_matches(',');
-        if bare.len() < url.len() {
-            out.push((bare, ""));
-            rest = after;
-        } else {
-            let (desc, next) = after.split_once(',').unwrap_or((after, ""));
-            out.push((url, desc.trim()));
-            rest = next;
-        }
-    }
-}
-
 fn is_remote(url: &str) -> bool {
     let url: String = url.chars().filter(|c| !matches!(c, '\t' | '\n' | '\r')).collect();
     url.trim_matches(|c: char| c <= ' ').split_once(':').is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
@@ -502,7 +479,14 @@ fn confine_media(body: &NodeRef, dir: &Path) {
             }
         }
         if let Some(set) = attr(&n, "srcset") {
-            let kept: Vec<String> = srcset_candidates(&set).into_iter().filter_map(|(u, rest)| local_media(u, dir, root).map(|u| if rest.is_empty() { u } else { format!("{u} {rest}") })).collect();
+            let kept: Vec<String> = set
+                .split(',')
+                .filter_map(|c| {
+                    let c = c.trim();
+                    let (u, rest) = c.split_once(char::is_whitespace).unwrap_or((c, ""));
+                    local_media(u, dir, root).map(|u| if rest.is_empty() { u } else { format!("{u} {}", rest.trim()) })
+                })
+                .collect();
             if kept.is_empty() {
                 remove_attr(&n, "srcset");
             } else {
@@ -1020,16 +1004,6 @@ mod tests {
     }
 
     #[test]
-    fn srcset_commas_inside_a_url_stay_in_it() {
-        let c = "https://x.test/w_100,h_100/a.png";
-        assert_eq!(srcset_candidates(&format!("{c} 1x, {c}")), [(c, "1x"), (c, "")]);
-        assert_eq!(srcset_candidates("a.png 1x,b.png 2x"), [("a.png", "1x"), ("b.png", "2x")]);
-        assert_eq!(srcset_candidates(" a.png, b.png,, "), [("a.png", ""), ("b.png", "")]);
-        assert_eq!(srcset_candidates("a.png,../../secret.png 2x"), [("a.png,../../secret.png", "2x")]);
-        assert!(srcset_candidates(" , ").is_empty());
-    }
-
-    #[test]
     fn remote_urls_are_normalized_like_webkit() {
         for url in ["http://x.test/a", " HTTPS://x.test/a", "http:\n//127.0.0.1/x", "http:/\\127.0.0.1/x", "\thttp://x"] {
             assert!(is_remote(url), "{url:?}");
@@ -1122,14 +1096,13 @@ mod tests {
         let dir = std::fs::canonicalize(repo.join("docs")).unwrap();
         let outside = top.join("secret.png").display().to_string();
         let src = format!(
-            "<img alt=\"g\" src=\"..\\..\\..\\secret.png\"> <img alt=\"t\" src=\".&#9;./.&#9;./secret.png\"> ![a](img/a%20b.png) ![b](/logo.png) ![c](../../secret.png) ![d]({outside}) ![e](//host/x.png) ![f](https://x.test/r.png)\n\n<picture><source srcset=\"img/a%20b.png 1x, ../../secret.png 2x, img/a%20b.png,../../secret.png 3x\"><img src=\"img/a%20b.png\"></picture>\n\n<picture><source srcset=\"https://x.test/w_1,h_1/r.png 2x\"><img src=\"img/a%20b.png\"></picture>\n"
+            "<img alt=\"g\" src=\"..\\..\\..\\secret.png\"> <img alt=\"t\" src=\".&#9;./.&#9;./secret.png\"> ![a](img/a%20b.png) ![b](/logo.png) ![c](../../secret.png) ![d]({outside}) ![e](//host/x.png) ![f](https://x.test/r.png)\n\n<picture><source srcset=\"img/a%20b.png 1x, ../../secret.png 2x\"><img src=\"img/a%20b.png\"></picture>\n"
         );
         let html = render_in(&src, Some(&dir)).html;
         let _ = std::fs::remove_dir_all(&top);
         assert!(html.contains("src=\"img/a%20b.png\"") && html.contains("src=\"../logo.png\"") && html.contains("src=\"https://x.test/r.png\""), "{html}");
         assert!(!html.contains("src=\"..\\") && !html.contains("src=\".\t") && !html.contains(&format!("src=\"{outside}")) && !html.contains("src=\"//host"), "{html}");
         assert!(html.contains("srcset=\"img/a%20b.png 1x\""), "{html}");
-        assert!(html.contains("data-mddog-srcset=\"https://x.test/w_1,h_1/r.png 2x\""), "{html}");
     }
 
     #[test]

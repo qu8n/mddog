@@ -29,12 +29,12 @@ impl Bitmap {
     /// the small copies it draws where sharp tiles don't fit.
     /// Lossy at `quality` when given, else lossless.
     pub fn webp(&self, quality: Option<f32>) -> Result<Vec<u8>, String> {
-        let mut cfg = webp::WebPConfig::new().map_err(|()| "libwebp refused its default config".to_string())?;
+        let mut cfg = webp::WebPConfig::new().map_err(|()| "can't set up the WebP encoder".to_string())?;
         cfg.lossless = i32::from(quality.is_none());
         // Lossless reads it as effort.
         cfg.quality = quality.unwrap_or(75.0);
         cfg.method = 2;
-        let mem = webp::Encoder::from_rgba(&self.rgba[..], self.width as u32, self.height as u32).encode_advanced(&cfg).map_err(|e| format!("libwebp: {e:?}"))?;
+        let mem = webp::Encoder::from_rgba(&self.rgba[..], self.width as u32, self.height as u32).encode_advanced(&cfg).map_err(|e| format!("can't encode WebP: {e:?}"))?;
         Ok(mem.to_vec())
     }
 }

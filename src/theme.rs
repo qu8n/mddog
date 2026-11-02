@@ -136,7 +136,7 @@ fn load(path: &Path, seen: &mut Vec<PathBuf>) -> Result<Theme, String> {
     let shown = path.display().to_string();
     let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if seen.contains(&key) {
-        return Err(format!("loops back to {}", key.display()));
+        return Err(format!("the chain of base themes loops back to {}", key.display()));
     }
     let css = std::fs::read_to_string(path).map_err(|e| format!("{shown}: {}", crate::term::io_error(&e)))?;
     let dir = path.parent().unwrap_or(Path::new(""));
@@ -399,7 +399,7 @@ mod tests {
         std::fs::write(dir.join("sub/b.css"), ":root{--mddog-base:../a.css}").unwrap();
         let e = file(&dir.join("a.css")).unwrap_err();
         let (a, b) = (dir.join("a.css").display().to_string(), dir.join("sub/b.css").display().to_string());
-        assert_eq!(e, format!("{a}: --mddog-base: {b}: --mddog-base: loops back to {}", dir.join("a.css").canonicalize().unwrap().display()));
+        assert_eq!(e, format!("{a}: --mddog-base: {b}: --mddog-base: the chain of base themes loops back to {}", dir.join("a.css").canonicalize().unwrap().display()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

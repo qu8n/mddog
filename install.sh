@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the latest mdd release and has macOS start a hidden mdd at login, so the first preview opens fast.
 #   curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
-# MDDOG_INSTALL_DIR picks the folder (default ~/.local/bin). MDDOG_NO_START_AT_LOGIN=1 skips the start at login.
+# MDDOG_INSTALL_DIR picks the folder (default ~/.local/bin). MDDOG_NO_PREWARM_AT_LOGIN=1 skips the prewarm at login.
 set -eu
 
 url=${MDDOG_RELEASE_URL:-https://github.com/qu8n/mddog/releases/latest/download}
@@ -41,7 +41,7 @@ xattr -d com.apple.quarantine "$dir/mdd" 2>/dev/null || true
 echo "$ok Installed $("$dir/mdd" --version) to $show/mdd"
 
 # The launchd job records the binary's path, so it runs after the move. Its errors still reach stderr.
-[ "${MDDOG_NO_START_AT_LOGIN:-}" = 1 ] || "$dir/mdd" --start-at-login >/dev/null || [ $? -eq 3 ]
+[ "${MDDOG_NO_PREWARM_AT_LOGIN:-}" = 1 ] || "$dir/mdd" --prewarm-at-login >/dev/null || [ $? -eq 3 ]
 
 echo
 case ":$PATH:" in

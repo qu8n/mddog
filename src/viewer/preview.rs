@@ -48,7 +48,7 @@ fn garbles_scrolling() -> Option<&'static str> {
     if std::env::var_os("ZELLIJ").is_some() {
         Some("zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648)")
     } else if std::env::var("TERM_PROGRAM").as_deref() == Ok("WarpTerminal") {
-        Some("Warp ignores the crop that mddog scrolls an image with")
+        Some("Warp can't crop images, and mddog crops images to scroll them")
     } else {
         None
     }
@@ -340,7 +340,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let refusal = if probe.no_graphics() {
         Some(UNSUPPORTED.to_string())
     } else {
-        garbles_scrolling().map(|why| format!("mdd: {why}, so it can't show the preview here. Use Ghostty, Kitty, WezTerm, or iTerm2."))
+        garbles_scrolling().map(|why| format!("mdd: {why}. So mddog can't show the preview here. Use Ghostty, Kitty, WezTerm, or iTerm2."))
     };
     if let Some(refusal) = refusal {
         drop(loader);
@@ -442,7 +442,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
             Err(RecvTimeoutError::Disconnected) => {
                 p.shutdown();
                 engine::spare::spawn();
-                eprintln!("mdd: could not render {}", term::printable(&p.file.display().to_string()));
+                eprintln!("mdd: can't render {}", term::printable(&p.file.display().to_string()));
                 return 1;
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -723,7 +723,7 @@ impl Preview {
             }
             Action::ToggleToc if self.app.toc_visible && app::toc_width(self.size.cols) == 0 => {
                 self.app.toc_visible = false;
-                self.notify(&format!("Too narrow for the contents. It needs {} columns", app::TOC_MIN_COLS));
+                self.notify(&format!("Too narrow for the table of contents. It needs {} columns", app::TOC_MIN_COLS));
                 false
             }
             Action::ToggleToc => {
@@ -1760,7 +1760,7 @@ impl Preview {
         let Ok(bytes) = std::fs::read(&v.file) else {
             // Drop it, so the next Backspace reaches the files before it.
             self.app.back_file = !self.history.is_empty();
-            self.notify(&format!("Can't read {}, so it left the Back list", v.name));
+            self.notify(&format!("Can't read {}, so it was removed from the Back list", v.name));
             return;
         };
         let (wrap, toc_visible) = (self.app.wrap, self.app.toc_visible);

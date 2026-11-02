@@ -117,7 +117,7 @@ test('a child that a newer render aborts starts again', async ($, on) => {
   const ui = await $.ui.mount(PANE)
   expect((await ui.find({ type: 'Image', key: 'tile-0' }))?.props.rows).toBe(12)
   expect(spawns).toBe(2)
-  expect(await ui.find({ type: 'Text', text: /could not run/ })).toBeFalsy()
+  expect(await ui.find({ type: 'Text', text: /couldn't run/ })).toBeFalsy()
   await ui.unmount()
 })
 
@@ -141,7 +141,7 @@ test('a child that keeps failing to start ends in an error until the next /mddog
   await $.command.run(mddog('doc.md'))
   const ui = await $.ui.mount(PANE)
   for (let i = 0; i < 4; i++) await clock.settle()
-  expect((await ui.find({ type: 'Text', text: /could not run/ }))?.text).toContain('could not run mdd:')
+  expect((await ui.find({ type: 'Text', text: /couldn't run/ }))?.text).toContain("couldn't run mdd:")
   expect(spawns).toBe(4)
 
   failing = false

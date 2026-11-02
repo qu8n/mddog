@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 <details>
 <summary>What this script does</summary>
 
-The script installs the latest release of mddog. It also registers a small launchd job that starts mddog with WebKit loaded at login, so the first preview after login opens faster. To opt out of this, run `mdd --no-start-at-login` after installing or set the environment variable `MDDOG_NO_START_AT_LOGIN=1` before running the script. To run mddog with no background process at all, set `fast_start = false` in its [config](#config-optional).
+The script installs the latest release of mddog. It also registers a small launchd job that starts mddog with WebKit loaded at login, so the first preview after login opens faster. To opt out of this, run `mdd --no-prewarm-at-login` after installing or set the environment variable `MDDOG_NO_PREWARM_AT_LOGIN=1` before running the script. To run mddog with no background process at all, set `prewarm = false` in its [config](#config-optional).
 
 If you want to build from source instead, install [Rust](https://rust-lang.org/tools/install/) first, then run the following commands:
 
@@ -51,7 +51,7 @@ If you want to build from source instead, install [Rust](https://rust-lang.org/t
 git clone https://github.com/qu8n/mddog.git
 cd mddog
 cargo install --path .
-mdd --start-at-login
+mdd --prewarm-at-login
 ```
 
 </details>

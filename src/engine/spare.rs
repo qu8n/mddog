@@ -32,7 +32,7 @@ fn path() -> Option<PathBuf> {
 }
 
 fn off() -> bool {
-    std::env::var_os("MDDOG_NO_SPARE").is_some() || !crate::config::get().fast_start
+    std::env::var_os("MDDOG_NO_SPARE").is_some() || !crate::config::get().prewarm
 }
 
 fn write_frame(s: &mut UnixStream, b: &[u8]) -> io::Result<()> {
@@ -54,7 +54,7 @@ fn read_frame(s: &mut UnixStream) -> io::Result<Vec<u8>> {
     Ok(b)
 }
 
-const AGENT: &str = "dev.mddog.spare";
+const AGENT: &str = "dev.mddog.prewarm";
 
 fn agent_plist() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
@@ -65,8 +65,8 @@ fn agent_target() -> String {
     format!("gui/{}", crate::sweep::uid())
 }
 
-pub fn start_at_login() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+pub fn prewarm_at_login() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("can't find the mdd executable: {e}"))?;
     let plist = agent_plist()?;
     let esc = |p: &Path| p.to_string_lossy().replace('&', "&amp;").replace('<', "&lt;");
     let body = format!(
@@ -81,7 +81,8 @@ pub fn start_at_login() -> Result<PathBuf, String> {
             .and_then(|v| std::path::absolute(v).ok())
             .map_or_else(String::new, |d| format!("<key>XDG_CONFIG_HOME</key><string>{}</string>", esc(&d)))
     );
-    std::fs::create_dir_all(plist.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
+    let dir = plist.parent().unwrap_or(Path::new("/"));
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {}", dir.display(), crate::term::io_error(&e)))?;
     std::fs::write(&plist, body).map_err(|e| format!("{}: {e}", plist.display()))?;
     let target = agent_target();
     let service = format!("{target}/{AGENT}");
@@ -95,11 +96,11 @@ pub fn start_at_login() -> Result<PathBuf, String> {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     let ok = Command::new("launchctl").args(["bootstrap", &target]).arg(&plist).status().is_ok_and(|s| s.success());
-    if ok { Ok(plist) } else { Err(format!("launchctl could not load {}", plist.display())) }
+    if ok { Ok(plist) } else { Err(format!("launchctl couldn't load {}", plist.display())) }
 }
 
 /// Stops the launchd job and removes its plist. Returns false when there was none.
-pub fn no_start_at_login() -> Result<bool, String> {
+pub fn no_prewarm_at_login() -> Result<bool, String> {
     let plist = agent_plist()?;
     let _ = Command::new("launchctl").args(["bootout", &format!("{}/{AGENT}", agent_target())]).stderr(Stdio::null()).status();
     match std::fs::remove_file(&plist) {
@@ -282,7 +283,7 @@ fn warm(engine: &Engine) {
     let file = crate::sweep::temp_path("mddog-", "-warm.html");
     if crate::page::load(engine, &file, &html, theme.dark, Duration::from_secs(5)).is_ok() {
         let _ = engine.eval(crate::page::script::START_MERMAID);
-        engine.wait_js(&format!("document.fonts.status === 'loaded' && {} && {}", crate::page::script::MATH_DONE, crate::page::script::MERMAID_DONE), Duration::from_secs(5));
+        engine.wait_js("document.fonts.status === 'loaded' && mddog.state.math === true && mddog.state.mermaid === true", Duration::from_secs(5));
     }
     let _ = std::fs::remove_file(&file);
 }
@@ -309,7 +310,7 @@ pub fn connect() -> Option<Client> {
         return None;
     }
     write_frame(&mut s, HELLO).ok()?;
-    // A spare from before fast_start was turned off serves this client, finds it gone, and exits.
+    // A spare from before prewarm was turned off serves this client, finds it gone, and exits.
     if off() {
         return None;
     }

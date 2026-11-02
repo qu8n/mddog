@@ -118,7 +118,7 @@ function start($: EngineInterface, v: View, cols: number, webp: boolean) {
         $.ui.invalidate('ui.render')
         return
       }
-      if (v.child === stream) v.error = `could not run mdd: ${String(e)}`
+      if (v.child === stream) v.error = `couldn't run mdd: ${String(e)}`
     }
     if (v.child === stream) {
       v.child = undefined
@@ -340,7 +340,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {v.error && <Text color="red">{v.error}</Text>}
         {v.tiles.map((t, i) => !near.has(i) ? <Box key={`gap-${i}`} height={t.rows} /> : (
-          <Image key={`tile-${i}`} source={{ file: t.file, format: 'png' }} columns={v.columns} rows={t.rows} alt={i === 0 ? `${file} (this terminal cannot show images)` : ' '} />
+          <Image key={`tile-${i}`} source={{ file: t.file, format: 'png' }} columns={v.columns} rows={t.rows} alt={i === 0 ? `${file} (this terminal can't show images)` : ' '} />
         ))}
       </Box>
     )
