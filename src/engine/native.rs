@@ -4,12 +4,11 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use serde_json::json;
-
 use super::{Bitmap, Block, Layout, Pointer, Press, Select, snapshot_size};
 use crate::native::doc::{self, Doc};
 use crate::native::images::Images;
-use crate::native::layout::{self, Opts};
+use crate::native::images::render_view;
+use crate::native::layout::{self, Opts, place_bar};
 use crate::native::page::{BtnKind, Kind, Page};
 use crate::native::raster::{self, Ctx, Expanded, Overlay};
 use crate::native::text::Fonts;
@@ -29,7 +28,10 @@ struct St {
     images: Images,
     wrap: bool,
     toggled: HashSet<usize>,
-    zoom: HashMap<usize, f32>,
+    /// Zoomed diagrams, by index.
+    views: HashMap<usize, View>,
+    /// The diagram a drag pans, and the pointer's last spot (device px).
+    pan: Option<(usize, f32, f32)>,
     page: Page,
     runs: Vec<(usize, usize, u32)>,
     ov: Overlay,
@@ -44,6 +46,25 @@ struct St {
 
 type R = [f64; 4];
 
+/// A zoomed diagram's view: `z` device pixels per SVG unit, with SVG point (`x`, `y`) at the frame's top left.
+/// `fit` is the fit size it zoomed from, so a layout that changes it drops the view, as pele resets on a resize.
+#[derive(Clone, Copy, Debug)]
+struct View {
+    fit: f32,
+    z: f32,
+    x: f32,
+    y: f32,
+}
+
+/// Pele's step: each click zooms by 1.25 twice.
+const ZOOM_STEP: f32 = 1.5625;
+
+/// Pele's offset rule along one axis: a view wider than the content keeps all of it in sight, and a narrower
+/// one stays within it.
+fn clamp_view(o: f32, view: f32, content: f32) -> f32 {
+    if view >= content { o.clamp(content - view, 0.0) } else { o.clamp(0.0, content - view) }
+}
+
 impl Engine {
     pub fn new(width: f64, scale: f64) -> Engine {
         let st = St {
@@ -53,7 +74,8 @@ impl Engine {
             images: Images::new(".".into()),
             wrap: false,
             toggled: HashSet::new(),
-            zoom: HashMap::new(),
+            views: HashMap::new(),
+            pan: None,
             page: Page::default(),
             runs: vec![],
             ov: Overlay::default(),
@@ -83,7 +105,7 @@ impl Engine {
         st.images = Images::new(base.to_path_buf());
         st.wrap = wrap;
         st.toggled.clear();
-        st.zoom.clear();
+        st.views.clear();
         st.sel = None;
         st.held = None;
         st.ov = Overlay::default();
@@ -96,8 +118,10 @@ impl Engine {
 
     fn relayout(&self, st: &mut St) {
         let Some(doc) = st.doc.take() else { return };
-        let o = Opts { width: (self.width.get() * self.scale.get()) as f32, scale: self.scale.get() as f32, wrap_code: st.wrap, toggled: st.toggled.clone(), zoom: st.zoom.clone() };
+        let o = Opts { width: (self.width.get() * self.scale.get()) as f32, scale: self.scale.get() as f32, wrap_code: st.wrap, toggled: st.toggled.clone() };
+        let before = st.page.diagrams.len();
         let St { fonts, th, images, .. } = st;
+        fonts.set_scale(o.scale);
         st.page = layout::layout(fonts, th, &o, &doc, images);
         st.doc = Some(doc);
         st.runs = build_runs(&st.page);
@@ -111,6 +135,16 @@ impl Engine {
         st.ov.hover_btn = None;
         st.ov.copied_btn = None;
         st.held = None;
+        st.pan = None;
+        // Views are kept by index, so a layout that adds or drops a diagram (a <details> toggle) drops them all.
+        let n = st.page.diagrams.len();
+        let views = std::mem::take(&mut st.views);
+        for (i, v) in views.into_iter().filter(|_| n == before) {
+            if st.page.diagrams.get(i).is_some_and(|d| d.zoom.is_some() && (d.fit - v.fit).abs() < 1e-4) {
+                st.views.insert(i, v);
+                self.show(st, i);
+            }
+        }
         if !st.matches.is_empty() {
             st.matches.clear();
             st.cur = None;
@@ -156,7 +190,7 @@ impl Engine {
         Some(Bitmap { width, height, rgba })
     }
 
-    pub fn snapshot_into(&self, y: f64, h: f64, scale: f64, dst: &mut [u8]) -> Option<()> {
+    fn snapshot_into(&self, y: f64, h: f64, scale: f64, dst: &mut [u8]) -> Option<()> {
         let (width, height) = snapshot_size(self.width.get(), h, scale);
         let dst = dst.get_mut(..width * height * 4)?;
         let mut st = self.st.borrow_mut();
@@ -195,7 +229,8 @@ impl Engine {
     }
 
     /// Shows diagram `i` over the view from CSS `top`, `height` tall, drawn again to fill it as GitHub's
-    /// expanded view does: 16 px padding, the full width, centered. Returns the old box and the new one.
+    /// expanded view does: 16 px padding, the full width, centered. A zoomed diagram shows the part in its frame,
+    /// as pele's zoomed view box did. Returns the old box and the new one.
     pub fn expand(&self, i: usize, top: f64, height: f64) -> Vec<R> {
         let mut out = self.collapse();
         let mut st = self.st.borrow_mut();
@@ -206,15 +241,82 @@ impl Engine {
         let h = (height as f32 * s).min(st.page.h - y).max(0.0);
         let pad = 16.0 * s;
         let (aw, ah) = (st.page.w - 2.0 * pad, h - 2.0 * pad);
-        // The page's copy is at its zoom, so this undoes that to find the size at scale 1.
-        let z = st.zoom.get(&i).copied().unwrap_or(1.0);
-        let (w1, h1) = (d.bmp.w as f32 / (s * z), d.bmp.h as f32 / (s * z));
-        let fit = (aw / w1).min(ah / h1).max(0.01);
-        let Some(bmp) = crate::native::mermaid::render(&d.src, &st.th, aw / s, fit) else { return out };
+        let size = d.tree.size();
+        let (x0, y0, w1, h1) = match (st.views.get(&i), &d.zoom) {
+            (Some(v), Some(zb)) => (v.x, v.y, zb.frame.2 / v.z, zb.frame.3 / v.z),
+            _ => (0.0, 0.0, size.width(), size.height()),
+        };
+        let z = (aw / w1).min(ah / h1).max(0.01);
+        let Some(bmp) = render_view(&d.tree, (w1 * z).round() as u32, (h1 * z).round() as u32, z, x0, y0) else { return out };
         let (bw, bh) = (bmp.w as f32, bmp.h as f32);
         st.ov.expanded = Some(Expanded { y, h, x: (st.page.w - bw) / 2.0, top: y + (h - bh) / 2.0, bmp: std::rc::Rc::new(bmp) });
         out.push(self.css((0.0, y, st.page.w, h)));
         out
+    }
+
+    /// Draws diagram `i` at its view, or at the fit size without one, and places its zoom bar. Returns its frame.
+    fn show(&self, st: &mut St, i: usize) -> Option<R> {
+        let d = st.page.diagrams.get(i)?;
+        let zb = d.zoom.as_ref()?;
+        let frame = zb.frame;
+        let max = d.fit.max(3.0 * self.scale.get() as f32);
+        let view = st.views.get(&i).copied();
+        let (rect, bmp) = match view {
+            Some(v) => (frame, std::rc::Rc::new(render_view(&d.tree, frame.2.round() as u32, frame.3.round() as u32, v.z, v.x, v.y)?)),
+            None => (d.rect, d.bmp.clone()),
+        };
+        let it = &mut st.page.items[d.item];
+        (it.x, it.y, it.w, it.h) = rect;
+        it.k = Kind::Img(bmp);
+        place_bar(&mut st.page, i, view.map(|v| (v.z, max)));
+        Some(self.css(frame))
+    }
+
+    /// Zooms diagram `i` to `z` device pixels per SVG unit. Pele's limits: from the fit size, where the view goes, to three CSS pixels per unit.
+    fn zoom_to(&self, st: &mut St, i: usize, z: f32) -> Option<R> {
+        let d = st.page.diagrams.get(i)?;
+        let frame = d.zoom.as_ref()?.frame;
+        let (fit, size) = (d.fit, d.tree.size());
+        let z = z.min(fit.max(3.0 * self.scale.get() as f32));
+        if z <= fit * 1.001 {
+            st.views.remove(&i);
+            return self.show(st, i);
+        }
+        let old = st.views.get(&i).copied().unwrap_or(View { fit, z: fit, x: 0.0, y: 0.0 });
+        // A zoom from the fit size keeps the diagram's top center in place, so a short, wide diagram keeps its top
+        // row in view (pele kept its center, which cut the top off). A later zoom keeps the frame's center.
+        let (ax, ay) = if st.views.contains_key(&i) { (frame.2 / 2.0, frame.3 / 2.0) } else { (d.rect.2 / 2.0, 0.0) };
+        let (cx, cy) = (old.x + ax / old.z, old.y + ay / old.z);
+        let x = clamp_view(cx - ax / z, frame.2 / z, size.width());
+        let y = clamp_view(cy - ay / z, frame.3 / z, size.height());
+        st.views.insert(i, View { fit, z, x, y });
+        self.show(st, i)
+    }
+
+    /// Moves zoomed diagram `i` by device pixels, as a drag does. Returns its frame when it moved.
+    fn pan_by(&self, st: &mut St, i: usize, dx: f32, dy: f32) -> Option<R> {
+        let (d, v) = (st.page.diagrams.get(i)?, st.views.get(&i).copied()?);
+        let (zb, size) = (d.zoom.as_ref()?, d.tree.size());
+        let x = clamp_view(v.x - dx / v.z, zb.frame.2 / v.z, size.width());
+        let y = clamp_view(v.y - dy / v.z, zb.frame.3 / v.z, size.height());
+        if (x - v.x).abs() < 1e-3 && (y - v.y).abs() < 1e-3 {
+            return None;
+        }
+        st.views.insert(i, View { x, y, ..v });
+        self.show(st, i)
+    }
+
+    /// The zoomed diagram whose frame holds the point, off its buttons.
+    fn zoomed_at(st: &St, x: f32, y: f32) -> Option<usize> {
+        if st.page.buttons.iter().any(|b| b.hit(x, y)) {
+            return None;
+        }
+        st.views.keys().copied().find(|&i| {
+            st.page.diagrams[i].zoom.as_ref().is_some_and(|z| {
+                let f = z.frame;
+                x >= f.0 && x <= f.0 + f.2 && y >= f.1 && y <= f.1 + f.3
+            })
+        })
     }
 
     /// Closes the expanded diagram. Returns the box it covered.
@@ -300,7 +402,7 @@ impl Engine {
         let st = &mut *st;
         let (x, y) = (self.px(x), self.px(y));
         let shape = pointer(st, x, y);
-        let hb = st.page.buttons.iter().position(|b| x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+        let hb = st.page.buttons.iter().position(|b| b.hit(x, y));
         let mut rects = vec![];
         if hb != st.ov.hover_btn {
             for b in [st.ov.hover_btn, hb].into_iter().flatten() {
@@ -364,22 +466,29 @@ impl Engine {
         self.st.borrow().pending
     }
 
-    /// Lays out again as remote images arrive. True once none is loading.
-    pub fn images_done(&self) -> bool {
+    /// Lays out again if remote images arrived. True when it did, so the caller measures the new page.
+    pub fn take_images(&self) -> bool {
         let mut st = self.st.borrow_mut();
-        if st.images.poll() {
+        let changed = st.images.poll();
+        if changed {
             self.relayout(&mut st);
         }
         st.pending = st.images.loading();
-        st.pending == 0
+        changed
     }
 
+    /// Takes hold of a wide block's scroll bar, or of a zoomed diagram to pan it, as pele's drag does.
     pub fn code_grab(&self, x: f64, y: f64, slack: f64) -> Option<Vec<R>> {
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
         let s = self.scale.get() as f32;
         st.held = None;
+        st.pan = None;
         let (x, y, slack) = (self.px(x), self.px(y), self.px(slack));
+        if let Some(i) = Self::zoomed_at(st, x, y) {
+            st.pan = Some((i, x, y));
+            return Some(vec![]);
+        }
         let i = st.page.hscroll.iter().position(|h| h.max > 0.0 && x >= h.x && x <= h.x + h.w && y + slack >= h.bar_y && y - slack <= h.bar_y + 6.0 * s)?;
         st.held = Some(i);
         // A press on the thumb holds it where it is. A press on the track centers the thumb there first.
@@ -389,22 +498,33 @@ impl Engine {
         Some(vec![self.region(st, i)])
     }
 
-    pub fn code_drag(&self, x: f64) -> Vec<R> {
+    pub fn code_drag(&self, x: f64, y: f64) -> Vec<R> {
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
+        let (x, y) = (self.px(x), self.px(y));
+        if let Some((i, px, py)) = st.pan {
+            st.pan = Some((i, x, y));
+            return self.pan_by(st, i, x - px, y - py).into_iter().collect();
+        }
         let Some(i) = st.held else { return vec![] };
-        self.bar_set(st, i, self.px(x) - st.grip);
+        self.bar_set(st, i, x - st.grip);
         vec![self.region(st, i)]
     }
 
     pub fn code_release(&self) {
-        self.st.borrow_mut().held = None;
+        let mut st = self.st.borrow_mut();
+        st.held = None;
+        st.pan = None;
     }
 
+    /// Scrolls the wide block under the point sideways, or pans the zoomed diagram there.
     pub fn code_scroll(&self, x: f64, y: f64, d: f64) -> Vec<R> {
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
         let (x, y, d) = (self.px(x), self.px(y), self.px(d));
+        if let Some(i) = Self::zoomed_at(st, x, y) {
+            return self.pan_by(st, i, -d, 0.0).into_iter().collect();
+        }
         let hit = st.page.hscroll.iter().position(|h| h.max > 0.0 && x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h);
         hit.filter(|&i| self.shift(st, i, d)).map(|i| vec![self.region(st, i)]).unwrap_or_default()
     }
@@ -427,16 +547,15 @@ impl Engine {
         out
     }
 
-    /// The wide blocks' sideways offsets, as JSON for `code_restore`.
-    pub fn code_positions(&self) -> String {
-        json!(self.st.borrow().ov.hoff).to_string()
+    /// The wide blocks' sideways offsets in layout pixels, in page order, for `code_restore`.
+    pub fn code_positions(&self) -> Vec<f32> {
+        self.st.borrow().ov.hoff.clone()
     }
 
-    pub fn code_restore(&self, saved: &str) {
+    pub fn code_restore(&self, saved: &[f32]) {
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
-        let saved: Vec<f32> = serde_json::from_str(saved).unwrap_or_default();
-        for (i, v) in saved.into_iter().enumerate() {
+        for (i, &v) in saved.iter().enumerate() {
             if let (Some(o), Some(h)) = (st.ov.hoff.get_mut(i), st.page.hscroll.get(i)) {
                 *o = v.min(h.max);
             }
@@ -454,7 +573,7 @@ impl Engine {
         let mut st = self.st.borrow_mut();
         let st = &mut *st;
         let (x, y) = (self.px(x), self.px(y));
-        if let Some(b) = st.page.buttons.iter().position(|b| x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+        if let Some(b) = st.page.buttons.iter().position(|b| b.hit(x, y)) {
             let (kind, data) = (st.page.buttons[b].kind, st.page.buttons[b].data);
             return match kind {
                 BtnKind::CopyCode | BtnKind::CopyDiagram => {
@@ -467,16 +586,14 @@ impl Engine {
                     Press::Copy { text: st.page.copies.get(data).cloned().unwrap_or_default(), rects, label: label.into() }
                 }
                 BtnKind::Expand => Press::Expand(data),
-                BtnKind::ZoomIn => {
-                    let z = st.zoom.get(&data).copied().unwrap_or(1.0);
-                    st.zoom.insert(data, (z * 1.25).min(4.0));
-                    self.relayout(st);
-                    Press::Other
-                }
-                BtnKind::ZoomReset => {
-                    st.zoom.remove(&data);
-                    self.relayout(st);
-                    Press::Other
+                BtnKind::ZoomIn | BtnKind::ZoomOut | BtnKind::ZoomReset => {
+                    let now = st.views.get(&data).map_or_else(|| st.page.diagrams[data].fit, |v| v.z);
+                    let z = match kind {
+                        BtnKind::ZoomIn => now * ZOOM_STEP,
+                        BtnKind::ZoomOut => now / ZOOM_STEP,
+                        _ => 0.0,
+                    };
+                    Press::Redraw(self.zoom_to(st, data, z).into_iter().collect())
                 }
             };
         }
@@ -556,7 +673,7 @@ fn link_at(st: &St, x: f32, y: f32) -> Option<u32> {
 fn pointer(st: &St, x: f32, y: f32) -> Pointer {
     let p = &st.page;
     let on = |bx: f32, by: f32, bw: f32, bh: f32| x >= bx && x <= bx + bw && y >= by && y <= by + bh;
-    if p.buttons.iter().any(|b| on(b.x, b.y, b.w, b.h)) || link_at(st, x, y).is_some() || p.toggles.iter().any(|t| on(t.0, t.1, t.2, t.3)) {
+    if p.buttons.iter().any(|b| b.hit(x, y)) || link_at(st, x, y).is_some() || p.toggles.iter().any(|t| on(t.0, t.1, t.2, t.3)) {
         return Pointer::Hand;
     }
     for &(_, _, it) in &st.runs {
@@ -583,7 +700,7 @@ fn build_runs(page: &Page) -> Vec<(usize, usize, u32)> {
 }
 
 fn match_rects(st: &mut St, a: usize, b: usize) -> Vec<(f32, f32, f32, f32, u16)> {
-    let mut out = vec![];
+    let mut out: Vec<(f32, f32, f32, f32, u16)> = vec![];
     let start = st.runs.partition_point(|r| r.0 + r.1 <= a);
     for ri in start..st.runs.len() {
         let (tx, len, it) = st.runs[ri];
@@ -598,7 +715,21 @@ fn match_rects(st: &mut St, a: usize, b: usize) -> Vec<(f32, f32, f32, f32, u16)
         }
         let x0 = st.fonts.char_x(*f, s, ls);
         let x1 = st.fonts.char_x(*f, s, le);
-        out.push((item.x + x0, item.y, x1 - x0, item.h, item.clip));
+        let (x, w) = (item.x + x0, x1 - x0);
+        // Words are separate items: join a word to the one before it on the same line, so the space between
+        // them highlights too. Inline code sits a little lower and shorter, so the line test compares centers
+        // and the join takes both boxes. A gap wider than a line is tall (between table cells) stays a gap.
+        if let Some(p) = out.last_mut()
+            && p.4 == item.clip
+            && ((p.1 + p.3 / 2.0) - (item.y + item.h / 2.0)).abs() < p.3.min(item.h) / 2.0
+            && x >= p.0 + p.2
+            && x - (p.0 + p.2) < p.3.max(item.h)
+        {
+            let (top, bottom) = (p.1.min(item.y), (p.1 + p.3).max(item.y + item.h));
+            *p = (p.0, top, x + w - p.0, bottom - top, p.4);
+            continue;
+        }
+        out.push((x, item.y, w, item.h, item.clip));
     }
     out
 }

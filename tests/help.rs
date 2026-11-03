@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 /// The terminal's answer to the viewer's probe, for a cell `(width, height)` device pixels big.
@@ -12,12 +12,44 @@ fn probe_reply((w, h): (u16, u16)) -> Vec<u8> {
     format!("\x1b]11;rgb:0a0a/0a0a/0f0f\x1b\\\x1b[6;{h};{w}t\x1bP>|libghostty\x1b\\\x1b[?2026;2$y\x1b_Gi=4001;OK\x1b\\\x1b[?62;22c").into_bytes()
 }
 
+/// How long a test waits on the viewer before it fails. Waits end as soon as their condition holds, so a passing run
+/// never waits this long. It is long because a loaded machine (a parallel build, other test binaries) can make a step
+/// that takes 50 ms take seconds.
+const LIMIT: Duration = Duration::from_secs(30);
+
+/// How many viewers run at once, out of `(running, wake)`. Each renders on several threads, so all of them at once
+/// on a loaded machine starve each other and the waits above run out.
+static SLOTS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+/// A place among the viewers that may run at once, held until the viewer's terminal closes.
+struct Slot;
+
+impl Slot {
+    fn take() -> Slot {
+        let max = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).max(2));
+        let (count, wake) = &SLOTS;
+        // A viewer that a failed test left running never gives its place back, so a wait this long goes ahead anyway.
+        let (mut n, _) = wake.wait_timeout_while(count.lock().unwrap_or_else(std::sync::PoisonError::into_inner), LIMIT, |n| *n >= max).unwrap_or_else(std::sync::PoisonError::into_inner);
+        *n += 1;
+        Slot
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        let (count, wake) = &SLOTS;
+        let mut n = count.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *n = n.saturating_sub(1);
+        wake.notify_one();
+    }
+}
+
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
 fn wait_for(out: &Mutex<Vec<u8>>, from: usize, needle: &[u8]) -> usize {
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + LIMIT;
     loop {
         if let Some(i) = find(&out.lock().unwrap()[from..], needle) {
             return from + i;
@@ -86,12 +118,15 @@ fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::
             Ok(())
         });
     }
+    let slot = Slot::take();
     let child = cmd.spawn().unwrap();
     // SAFETY: openpty returned a new fd that nothing else owns.
     let tty = unsafe { std::fs::File::from_raw_fd(master) };
     let out = Arc::new(Mutex::new(Vec::new()));
     let (reader, mut writer, seen) = (tty.try_clone().unwrap(), tty.try_clone().unwrap(), out.clone());
     std::thread::spawn(move || {
+        // The read fails once the viewer and everything it started have closed the terminal.
+        let _slot = slot;
         let mut reader = reader;
         let mut buf = vec![0; 1 << 16];
         let mut answered = false;
@@ -182,7 +217,7 @@ fn zellij_and_warp_are_refused() {
     for (env, why) in [(("ZELLIJ", "0"), "zellij"), (("TERM_PROGRAM", "WarpTerminal"), "Warp")] {
         let Viewer { mut child, out, .. } = open(GFM, 80, &[env]);
         wait_for(&out, 0, why.as_bytes());
-        let exit = exits_within(&mut child, Duration::from_secs(5));
+        let exit = exits_within(&mut child, LIMIT);
         let _ = child.kill();
         assert_eq!(exit, Some(false), "{why} wasn't refused");
         assert!(find(&out.lock().unwrap(), b"a=p,").is_none(), "{why} got a page");
@@ -203,7 +238,7 @@ fn ctrl_c_in_the_editor_keeps_the_viewer() {
     assert!(exits_within(&mut child, Duration::from_millis(1500)).is_none(), "Ctrl-C in the editor quit the viewer");
     wait_for(&out, after, b"a=p,");
     tty.write_all(b"q").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     assert_eq!(quit, Some(true));
 }
@@ -213,7 +248,7 @@ fn sigint_outside_the_editor_quits() {
     let Viewer { mut child, out, .. } = open(GFM, 80, &[]);
     wait_for(&out, 0, b"a=p,");
     signal(child.id().cast_signed(), libc::SIGINT);
-    let exit = exits_within(&mut child, Duration::from_secs(5));
+    let exit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     assert!(exit.is_some(), "SIGINT didn't quit the viewer");
 }
@@ -234,13 +269,13 @@ fn a_save_during_startup_is_shown() {
     wait_for(&out, 0, b"\x1b[c");
     std::fs::write(&file, "# Two\n").unwrap();
     wait_for(&out, 0, b"a=p,");
-    let end = Instant::now() + Duration::from_secs(3);
+    let end = Instant::now() + LIMIT;
     while find(&out.lock().unwrap(), b"Reloaded").is_none() && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(50));
     }
     let reloaded = find(&out.lock().unwrap(), b"Reloaded").is_some();
     tty.write_all(b"q").unwrap();
-    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = exits_within(&mut child, LIMIT);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(reloaded, "the save made before the watcher started was never shown");
 }
@@ -260,7 +295,7 @@ fn contents_toggle_keeps_the_loaded_version_without_live_reload() {
     wait_for(&out, before, b"Alpha two");
     let beta = find(&out.lock().unwrap()[before..], b"Beta").is_some();
     tty.write_all(b"q").unwrap();
-    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = exits_within(&mut child, LIMIT);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!beta, "t read the file from disk with live_reload off");
 }
@@ -279,20 +314,20 @@ fn an_image_that_never_loads_does_not_stall_the_page() {
     wait_for(&out, 0, b"a=p,");
     let before = out.lock().unwrap().len();
     tty.write_all(b"t").unwrap();
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + LIMIT;
     while find(&out.lock().unwrap()[before..], b"Alpha two").is_none() && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(50));
     }
     let kept = find(&out.lock().unwrap()[before..], b"Alpha two").is_some();
     tty.write_all(b"q").unwrap();
-    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = exits_within(&mut child, LIMIT);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(kept, "the table of contents lost the headings after the image");
 }
 
 /// The last `top=` the viewer traced after the line that contains `after`, once one is there.
 fn top_after(trace: &std::path::Path, after: &str) -> String {
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + LIMIT;
     loop {
         let log = std::fs::read_to_string(trace).unwrap_or_default();
         if let Some(i) = log.rfind(after)
@@ -325,7 +360,7 @@ fn backspace_after_a_resize_returns_to_the_same_text() {
     tty.write_all(b"\x7f").unwrap();
     let back = top_after(&trace, "key Backspace");
     tty.write_all(b"q").unwrap();
-    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = exits_within(&mut child, LIMIT);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!before.is_empty());
     assert_eq!(back, before, "Backspace went to another place after a resize re-wrapped the page");
@@ -346,7 +381,7 @@ fn hints_work_while_help_shows() {
     click(&mut tty, 55);
     std::thread::sleep(Duration::from_millis(400));
     click(&mut tty, 55);
-    let quit = exits_within(&mut child, Duration::from_secs(5)) == Some(true);
+    let quit = exits_within(&mut child, LIMIT) == Some(true);
     let _ = child.kill();
     assert!(!placed, "j scrolled the page under the help screen");
     assert!(quit, "two clicks on the q hint did not quit");
@@ -370,19 +405,32 @@ fn closing_help_sends_the_page_again() {
     assert!(sent.is_some_and(|s| s < place), "image {id} was placed after help closed but not sent again");
 }
 
-/// Waits for the page to be placed again after `before`, and says whether the screen was cleared on the way.
 /// Waits until `trace` holds `mark`, so a test acts on what the viewer has done rather than on a guess of how long it takes.
 fn wait_trace(trace: &std::path::Path, mark: &str) {
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + LIMIT;
     while !std::fs::read_to_string(trace).unwrap_or_default().contains(mark) {
         assert!(Instant::now() < end, "no {mark:?} in the trace");
         std::thread::sleep(Duration::from_millis(20));
     }
 }
 
-fn cleared_before_placing(out: &Mutex<Vec<u8>>, before: usize) -> bool {
-    let place = wait_for(out, before, b"a=p,");
-    find(&out.lock().unwrap()[before..place], b"\x1b[2J").is_some()
+/// Waits for a frame that clears the screen and then places the page, after `before`. The tiles the viewer prefetches
+/// while idle can be placed before the frame, so the first placement doesn't tell.
+fn cleared_then_placed(out: &Mutex<Vec<u8>>, before: usize) -> bool {
+    let end = Instant::now() + LIMIT;
+    loop {
+        let o = out.lock().unwrap();
+        if let Some(c) = find(&o[before..], b"\x1b[2J")
+            && find(&o[before + c..], b"a=p,").is_some()
+        {
+            return true;
+        }
+        if Instant::now() > end {
+            return false;
+        }
+        drop(o);
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
@@ -394,7 +442,7 @@ fn closing_the_contents_clears_its_text() {
     std::thread::sleep(Duration::from_millis(1500));
     let closed = out.lock().unwrap().len();
     tty.write_all(b"t").unwrap();
-    let cleared = cleared_before_placing(&out, closed);
+    let cleared = cleared_then_placed(&out, closed);
     tty.write_all(b"q").unwrap();
     let _ = child.wait();
     assert!(cleared, "the sidebar's text stayed on screen under the wider page");
@@ -409,23 +457,8 @@ fn a_resize_clears_the_old_status_row() {
     let before = out.lock().unwrap().len();
     let size = libc::winsize { ws_row: 30, ws_col: 90, ws_xpixel: 90 * 18, ws_ypixel: 30 * 38 };
     resize(&tty, size);
-    // The tiles the viewer prefetches while idle can go out between the read above and the resize, so this
-    // waits for the resize's frame: a clear, then a placement.
     wait_trace(&trace, "mark resize");
-    let end = Instant::now() + Duration::from_secs(10);
-    let cleared = loop {
-        let o = out.lock().unwrap();
-        if let Some(c) = find(&o[before..], b"\x1b[2J")
-            && find(&o[before + c..], b"a=p,").is_some()
-        {
-            break true;
-        }
-        if Instant::now() > end {
-            break false;
-        }
-        drop(o);
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let cleared = cleared_then_placed(&out, before);
     let mut tty = tty;
     tty.write_all(b"q").unwrap();
     let _ = child.wait();
@@ -478,7 +511,7 @@ fn help_follows_an_appearance_change() {
     let keys = wait_for(&out, before, b"mddog keys");
     let dark = find(&out.lock().unwrap()[before..keys], b"\x1b[0m\x1b[48;2;28;28;28m\x1b[2J").is_some();
     tty.write_all(b"q").unwrap();
-    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     drop(mac);
     let _ = std::fs::remove_dir_all(&dir);
@@ -514,7 +547,7 @@ fn suspends_and_resumes(key: &[u8]) {
     tty.write_all(key).unwrap();
     let left = wait_for(&out, 0, b"\x1b[?1049l");
     assert!(find(&out.lock().unwrap()[start..left], b"\x1b[<1u").is_some(), "the keyboard flags stayed pushed in the shell");
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + LIMIT;
     let mut st = 0;
     // SAFETY: st is a valid out-pointer for the status.
     while unsafe { libc::waitpid(pid, &mut st, libc::WUNTRACED | libc::WNOHANG) } == 0 && Instant::now() < end {
@@ -527,7 +560,7 @@ fn suspends_and_resumes(key: &[u8]) {
     wait_for(&out, back, b"\x1b[>1u");
     wait_for(&out, back, b"a=p,");
     tty.write_all(b"q").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     assert!(stopped, "Ctrl-Z did not stop the viewer");
     assert!(!early, "the viewer came back before SIGCONT");
@@ -557,7 +590,7 @@ fn bare_mdd_lists_files_and_opens_one() {
     tty.write_all(b"\x7f").unwrap();
     wait_for(&out, alpha, b" beta.md ");
     tty.write_all(b"q").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(list < probe, "the list waited for the terminal probe");
@@ -610,7 +643,7 @@ fn a_pixel_click_in_the_list_follows_a_font_size_change() {
     tty.write_all(format!("\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m").as_bytes()).unwrap();
     let opened = wait_for(&out, before, b"a=p,");
     // The status row names the file that opened.
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + LIMIT;
     let named = loop {
         let o = out.lock().unwrap();
         if let Some(i) = (0..6).find(|i| find(&o[opened..], format!(" f{i}.md ").as_bytes()).is_some()) {
@@ -624,7 +657,7 @@ fn a_pixel_click_in_the_list_follows_a_font_size_change() {
     };
     let f2 = named == Some(2);
     tty.write_all(b"q").unwrap();
-    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = exits_within(&mut child, LIMIT);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(f2, "the click opened another file: {:?}", String::from_utf8_lossy(&out.lock().unwrap()[opened..]).chars().filter(|c| c.is_ascii_graphic() || *c == ' ').collect::<String>().get(..400));
 }
@@ -645,13 +678,13 @@ fn esc_in_the_startup_list_quits_and_in_a_file_goes_back() {
     wait_for(&out, list, b"a=p,");
     let alive = exits_within(&mut child, Duration::from_millis(500)).is_none();
     tty.write_all(b"q").unwrap();
-    let first = exits_within(&mut child, Duration::from_secs(5));
+    let first = exits_within(&mut child, LIMIT);
     let Viewer { mut child, mut tty, out } = start(&[dir.to_str().unwrap()], None, 80, &[], false);
     wait_for(&out, 0, b"A title");
     wait_for(&out, 0, b"\x1b[c");
     std::thread::sleep(Duration::from_millis(300));
     tty.write_all(b"\x1b").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(alive, "Esc in a list opened from a file quit");
@@ -709,12 +742,12 @@ fn tiles_line_up_at_an_odd_cell_height() {
         let dump = dir.join(format!("tiles-{h}"));
         std::fs::create_dir_all(&dump).unwrap();
         let mut v = start_exe(env!("CARGO_BIN_EXE_mdd").as_ref(), &[md.to_str().unwrap()], None, 108, (22, h), &[("XDG_CONFIG_HOME", &cfg), ("MDDOG_DUMP_TILES", dump.to_str().unwrap())], false);
-        let end = Instant::now() + Duration::from_secs(10);
+        let end = Instant::now() + LIMIT;
         while stitched(&dump).len() < 3000 && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(100));
         }
         v.tty.write_all(b"q").unwrap();
-        let _ = exits_within(&mut v.child, Duration::from_secs(5));
+        let _ = exits_within(&mut v.child, LIMIT);
         let _ = v.child.kill();
         // 108 columns of 22 px make 19-row tiles, so at 43 px every other tile starts on an odd device pixel.
         let odd = std::fs::read_dir(&dump).unwrap().any(|e| e.unwrap().path().file_stem().and_then(|s| s.to_str()?.rsplit_once('-')?.1.parse::<u32>().ok()).is_some_and(|top| top % 2 == 1));
@@ -728,9 +761,9 @@ fn tiles_line_up_at_an_odd_cell_height() {
     assert_eq!(first, None, "the tiles differ from page row {first:?} on");
 }
 
-/// Sends `mouse` with `copy_on_select` set to `on`. Returns the text of each
-/// OSC 52 copy the viewer wrote, and what it sent to a stand-in pbcopy.
-fn mouse_copies(on: bool, mouse: &[u8]) -> (Vec<String>, String) {
+/// Sends `mouse` with `copy_on_select` set to `on`, and waits for a copy when `copies` says one should come. Returns
+/// the text of each OSC 52 copy the viewer wrote, and what it sent to a stand-in pbcopy.
+fn mouse_copies(on: bool, mouse: &[u8], copies: bool) -> (Vec<String>, String) {
     let dir = scratch(&format!("select-{on}-{}", mouse.len()));
     std::fs::write(dir.join("mddog/config.toml"), format!("copy_on_select = {on}\n")).unwrap();
     let bin = dir.join("bin");
@@ -745,11 +778,17 @@ fn mouse_copies(on: bool, mouse: &[u8]) -> (Vec<String>, String) {
     wait_for(&out, 0, b"a=p,");
     let before = out.lock().unwrap().len();
     tty.write_all(mouse).unwrap();
-    std::thread::sleep(Duration::from_millis(800));
+    let clip = dir.join("clip");
+    // A copy writes OSC 52 and starts pbcopy on a thread, and a quit can come before pbcopy has run, so this waits
+    // on both. With no copy coming, the wait is a fixed window for a wrong one to show up in.
+    let end = Instant::now() + if copies { LIMIT } else { Duration::from_millis(800) };
+    while !(find(&out.lock().unwrap()[before..], b"\x1b]52;c;").is_some() && std::fs::metadata(&clip).is_ok_and(|m| m.len() > 0)) && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
     tty.write_all(b"q").unwrap();
-    let _ = exits_within(&mut child, Duration::from_secs(5));
+    let _ = exits_within(&mut child, LIMIT);
     let _ = child.kill();
-    let clip = std::fs::read_to_string(dir.join("clip")).unwrap_or_default();
+    let clip = std::fs::read_to_string(clip).unwrap_or_default();
     let _ = std::fs::remove_dir_all(&dir);
     let all = out.lock().unwrap()[before..].to_vec();
     let copies = String::from_utf8_lossy(&all)
@@ -769,16 +808,16 @@ const DRAG: &[u8] = b"\x1b[<0;2;1M\x1b[<32;40;3M\x1b[<32;79;6M\x1b[<0;79;6m";
 
 #[test]
 fn copy_on_select_copies_a_drag() {
-    let (copies, clip) = mouse_copies(true, DRAG);
+    let (copies, clip) = mouse_copies(true, DRAG, true);
     assert_eq!(copies.len(), 1, "{copies:?}");
     assert!(copies[0].contains("alpha beta gamma") && copies[0].contains("delta epsilon zeta"), "{copies:?}");
     assert_eq!(clip, copies[0], "pbcopy and OSC 52 got different text");
-    assert_eq!(mouse_copies(false, DRAG), (vec![], String::new()), "a drag copied with copy_on_select off");
+    assert_eq!(mouse_copies(false, DRAG, false), (vec![], String::new()), "a drag copied with copy_on_select off");
 }
 
 #[test]
 fn copy_on_select_copies_a_double_clicked_word() {
-    let (copies, clip) = mouse_copies(true, b"\x1b[<0;10;2M\x1b[<0;10;2m\x1b[<0;10;2M\x1b[<0;10;2m");
+    let (copies, clip) = mouse_copies(true, b"\x1b[<0;10;2M\x1b[<0;10;2m\x1b[<0;10;2M\x1b[<0;10;2m", true);
     assert_eq!(copies, ["beta"], "{copies:?}");
     assert_eq!(clip, "beta");
 }
@@ -787,11 +826,11 @@ const CMD_C: &[u8] = b"\x1b[99;9u";
 
 #[test]
 fn cmd_c_copies_the_selection() {
-    let (copies, clip) = mouse_copies(false, &[DRAG, CMD_C].concat());
+    let (copies, clip) = mouse_copies(false, &[DRAG, CMD_C].concat(), true);
     assert_eq!(copies.len(), 1, "{copies:?}");
     assert!(copies[0].contains("alpha beta gamma") && copies[0].contains("delta epsilon zeta"), "{copies:?}");
     assert_eq!(clip, copies[0], "pbcopy and OSC 52 got different text");
-    assert_eq!(mouse_copies(false, CMD_C), (vec![], String::new()), "Cmd-C copied with nothing selected");
+    assert_eq!(mouse_copies(false, CMD_C, false), (vec![], String::new()), "Cmd-C copied with nothing selected");
 }
 
 #[test]
@@ -802,7 +841,7 @@ fn kitty_ctrl_c_quits_and_pops_the_keyboard_flags() {
     wait_for(&out, 0, b"a=p,");
     let start = out.lock().unwrap().len();
     tty.write_all(b"\x1b[99;5u").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     assert_eq!(quit, Some(true), "Ctrl-C as CSI 99;5u did not quit");
     let tail = out.lock().unwrap()[start..].to_vec();
@@ -833,7 +872,7 @@ fn the_pointer_shape_follows_the_mouse() {
     tty.write_all(b"\x10").unwrap();
     let list = wait_for(&out, back, b"\x1b]22;left_ptr\x1b\\");
     tty.write_all(b"\x1b[<35;40;4M\x1bq").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
     let first = out.lock().unwrap()[drawn..help].to_vec();
@@ -852,7 +891,7 @@ fn a_wheel_before_any_move_sets_the_pointer_shape() {
     tty.write_all(b"\x1b[<65;40;4M").unwrap();
     wait_for(&out, drawn, b"\x1b]22;xterm\x1b\\");
     tty.write_all(b"q").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(quit, Some(true));
@@ -870,7 +909,7 @@ fn a_file_opened_by_a_click_hit_tests_the_still_pointer() {
     let shown = wait_for(&out, list, b"a=p,");
     wait_for(&out, shown, b"\x1b]22;xterm\x1b\\");
     tty.write_all(b"q").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(quit, Some(true));
@@ -895,7 +934,7 @@ fn buttons_show_the_hand() {
         at = wait_for(&out, at, b"\x1b]22;pointer\x1b\\");
     }
     tty.write_all(b"q").unwrap();
-    let quit = exits_within(&mut child, Duration::from_secs(5));
+    let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(quit, Some(true));

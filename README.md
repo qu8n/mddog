@@ -99,7 +99,9 @@ Note: Claude Code only shows images in the terminals it knows, like Ghostty, kit
 
 Configure your mddog at `~/.config/mddog/config.toml`, or `$XDG_CONFIG_HOME/mddog/config.toml` when that is set. See [`config.example.toml`](config.example.toml) for every option.
 
-Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`. By default mddog uses the GitHub pair and follows the macOS appearance. The Obsidian themes restyle the whole page like Obsidian's reading view and draw Mermaid diagrams the way Obsidian does. A theme is a token file that sets colors, fonts and sizes. `style.css` and themes written in arbitrary CSS are no longer read. To write your own theme, see [docs/themes.md](docs/themes.md).
+Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`. By default mddog uses the GitHub pair and follows the macOS appearance. The Obsidian themes restyle the whole page like Obsidian's reading view. A theme is a token file that sets colors, fonts and sizes. `style.css` and themes written in arbitrary CSS are no longer read. To write your own theme, see [docs/themes.md](docs/themes.md).
+
+mddog draws text with font smoothing when macOS does, which it reads from `defaults -g AppleFontSmoothing` at startup (0 turns it off). Set `font_smoothing = true` or `false` to choose for mddog alone.
 
 ## Limitations
 

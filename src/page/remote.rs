@@ -2,7 +2,7 @@
 //! a redirect to a name that resolves to a private address, or a DNS answer that changes between check and connect,
 //! can't reach one.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -17,7 +17,6 @@ const PER_HOST: usize = 6;
 const MAX_BODY: u64 = 32 << 20;
 const CACHE_BYTES: usize = 64 << 20;
 const CHUNK: usize = 256 << 10;
-const BLOCK: u64 = 2 << 20;
 
 fn private_ip(ip: IpAddr) -> bool {
     match ip {
@@ -59,13 +58,6 @@ pub enum Fail {
     /// The host is private, or resolves to a private address.
     Blocked,
     Failed,
-}
-
-pub enum Event {
-    Head { status: u16, headers: Vec<(&'static str, String)> },
-    Data(Vec<u8>),
-    Done,
-    Fail(Fail),
 }
 
 type Lookup = fn(&str, u16) -> std::io::Result<Vec<SocketAddr>>;
@@ -210,33 +202,18 @@ fn work() {
 struct Entry {
     url: String,
     mime: String,
-    /// Where `body` starts in the whole resource, and the resource's length.
-    start: u64,
-    total: u64,
     body: Arc<Vec<u8>>,
     until: Instant,
 }
 
-impl Entry {
-    fn covers(&self, want: Option<(u64, Option<u64>)>) -> bool {
-        let end = self.start + self.body.len() as u64;
-        match want {
-            None => self.start == 0 && end == self.total,
-            // An open range (`bytes=a-`) takes what the block holds, as a server may answer one in parts.
-            Some((a, b)) => self.start <= a && a < end && (end == self.total || b.is_none_or(|b| b < end)),
-        }
-    }
-}
-
-/// Whole responses and blocks of media, oldest first, so a reload or a reopen in the same process skips the
-/// network, and a video's many small range requests are answered from one block.
+/// Whole responses, oldest first, so a reload or a reopen in the same process skips the network.
 static CACHE: Mutex<Vec<Arc<Entry>>> = Mutex::new(Vec::new());
 
-fn cached(url: &str, want: Option<(u64, Option<u64>)>) -> Option<Arc<Entry>> {
+fn cached(url: &str) -> Option<Arc<Entry>> {
     let mut cache = lock(&CACHE);
     let now = Instant::now();
     cache.retain(|e| e.until > now);
-    let i = cache.iter().position(|e| e.url == url && e.covers(want))?;
+    let i = cache.iter().position(|e| e.url == url)?;
     let e = cache.remove(i);
     cache.push(e.clone());
     Some(e)
@@ -258,7 +235,7 @@ fn store(entry: Arc<Entry>) {
         return;
     }
     let mut cache = lock(&CACHE);
-    cache.retain(|e| e.url != entry.url || e.start != entry.start);
+    cache.retain(|e| e.url != entry.url);
     cache.push(entry);
     let mut total: usize = cache.iter().map(|e| e.body.len()).sum();
     while total > CACHE_BYTES {
@@ -307,7 +284,7 @@ fn read_disk(dir: &Path, url: &str) -> Option<Arc<Entry>> {
     }
     let mime = head["mime"].as_str()?.to_owned();
     let body = bytes.split_off(line + 1);
-    Some(Arc::new(Entry { url: url.to_owned(), mime, start: 0, total: body.len() as u64, body: Arc::new(body), until: Instant::now() + Duration::from_secs(left) }))
+    Some(Arc::new(Entry { url: url.to_owned(), mime, body: Arc::new(body), until: Instant::now() + Duration::from_secs(left) }))
 }
 
 /// Writes through a temp file and a rename, so a reader never sees half a file.
@@ -327,121 +304,60 @@ fn write_disk(dir: &Path, e: &Entry, keep: Duration) {
     }
 }
 
-/// The first and last byte of a `Range: bytes=a-b` header, where `b` may be left out.
-fn parse_range(range: &str) -> Option<(u64, Option<u64>)> {
-    let (a, b) = range.trim().strip_prefix("bytes=")?.split_once('-')?;
-    let a = a.trim().parse().ok()?;
-    let b = if b.trim().is_empty() { None } else { Some(b.trim().parse().ok()?) };
-    b.is_none_or(|b| b >= a).then_some((a, b))
-}
-
-/// Where a `Content-Range: bytes s-e/t` body starts, and the whole length when the server gives it.
-fn parse_content_range(v: &str) -> Option<(u64, Option<u64>)> {
-    let (span, total) = v.trim().strip_prefix("bytes ")?.split_once('/')?;
-    Some((span.split_once('-')?.0.trim().parse().ok()?, total.trim().parse().ok()))
-}
-
-/// Answers the page's request from `e`: the whole body, or for a range the part of it asked for.
-fn answer(e: &Entry, want: Option<(u64, Option<u64>)>, on: &mut dyn FnMut(Event)) {
-    if let Some(m) = lock(&OUTCOMES).as_mut() {
-        m.remove(&e.url);
-    }
-    let Some((a, b)) = want else {
-        on(Event::Head { status: 200, headers: vec![("Content-Type", e.mime.clone()), ("Content-Length", e.body.len().to_string())] });
-        on(Event::Data(e.body.to_vec()));
-        return on(Event::Done);
-    };
-    let last = b.unwrap_or(u64::MAX).min(e.start + e.body.len() as u64 - 1);
-    let part = e.body[(a - e.start) as usize..=(last - e.start) as usize].to_vec();
-    let headers = vec![("Content-Type", e.mime.clone()), ("Content-Range", format!("bytes {a}-{last}/{}", e.total)), ("Content-Length", part.len().to_string()), ("Accept-Ranges", "bytes".into())];
-    on(Event::Head { status: 206, headers });
-    on(Event::Data(part));
-    on(Event::Done);
-}
-
-static OUTCOMES: Mutex<Option<HashMap<String, Fail>>> = Mutex::new(None);
-
-/// Why the last fetch of `url` failed, for the page's placeholder.
-pub fn outcome(url: &str) -> Option<Fail> {
-    lock(&OUTCOMES).as_ref()?.get(url).copied()
-}
-
-fn failed(url: &str, why: Fail) -> Event {
-    let mut outcomes = lock(&OUTCOMES);
-    let map = outcomes.get_or_insert_with(HashMap::new);
-    if map.len() > 4096 {
-        map.clear();
-    }
-    map.insert(url.to_owned(), why);
-    Event::Fail(why)
-}
-
-fn media_type(mime: &str) -> bool {
+/// Images, and the generic binary types some servers send images as. The native engine draws nothing else.
+fn image_type(mime: &str) -> bool {
     let m = mime.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
-    ["image/", "video/", "audio/"].iter().any(|p| m.starts_with(p)) || m == "application/octet-stream" || m == "binary/octet-stream"
+    m.starts_with("image/") || m == "application/octet-stream" || m == "binary/octet-stream"
 }
 
-/// Fetches `url` (http or https) and reports its response through `on`, ending with `Done` or `Fail`. Stops
-/// early, silently, once `stop` is set. `range` is the page's `Range` header, which video playback sends; it
-/// fetches a block of at least `BLOCK` bytes, so the next small ranges come from the cache.
-pub fn fetch(agent: &ureq::Agent, url: &str, range: Option<&str>, stop: &AtomicBool, on: &mut dyn FnMut(Event)) {
-    let want = range.and_then(parse_range);
+/// Fetches `url` (http or https) and returns its body. Returns `None`, early and silently, once `stop` is set.
+pub fn fetch(agent: &ureq::Agent, url: &str, stop: &AtomicBool) -> Option<Result<Arc<Vec<u8>>, Fail>> {
     let disk = (!cfg!(test)).then(disk_dir);
-    if let Some(e) = cached(url, want) {
-        return answer(&e, want, on);
+    if let Some(e) = cached(url) {
+        return Some(Ok(e.body.clone()));
     }
-    if let Some(e) = disk.as_deref().and_then(|d| read_disk(d, url)).filter(|e| e.covers(want)) {
-        answer(&e, want, on);
-        return store(e);
+    if let Some(e) = disk.as_deref().and_then(|d| read_disk(d, url)) {
+        let body = e.body.clone();
+        store(e);
+        return Some(Ok(body));
     }
     if stop.load(Ordering::Relaxed) {
-        return;
+        return None;
     }
-    let mut req = agent.get(url).header("Accept", "image/*,video/*,*/*;q=0.8");
-    if let Some((a, b)) = want {
-        let len = b.map_or(0, |b| (b - a).saturating_add(1)).clamp(BLOCK, MAX_BODY);
-        req = req.header("Range", format!("bytes={a}-{}", a.saturating_add(len - 1)));
-    }
-    let resp = match req.call() {
+    let resp = match agent.get(url).header("Accept", "image/*,*/*;q=0.8").call() {
         Ok(r) => r,
-        Err(ureq::Error::Other(e)) if e.is::<Blocked>() => return on(failed(url, Fail::Blocked)),
-        Err(_) => return on(failed(url, Fail::Failed)),
+        Err(ureq::Error::Other(e)) if e.is::<Blocked>() => return Some(Err(Fail::Blocked)),
+        Err(_) => return Some(Err(Fail::Failed)),
     };
     let header = |k: &str| resp.headers().get(k).and_then(|v| v.to_str().ok()).map(str::to_owned);
     let mime = header("content-type").unwrap_or_default();
-    if !media_type(&mime) {
-        return on(failed(url, Fail::Failed));
+    // A 206 to a GET with no Range is a part that would be cached as the whole image.
+    if resp.status().as_u16() != 200 || !image_type(&mime) {
+        return Some(Err(Fail::Failed));
     }
-    let (start, total) = if resp.status().as_u16() == 206 { header("content-range").as_deref().and_then(parse_content_range).unwrap_or((0, None)) } else { (0, None) };
-    // A part with no stated length can't be told from the whole, so it is not kept.
-    let keep = keep_for(header("cache-control").as_deref()).filter(|_| resp.status().as_u16() != 206 || total.is_some());
+    let keep = keep_for(header("cache-control").as_deref());
     let mut body = Vec::new();
     let mut reader = resp.into_body().into_with_config().limit(MAX_BODY).reader();
     let mut buf = vec![0; CHUNK];
     loop {
         if stop.load(Ordering::Relaxed) {
-            return;
+            return None;
         }
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => body.extend_from_slice(&buf[..n]),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => return on(failed(url, Fail::Failed)),
+            Err(_) => return Some(Err(Fail::Failed)),
         }
     }
-    let Some(end) = start.checked_add(body.len() as u64) else { return on(failed(url, Fail::Failed)) };
-    let total = total.unwrap_or(end);
-    let entry = Arc::new(Entry { url: url.to_owned(), mime, start, total, body: Arc::new(body), until: Instant::now() + keep.unwrap_or_default() });
-    if !entry.covers(want) {
-        return on(failed(url, Fail::Failed));
-    }
-    answer(&entry, want, on);
+    let entry = Arc::new(Entry { url: url.to_owned(), mime, body: Arc::new(body), until: Instant::now() + keep.unwrap_or_default() });
     if let Some(keep) = keep {
-        if let Some(d) = disk.as_deref().filter(|_| entry.covers(None) && entry.body.len() as u64 <= DISK_BYTES / 8) {
+        if let Some(d) = disk.as_deref().filter(|_| entry.body.len() as u64 <= DISK_BYTES / 8) {
             write_disk(d, &entry, keep);
         }
-        store(entry);
+        store(entry.clone());
     }
+    Some(Ok(entry.body.clone()))
 }
 
 #[cfg(test)]
@@ -465,22 +381,12 @@ mod tests {
     }
 
     #[test]
-    fn ranges() {
-        assert_eq!(parse_range("bytes=0-1"), Some((0, Some(1))));
-        assert_eq!(parse_range("bytes=5-"), Some((5, None)));
-        assert_eq!(parse_range("bytes=5-1"), None);
-        assert_eq!(parse_range("bytes=-5"), None);
-        assert_eq!(parse_content_range("bytes 0-1/10"), Some((0, Some(10))));
-        assert_eq!(parse_content_range("bytes 4-7/*"), Some((4, None)));
-    }
-
-    #[test]
     fn disk_cache_round_trip() {
         let dir = std::env::temp_dir().join(format!("mddog-remote-test-{}", std::process::id()));
-        let e = Entry { url: "https://x.test/a.png".into(), mime: "image/png".into(), start: 0, total: 3, body: Arc::new(b"PNG".to_vec()), until: Instant::now() };
+        let e = Entry { url: "https://x.test/a.png".into(), mime: "image/png".into(), body: Arc::new(b"PNG".to_vec()), until: Instant::now() };
         write_disk(&dir, &e, Duration::from_secs(60));
         let back = read_disk(&dir, "https://x.test/a.png").unwrap();
-        assert_eq!((back.mime.as_str(), back.body.as_slice(), back.covers(None)), ("image/png", &b"PNG"[..], true));
+        assert_eq!((back.mime.as_str(), back.body.as_slice()), ("image/png", &b"PNG"[..]));
         assert!(read_disk(&dir, "https://x.test/b.png").is_none());
         write_disk(&dir, &e, Duration::ZERO);
         assert!(read_disk(&dir, "https://x.test/a.png").is_none(), "expired");
@@ -535,19 +441,9 @@ mod tests {
         })
     }
 
-    fn get(agent: &ureq::Agent, url: &str) -> (Option<u16>, usize, Option<Fail>) {
-        get_range(agent, url, None)
-    }
-
-    fn get_range(agent: &ureq::Agent, url: &str, range: Option<&str>) -> (Option<u16>, usize, Option<Fail>) {
-        let (mut status, mut bytes, mut fail) = (None, 0, None);
-        fetch(agent, url, range, &AtomicBool::new(false), &mut |e| match e {
-            Event::Head { status: s, .. } => status = Some(s),
-            Event::Data(d) => bytes += d.len(),
-            Event::Done => {}
-            Event::Fail(f) => fail = Some(f),
-        });
-        (status, bytes, fail)
+    /// The body's length, or why the fetch failed.
+    fn get(agent: &ureq::Agent, url: &str) -> Result<usize, Fail> {
+        fetch(agent, url, &AtomicBool::new(false)).unwrap().map(|b| b.len())
     }
 
     #[test]
@@ -563,38 +459,35 @@ mod tests {
             ("/to-ip.png", Box::leak(format!("HTTP/1.1 301 Moved\r\nLocation: http://[::ffff:127.0.0.1]:{private}/secret.png\r\nContent-Length: 0\r\n\r\n").into_boxed_str())),
             ("/loop.png", "HTTP/1.1 302 Found\r\nLocation: /loop.png\r\nContent-Length: 0\r\n\r\n"),
             ("/v.mp4", "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: 10\r\n\r\n0123456789"),
+            ("/part.png", "HTTP/1.1 206 Partial Content\r\nContent-Type: image/png\r\nContent-Range: bytes 0-2/10\r\nContent-Length: 3\r\n\r\nPNG"),
+            ("/raw", "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 3\r\nCache-Control: no-store\r\n\r\nPNG"),
         ]));
-        let (port, hits) = serve(routes);
+        let (port, _) = serve(routes);
         PUBLIC.store(port, Ordering::SeqCst);
         let agent = agent_with(test_lookup, test_allow);
         let url = |host: &str, path: &str| format!("http://{host}:{port}{path}");
 
-        assert_eq!(get(&agent, &url("img.test", "/a.png")), (Some(200), 3, None));
-        assert_eq!(get(&agent, &url("img.test", "/hop.png")), (Some(200), 3, None));
+        assert_eq!(get(&agent, &url("img.test", "/a.png")), Ok(3));
+        assert_eq!(get(&agent, &url("img.test", "/hop.png")), Ok(3));
         for path in ["/to-name.png", "/to-local.png", "/to-ip.png"] {
-            assert_eq!(get(&agent, &url("img.test", path)), (None, 0, Some(Fail::Blocked)), "{path}");
-            assert_eq!(outcome(&url("img.test", path)), Some(Fail::Blocked));
+            assert_eq!(get(&agent, &url("img.test", path)), Err(Fail::Blocked), "{path}");
         }
-        assert_eq!(get(&agent, &format!("http://127.0.0.1.nip.io:{private}/secret.png")), (None, 0, Some(Fail::Blocked)));
+        assert_eq!(get(&agent, &format!("http://127.0.0.1.nip.io:{private}/secret.png")), Err(Fail::Blocked));
         assert_eq!(private_hits.load(Ordering::SeqCst), 0, "a request reached the private server");
-        assert_eq!(get(&agent, &url("img.test", "/page")), (None, 0, Some(Fail::Failed)));
-        assert_eq!(get(&agent, &url("img.test", "/loop.png")), (None, 0, Some(Fail::Failed)));
-
-        // The first range fetches a block, and the next ranges in it come from the cache.
-        let before = hits.load(Ordering::SeqCst);
-        assert_eq!(get_range(&agent, &url("img.test", "/v.mp4"), Some("bytes=0-1")), (Some(206), 2, None));
-        assert_eq!(get_range(&agent, &url("img.test", "/v.mp4"), Some("bytes=4-")), (Some(206), 6, None));
-        assert_eq!(get_range(&agent, &url("img.test", "/v.mp4"), Some("bytes=9-20")), (Some(206), 1, None));
-        assert_eq!(get_range(&agent, &url("img.test", "/v.mp4"), Some("bytes=10-11")), (None, 0, Some(Fail::Failed)));
-        assert_eq!(hits.load(Ordering::SeqCst), before + 2);
+        assert_eq!(get(&agent, &url("img.test", "/page")), Err(Fail::Failed));
+        assert_eq!(get(&agent, &url("img.test", "/loop.png")), Err(Fail::Failed));
+        // Only images are drawn, so only images, or bytes of no stated type, are read.
+        assert_eq!(get(&agent, &url("img.test", "/v.mp4")), Err(Fail::Failed));
+        assert_eq!(get(&agent, &url("img.test", "/raw")), Ok(3));
+        assert_eq!(get(&agent, &url("img.test", "/part.png")), Err(Fail::Failed));
 
         // Rebinding: the one lookup is public, and the connection goes to that address. A later lookup is
         // private, so a fresh connection is refused rather than sent to it.
         let fresh = agent_with(test_lookup, test_allow);
-        assert_eq!(get(&fresh, &format!("http://flip.test:{port}/a.png")), (Some(200), 3, None));
+        assert_eq!(get(&fresh, &format!("http://flip.test:{port}/a.png")), Ok(3));
         assert_eq!(LOOKUPS.load(Ordering::SeqCst), 1);
         let fresh = agent_with(test_lookup, test_allow);
-        assert_eq!(get(&fresh, &format!("http://flip.test:{port}/hop.png")), (None, 0, Some(Fail::Blocked)));
+        assert_eq!(get(&fresh, &format!("http://flip.test:{port}/hop.png")), Err(Fail::Blocked));
     }
 
     #[test]
@@ -621,8 +514,7 @@ mod tests {
                     let mut most = lock(&most);
                     *most = (most.0.max(now.values().sum()), most.1.max(now[&h]));
                 }
-                let mut ok = false;
-                fetch(agent, &url, None, &stop, &mut |e| ok |= matches!(e, Event::Done));
+                let ok = fetch(agent, &url, &stop).is_some_and(|r| r.is_ok());
                 *lock(&now).get_mut(&h).unwrap() -= 1;
                 tx.send(ok).unwrap();
             }));
@@ -636,10 +528,8 @@ mod tests {
     }
 
     #[test]
-    fn stop_ends_a_fetch_without_events() {
+    fn stop_ends_a_fetch_without_a_result() {
         let agent = agent_with(test_lookup, |_| true);
-        let mut events = 0;
-        fetch(&agent, "http://img.test:9/x.png", None, &AtomicBool::new(true), &mut |_| events += 1);
-        assert_eq!(events, 0);
+        assert!(fetch(&agent, "http://img.test:9/x.png", &AtomicBool::new(true)).is_none());
     }
 }

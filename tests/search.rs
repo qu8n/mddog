@@ -230,21 +230,36 @@ fn p7_copy_plain_code() {
 }
 
 const DIAGRAM: &str = "```mermaid\ngraph LR\n  A --> B\n```\n\nafter\n";
+/// Wider than a 600 px page, so it draws shrunk with a zoom bar.
+const WIDE: &str = "```mermaid\nflowchart LR\n  A[Start here] --> B[Parse the input file] --> C[Build the syntax tree] --> D[Lay out every block] --> E[Draw the tiles] --> F[Send frames to the terminal] --> G[Done and waiting]\n```\n\nafter\n";
 
-/// The diagram's buttons, right to left: copy, expand, zoom in, zoom reset.
-fn diagram_buttons(e: &Engine) -> Vec<(f64, f64)> {
-    let y = e.layout().blocks[0].top + 26.0;
+/// The buttons along row `y`, right to left: the centers of the runs of the hand pointer.
+fn buttons_at(e: &Engine, y: f64) -> Vec<(f64, f64)> {
     let mut out: Vec<(f64, f64)> = vec![];
-    let mut on = false;
-    for x in (200..600).rev().map(f64::from) {
-        let hand = e.hover(x, y).0 == Pointer::Hand;
-        if hand && !on {
-            out.push((x - 10.0, y));
+    let mut start = None;
+    for x in (0..600).rev().map(f64::from) {
+        match (e.hover(x, y).0 == Pointer::Hand, start) {
+            (true, None) => start = Some(x),
+            (false, Some(s)) => {
+                out.push((f64::midpoint(s, x), y));
+                start = None;
+            }
+            _ => {}
         }
-        on = hand;
     }
     e.hover(-1.0, -1.0);
     out
+}
+
+/// The diagram's top buttons, right to left: copy, expand.
+fn diagram_buttons(e: &Engine) -> Vec<(f64, f64)> {
+    buttons_at(e, e.layout().blocks[0].top + 25.0)
+}
+
+/// The zoom bar's buttons, right to left, that take a click: 15 px up from its bottom, 16 px above the block's end.
+fn zoom_buttons(e: &Engine) -> Vec<(f64, f64)> {
+    let b = e.layout().blocks[0];
+    buttons_at(e, b.top + b.height - 31.0)
 }
 
 #[test]
@@ -263,16 +278,159 @@ fn p6_expand_button_expands() {
 }
 
 #[test]
-fn p4_zoom_buttons_are_pointers_and_zoom() {
+fn p4_zoom_shows_only_on_a_shrunk_diagram() {
+    // A diagram that fits gets copy and expand, as pele drew it. Its block ends 16 px under the drawing.
     let e = page(DIAGRAM, 600.0);
-    let b = diagram_buttons(&e);
-    assert_eq!(b.len(), 4, "copy, expand, zoom in, zoom reset: {b:?}");
-    let before = e.layout().height;
-    assert_eq!(e.press(b[2].0, b[2].1), Press::Other);
-    assert!(e.layout().height > before, "zoom in draws the diagram bigger");
-    let b = diagram_buttons(&e);
-    assert_eq!(e.press(b[3].0, b[3].1), Press::Other);
-    assert_eq!(e.layout().height, before, "zoom reset gives back the first size");
+    assert_eq!(diagram_buttons(&e).len(), 2);
+    assert!(zoom_buttons(&e).is_empty(), "a diagram that fits has no zoom bar");
+    // A shrunk one gets a bar too. Zoom out is off at the fit size, and reset shows only once zoomed.
+    let e = page(WIDE, 600.0);
+    assert_eq!(diagram_buttons(&e).len(), 2);
+    let z = zoom_buttons(&e);
+    assert_eq!(z.len(), 1, "only zoom in takes a click at the fit size: {z:?}");
+    assert!(matches!(e.press(z[0].0, z[0].1), Press::Redraw(r) if !r.is_empty()));
+    assert_eq!(zoom_buttons(&e).len(), 3, "zoom in, zoom out and reset once zoomed");
+}
+
+#[test]
+fn p4_zoom_keeps_the_block_and_reset_gives_back_the_fit() {
+    let e = page(WIDE, 600.0);
+    let (before, block) = (pixels(&e), e.layout().blocks[0]);
+    let z = zoom_buttons(&e);
+    let Press::Redraw(r) = e.press(z[0].0, z[0].1) else { panic!("zoom in redraws in place") };
+    // The frame: the block less its 16 px padding above and below and 48 px on the right.
+    assert_eq!(r, vec![[24.0, block.top + 16.0, 504.0, block.height - 32.0]]);
+    assert_eq!(e.layout().blocks[0], block, "the block keeps its place and height");
+    let zoomed = pixels(&e);
+    assert_ne!(zoomed, before);
+    // Right to left once zoomed: zoom out, zoom in, reset. Zoom out from one step lands on the fit size.
+    let z = zoom_buttons(&e);
+    assert!(matches!(e.press(z[0].0, z[0].1), Press::Redraw(_)));
+    assert_eq!(pixels(&e), before);
+    let z = zoom_buttons(&e);
+    e.press(z[0].0, z[0].1);
+    let z = zoom_buttons(&e);
+    e.press(z[1].0, z[1].1);
+    let z = zoom_buttons(&e);
+    assert!(matches!(e.press(z[2].0, z[2].1), Press::Redraw(_)), "reset");
+    assert_eq!(pixels(&e), before);
+    assert_eq!(zoom_buttons(&e).len(), 1);
+}
+
+#[test]
+fn p4_zoom_buttons_stay_put_when_reset_shows() {
+    // Reset joins at the bar's left end, so a second click on the same spot zooms in again.
+    let e = page(WIDE, 600.0);
+    let z = zoom_buttons(&e)[0];
+    e.press(z.0, z.1);
+    let once = pixels(&e);
+    assert!(matches!(e.press(z.0, z.1), Press::Redraw(_)));
+    assert_ne!(pixels(&e), once, "the second click zooms in further");
+    let now = zoom_buttons(&e);
+    assert_eq!(now[1], z, "zoom in keeps its place");
+}
+
+#[test]
+fn p4_the_first_zoom_keeps_the_top_row() {
+    // A short, wide diagram zooms from its top center, so its top margin grows and no node is cut at the
+    // frame's top edge.
+    let src = WIDE.replace("[Done and waiting]", "[Done and waiting]\n  B --> H[Report an error]\n  B --> I[Log it]\n  B --> J[Retry later]");
+    let e = page(&src, 600.0);
+    let top = e.layout().blocks[0].top + 16.0;
+    let first = |e: &Engine| {
+        let s = e.snapshot(top, 40.0, 2.0).unwrap();
+        // All but the right 120 px, which hold the copy and expand buttons.
+        let w = s.width * 4;
+        let half = |r: usize| &s.rgba[r * w..(r + 1) * w - 960];
+        (0..s.height).find(|&r| half(r) != half(0)).unwrap_or(s.height)
+    };
+    let fit = first(&e);
+    assert!(fit > 0 && fit < 80, "the diagram starts inside the strip: {fit}");
+    let z = zoom_buttons(&e)[0];
+    e.press(z.0, z.1);
+    // Zoomed from the top, the margin above the top row grows with the zoom.
+    assert!(first(&e) > fit, "the top row moved up out of the frame: {} <= {fit}", first(&e));
+}
+
+#[test]
+fn p4_zoom_stops_at_three_times() {
+    let e = page(WIDE, 600.0);
+    let mut steps = 0;
+    // Zoom in is alone at the fit size, then second from the right until it goes off at the limit.
+    while let Some(&z) = zoom_buttons(&e).get(usize::from(steps > 0))
+        && (steps == 0 || zoom_buttons(&e).len() == 3)
+    {
+        assert!(matches!(e.press(z.0, z.1), Press::Redraw(_)));
+        steps += 1;
+        assert!(steps < 20, "zoom in never stops");
+    }
+    // From well under 1 to 3 CSS px per SVG unit at 1.5625 a step, then zoom in is off.
+    assert!(steps >= 3, "{steps}");
+    assert_eq!(zoom_buttons(&e).len(), 2, "zoom out and reset, with zoom in off");
+}
+
+#[test]
+fn p4_drag_pans_a_zoomed_diagram_and_stops_at_its_edges() {
+    let e = page(WIDE, 600.0);
+    let block = e.layout().blocks[0];
+    let (x, y) = (200.0, block.top + 40.0);
+    // Not zoomed: a press there is no grab, so it selects as usual.
+    assert!(e.code_grab(x, y, 8.0).is_none());
+    let z = zoom_buttons(&e);
+    e.press(z[0].0, z[0].1);
+    let start = pixels(&e);
+    assert_eq!(e.code_grab(x, y, 8.0), Some(vec![]), "a press in the zoomed frame takes hold");
+    let moved = e.code_drag(x - 60.0, y);
+    assert_eq!(moved.len(), 1, "a drag pans and redraws the frame");
+    assert_ne!(pixels(&e), start);
+    // The view stops at the diagram's left edge: dragging right past it moves no further.
+    assert!(!e.code_drag(x + 2000.0, y).is_empty());
+    assert!(e.code_drag(x + 4000.0, y).is_empty(), "panned past the left edge");
+    e.code_release();
+    assert_eq!(e.layout().blocks[0], block);
+    // A sideways wheel pans too, and stops at the right edge.
+    assert!(!e.code_scroll(x, y, 40.0).is_empty());
+    assert!(!e.code_scroll(x, y, 100_000.0).is_empty());
+    assert!(e.code_scroll(x, y, 40.0).is_empty(), "panned past the right edge");
+    // A press on the bar's buttons is a click, not a grab.
+    let z = zoom_buttons(&e);
+    assert!(e.code_grab(z[0].0, z[0].1, 8.0).is_none());
+}
+
+#[test]
+fn p4_a_narrow_page_shrinks_a_diagram_without_a_zoom_bar() {
+    // 120 px leaves 72 for the block: too little for the bar's 48 px gap and its 82 px.
+    let e = page(WIDE, 120.0);
+    let b = e.layout().blocks[0];
+    assert!(b.height > 32.0, "the diagram still draws");
+    assert!(zoom_buttons(&e).is_empty());
+}
+
+#[test]
+fn p4_a_details_toggle_above_drops_the_zoom() {
+    let src = format!("<details><summary>More</summary>\n\n{WIDE}\n</details>\n\n{WIDE}");
+    let e = page(&src, 600.0);
+    let fit = pixels(&e);
+    let blocks = e.layout().blocks;
+    let b = blocks[blocks.len() - 2];
+    let z = buttons_at(&e, b.top + b.height - 31.0);
+    assert!(matches!(e.press(z[0].0, z[0].1), Press::Redraw(_)));
+    // Opening the summary adds a diagram before the zoomed one, so no view carries over to the wrong one.
+    assert_eq!(e.press(40.0, e.layout().blocks[0].top + 10.0), Press::Other);
+    assert_eq!(e.press(40.0, e.layout().blocks[0].top + 10.0), Press::Other);
+    assert_eq!(pixels(&e), fit, "closed again, the page is at its fit view");
+}
+
+#[test]
+fn p6_expand_after_zoom_shows_the_zoomed_part() {
+    let e = page(WIDE, 600.0);
+    e.expand(0, 0.0, 400.0);
+    let whole = pixels(&e);
+    e.collapse();
+    let z = zoom_buttons(&e);
+    e.press(z[0].0, z[0].1);
+    e.expand(0, 0.0, 400.0);
+    assert_ne!(pixels(&e), whole, "the expanded view shows the zoomed part, as pele's view box did");
 }
 
 #[test]
@@ -367,7 +525,7 @@ fn c2_scroll_moves_code() {
     let before = pixels(&e);
     let code = e.layout().blocks[0];
     assert_eq!(e.code_scroll(300.0, code.top + code.height / 2.0, 50.0).len(), 1);
-    assert_eq!(e.code_positions(), "[100.0]", "50 CSS px at scale 2");
+    assert_eq!(e.code_positions(), [100.0], "50 CSS px at scale 2");
     assert_ne!(pixels(&e), before, "the scroll repaints");
 }
 
@@ -421,13 +579,13 @@ fn c4_grab_thumb_stays() {
     let (r, by) = bar(&e);
     // The thumb starts at the track's left end. A press off its center doesn't move it.
     assert!(e.code_grab(r[0] + 8.0, by, 0.0).is_some());
-    assert_eq!(e.code_positions(), "[0.0]");
+    assert_eq!(e.code_positions(), [0.0]);
     // A drag keeps the same point of the thumb under the pointer.
-    e.code_drag(r[0] + 18.0);
-    let moved: f64 = serde_json::from_str::<Vec<f64>>(&e.code_positions()).unwrap()[0];
-    e.code_drag(r[0] + 8.0);
+    e.code_drag(r[0] + 18.0, by);
+    let moved: f64 = f64::from(e.code_positions()[0]);
+    e.code_drag(r[0] + 8.0, by);
     assert!(moved > 0.0);
-    assert_eq!(e.code_positions(), "[0.0]");
+    assert_eq!(e.code_positions(), [0.0]);
 }
 
 #[test]
@@ -436,13 +594,13 @@ fn c4_grab_track_jumps_and_drag_follows() {
     let (r, by) = bar(&e);
     let end = r[0] + r[2] - 6.0;
     assert!(e.code_grab(end, by, 0.0).is_some());
-    let max: f64 = serde_json::from_str::<Vec<f64>>(&e.code_positions()).unwrap()[0];
+    let max: f64 = f64::from(e.code_positions()[0]);
     assert!(max > 0.0, "a press at the track's end goes to the end");
-    assert_eq!(e.code_drag(r[0]).len(), 1);
-    assert_eq!(e.code_positions(), "[0.0]", "a drag to the start goes to the start");
+    assert_eq!(e.code_drag(r[0], by).len(), 1);
+    assert_eq!(e.code_positions(), [0.0], "a drag to the start goes to the start");
     e.code_release();
-    assert!(e.code_drag(end).is_empty(), "a release lets go");
-    assert_eq!(e.code_positions(), "[0.0]");
+    assert!(e.code_drag(end, by).is_empty(), "a release lets go");
+    assert_eq!(e.code_positions(), [0.0]);
 }
 
 const WIDE_TABLE: &str = "```\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n```\n\n| a | b |\n|---|---|\n| yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy | zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz |\n";
@@ -458,7 +616,7 @@ fn w1_wide_table_scrolls() {
 fn w2_scroll_view_moves_both() {
     let e = page(WIDE_TABLE, 400.0);
     assert_eq!(e.code_scroll_view(0.0, e.layout().height, 40.0).len(), 2);
-    assert_eq!(e.code_positions(), "[80.0,80.0]");
+    assert_eq!(e.code_positions(), [80.0, 80.0]);
 }
 
 #[test]

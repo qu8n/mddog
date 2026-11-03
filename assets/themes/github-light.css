@@ -1,7 +1,6 @@
 /* GitHub light: Primer's light colors as github.com draws a README. */
 :root {
   color-scheme: light;
-  --mddog-mermaid: pele;
 
   /* The terminal chrome */
   --mddog-bg: #ffffff;
@@ -34,6 +33,7 @@
   --mddog-alert-caution: #cf222e;
   --mddog-diff-add-bg: #dafbe1;
   --mddog-diff-del-bg: #ffebe9;
+  --mddog-button-bg: #f6f8fa;
 
   /* Code */
   --mddog-pl-comment: #59636e;
@@ -43,11 +43,19 @@
   --mddog-pl-entity: #6639ba;
   --mddog-pl-inserted: #116329;
   --mddog-pl-deleted: #82071e;
+  --mddog-pl-variable: #953800;
+  --mddog-pl-tag: #116329;
 
   /* Type */
   --mddog-font-body: system-ui;
   --mddog-font-code: ui-monospace, SFMono-Regular, Menlo;
   --mddog-heading-scale: 2 1.5 1.25 1 0.875 0.85;
+  --mddog-heading-weight: 600 600 600 600 600 600;
   --mddog-line-height: 1.5;
   --mddog-code-size: 0.85;
+  --mddog-code-line-height: 1.45;
+
+  /* Layout */
+  --mddog-layout: github;
+
 }

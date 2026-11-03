@@ -13,8 +13,9 @@ pub static WAKE_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32:
 pub fn wake() {
     let fd = WAKE_FD.load(std::sync::atomic::Ordering::Relaxed);
     if fd >= 0 {
+        // SAFETY: the buffer is a one-byte static, and a bad fd only makes write fail.
         unsafe {
-            libc::write(fd, b"x".as_ptr() as *const _, 1);
+            libc::write(fd, b"x".as_ptr().cast(), 1);
         }
     }
 }
@@ -49,8 +50,8 @@ enum St {
 pub struct Images {
     pub dir: PathBuf,
     map: HashMap<String, St>,
-    tx: Sender<(String, Option<Vec<u8>>)>,
-    rx: Receiver<(String, Option<Vec<u8>>)>,
+    tx: Sender<(String, Option<Arc<Vec<u8>>>)>,
+    rx: Receiver<(String, Option<Arc<Vec<u8>>>)>,
     /// Stops this page's queued and running fetches when a reload replaces it.
     stops: Vec<Arc<std::sync::atomic::AtomicBool>>,
 }
@@ -67,7 +68,13 @@ fn fontdb() -> Arc<usvg::fontdb::Database> {
     static DB: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
     DB.get_or_init(|| {
         let mut db = usvg::fontdb::Database::new();
-        for f in ["/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/System/Library/Fonts/Menlo.ttc"] {
+        for f in [
+            "/System/Library/Fonts/SFNS.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/System/Library/Fonts/Menlo.ttc",
+        ] {
             if let Ok(d) = std::fs::read(f) {
                 db.load_font_data(d);
             }
@@ -80,10 +87,28 @@ fn fontdb() -> Arc<usvg::fontdb::Database> {
     .clone()
 }
 
+/// The SF family's name in `fontdb`: macOS's system font file calls itself this.
+const SYSTEM_FONT: &str = "System Font";
+
+/// A theme's font list for SVG text: CSS's names for the system font become SF's family, which `fontdb` knows,
+/// so diagram labels draw in SF as pele's did in WebKit, not in the Helvetica fallback.
+/// The names after the system font never draw, so they are left out.
+pub fn svg_families(fonts: &[String]) -> String {
+    let mut out = Vec::new();
+    for f in fonts {
+        match f.to_ascii_lowercase().as_str() {
+            "system-ui" | "-apple-system" | "blinkmacsystemfont" | "ui-sans-serif" | "sans-serif" | "sf pro" | "sf pro text" | "sf pro display" => {
+                out.push(SYSTEM_FONT.to_string());
+                break;
+            }
+            _ => out.push(f.clone()),
+        }
+    }
+    out.join(", ")
+}
+
 pub fn svg_tree(data: &[u8]) -> Option<usvg::Tree> {
-    let mut o = usvg::Options::default();
-    o.fontdb = fontdb();
-    o.font_family = "Helvetica".into();
+    let o = usvg::Options { fontdb: fontdb(), font_family: "Helvetica".into(), ..usvg::Options::default() };
     usvg::Tree::from_data(data, &o).ok()
 }
 
@@ -92,6 +117,13 @@ pub fn render_svg(t: &usvg::Tree, w: u32, h: u32) -> Option<Bitmap> {
     let s = t.size();
     let tf = resvg::tiny_skia::Transform::from_scale(w as f32 / s.width(), h as f32 / s.height());
     resvg::render(t, tf, &mut pm.as_mut());
+    Some(Bitmap { w: pm.width(), h: pm.height(), px: pm.take() })
+}
+
+/// A `w` by `h` window onto `t` drawn at `z` pixels per SVG unit, with SVG point (`x`, `y`) at its top left.
+pub fn render_view(t: &usvg::Tree, w: u32, h: u32, z: f32, x: f32, y: f32) -> Option<Bitmap> {
+    let mut pm = resvg::tiny_skia::Pixmap::new(w.max(1), h.max(1))?;
+    resvg::render(t, resvg::tiny_skia::Transform::from_row(z, 0.0, 0.0, z, -x * z, -y * z), &mut pm.as_mut());
     Some(Bitmap { w: pm.width(), h: pm.height(), px: pm.take() })
 }
 
@@ -104,10 +136,10 @@ pub fn decode(data: &[u8]) -> Option<Img> {
     let im = image::load_from_memory(data).ok()?.to_rgba8();
     let (w, h) = im.dimensions();
     let mut px = im.into_raw();
-    for p in px.chunks_exact_mut(4) {
-        let a = p[3] as u32;
-        for c in 0..3 {
-            p[c] = ((p[c] as u32 * a + 127) / 255) as u8;
+    for p in px.as_chunks_mut::<4>().0 {
+        let a = u32::from(p[3]);
+        for c in &mut p[..3] {
+            *c = ((u32::from(*c) * a + 127) / 255) as u8;
         }
     }
     Some(Img::Raster(Rc::new(Bitmap { w, h, px })))
@@ -151,21 +183,15 @@ impl Images {
     /// Start background fetches for the urls the layout asked for.
     /// Fetches through mddog's remote fetcher: its worker pool, cache, and private-address checks.
     pub fn fetch(&mut self, urls: Vec<String>) {
-        use crate::page::remote::{self, Event};
+        use crate::page::remote;
         for u in urls {
             let tx = self.tx.clone();
             let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
             self.stops.push(stop.clone());
             let (host, url) = (remote::host(&u), u.clone());
             let started = remote::spawn(host, stop.clone(), move || {
-                let mut body = Vec::new();
-                let mut ok = false;
-                remote::fetch(remote::agent(), &url, None, &stop, &mut |e| match e {
-                    Event::Data(d) => body.extend_from_slice(&d),
-                    Event::Done => ok = true,
-                    _ => {}
-                });
-                let _ = tx.send((url, (ok && !body.is_empty()).then_some(body)));
+                let body = remote::fetch(remote::agent(), &url, &stop).and_then(Result::ok).filter(|b| !b.is_empty());
+                let _ = tx.send((url, body));
                 wake();
             });
             if !started {
@@ -195,5 +221,18 @@ impl Images {
             }
         }
         any
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_system_font_names_reach_sf() {
+        let fonts = ["system-ui", "-apple-system", "Avenir Next"].map(String::from);
+        assert_eq!(super::svg_families(&fonts), "System Font");
+        let fonts = ["Avenir Next", "ui-sans-serif", "Inter"].map(String::from);
+        assert_eq!(super::svg_families(&fonts), "Avenir Next, System Font");
+        // SF is in the font set under that name, so a label in it doesn't fall back to Helvetica.
+        assert!(super::fontdb().faces().any(|f| f.families.iter().any(|(n, _)| n == super::SYSTEM_FONT)));
     }
 }

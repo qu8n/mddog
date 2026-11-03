@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, reason = "a failed step should fail the test")]
 
-//! `tests/math.golden` from the native parser's `Doc`, in the format `tests/math.rs` reads from HTML:
-//! one line per block that holds math or a `$`, inline math as `⟨…⟩`, display math as `⟦…⟧`, code spans
-//! in backticks. Writes `tmp/native-math.diff` and reports the differing lines.
+//! Checks the native parser's `Doc` for `fixtures/math` against `tests/math.golden`: one line per block that
+//! holds math or a `$`, inline math as `⟨…⟩`, display math as `⟦…⟧`, code spans in backticks. Run with
+//! `UPDATE_GOLDEN=1` to write the golden after a parser change, then read its diff.
 
 use mddog::native::doc::{self, Block, Inl};
 
@@ -43,7 +43,7 @@ fn line(v: &[Inl], out: &mut String) {
 fn blocks(bs: &[Block], out: &mut String) {
     for b in bs {
         match b {
-            Block::Para(v) | Block::Heading(_, v, _) => line(v, out),
+            Block::Para(v) | Block::Text(v) | Block::Heading(_, v, _) => line(v, out),
             Block::Math(t) => {
                 let s = format!("⟦$${t}$$⟧");
                 out.push_str(&s.split_whitespace().collect::<Vec<_>>().join(" "));
@@ -75,15 +75,14 @@ fn native_math_against_golden() {
         out.push_str(&format!("=== {}\n", f.file_stem().unwrap().to_string_lossy()));
         blocks(&doc::parse(&std::fs::read_to_string(&f).unwrap()).blocks, &mut out);
     }
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        std::fs::write("tests/math.golden", &out).unwrap();
+    }
     let want = std::fs::read_to_string("tests/math.golden").unwrap();
-    let diff = similar::TextDiff::from_lines(&want, &out).unified_diff().context_radius(0).header("golden", "native").to_string();
-    let _ = std::fs::create_dir_all("tmp");
-    std::fs::write("tmp/native-math.diff", &diff).unwrap();
-    std::fs::write("tmp/native-math.golden", &out).unwrap();
-    let n = diff.lines().filter(|l| l.starts_with(['-', '+']) && !l.starts_with("---") && !l.starts_with("+++")).count();
-    eprintln!("{n} differing lines of {}, see tmp/native-math.diff", want.lines().count());
-    // 9 known: extractor artefacts (footnote back-arrows, display style next to dropped HTML, a `<div>` split).
-    assert!(n <= 9, "{n} lines differ from the golden, up from 9, see tmp/native-math.diff");
+    if let Some((i, (w, o))) = want.lines().zip(out.lines()).enumerate().find(|(_, (w, o))| w != o) {
+        panic!("line {} differs from tests/math.golden\ngolden: {w}\nnative: {o}", i + 1);
+    }
+    assert_eq!(want.lines().count(), out.lines().count(), "tests/math.golden has another number of lines");
 }
 
 /// GitHub reads `<y>` in `$x<y>z$` as HTML, so the dollars around it are text. `$a<b$` has no tag and stays math.
@@ -141,7 +140,7 @@ fn exprs(bs: &[Block], out: &mut Vec<(String, bool)>) {
     };
     for b in bs {
         match b {
-            Block::Para(v) | Block::Heading(_, v, _) => inl(v, out),
+            Block::Para(v) | Block::Text(v) | Block::Heading(_, v, _) => inl(v, out),
             Block::Math(t) => out.push((t.clone(), true)),
             Block::Quote(c) | Block::Alert(_, c) | Block::Align(_, c) => exprs(c, out),
             Block::Details { summary, body, .. } => {

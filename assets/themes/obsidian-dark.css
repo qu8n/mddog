@@ -2,7 +2,6 @@
    obsidian-light.css sets the same tokens; a test keeps the two in step. */
 :root {
   color-scheme: dark;
-  --mddog-mermaid: obsidian;
 
   /* The terminal chrome */
   --mddog-bg: #1c1c1c;
@@ -20,7 +19,7 @@
   --mddog-heading: #dadada;
   --mddog-link: #a68af9;
   --mddog-accent: #8a5cf5;
-  --mddog-code-bg: #2b2b2b;
+  --mddog-code-bg: #232323;
   --mddog-pre-bg: #232323;
   --mddog-alt-bg: #232323;
   --mddog-rule: #333333;
@@ -30,11 +29,12 @@
   --mddog-text-selection: #483699;
   --mddog-alert-note: #027aff;
   --mddog-alert-tip: #53dfdd;
-  --mddog-alert-important: #a882ff;
+  --mddog-alert-important: #53dfdd;
   --mddog-alert-warning: #e9973f;
-  --mddog-alert-caution: #fb464c;
-  --mddog-diff-add-bg: #1b3324;
-  --mddog-diff-del-bg: #3a1d1f;
+  --mddog-alert-caution: #e9973f;
+  --mddog-diff-add-bg: #232323;
+  --mddog-diff-del-bg: #232323;
+  --mddog-button-bg: #282828;
 
   /* Code */
   --mddog-pl-comment: #666666;
@@ -44,11 +44,19 @@
   --mddog-pl-entity: #e0de71;
   --mddog-pl-inserted: #44cf6e;
   --mddog-pl-deleted: #fb464c;
+  --mddog-pl-variable: #53dfdd;
+  --mddog-pl-tag: #fb464c;
 
   /* Type */
-  --mddog-font-body: system-ui;
-  --mddog-font-code: ui-monospace, SFMono-Regular, Menlo;
+  --mddog-font-body: ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, Inter, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  --mddog-font-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Source Code Pro", monospace;
   --mddog-heading-scale: 1.618 1.462 1.318 1.188 1.076 1;
+  --mddog-heading-weight: 700 680 660 640 620 600;
   --mddog-line-height: 1.5;
   --mddog-code-size: 0.875;
+  --mddog-code-line-height: 1.715;
+
+  /* Layout */
+  --mddog-layout: obsidian;
+
 }

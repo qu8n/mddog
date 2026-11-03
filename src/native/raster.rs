@@ -1,5 +1,4 @@
 //! Draws display-list items into RGBA tiles with CoreGraphics.
-use crate::native::layout::Opts;
 use crate::native::page::*;
 use crate::native::text::Fonts;
 use crate::native::theme::{Theme, rgb};
@@ -88,21 +87,16 @@ pub fn cg_image(b: &Bitmap) -> CGImage {
     CGImage::new(b.w as usize, b.h as usize, 8, 32, b.w as usize * 4, &cs, kCGImageAlphaPremultipliedLast, &prov, true, 0)
 }
 
-/// Render the tile covering page rows `[top, top + h)` at full page width. Returns RGBA.
-pub fn render_tile(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, items: &[u32]) -> Vec<u8> {
-    let mut out = vec![0u8; w * h * 4];
-    render_into(fonts, cx, top, h, w, items, 1.0, &mut out);
-    out
-}
-
 /// Draws page rows from `top` (layout pixels) into `out`, a `w` by `h` RGBA buffer, at `z` output pixels per
 /// layout pixel.
+#[expect(clippy::too_many_arguments, reason = "the tile's place, size and scale, each a plain number")]
 pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, items: &[u32], z: f64, out: &mut [u8]) {
     let cs = CGColorSpace::create_device_rgb();
-    // SAFETY: `out` holds w * h * 4 bytes and outlives the context, which this function drops before it returns.
-    let mut ctx = unsafe { CGContext::create_bitmap_context(Some(out.as_mut_ptr().cast()), w, h, 8, w * 4, &cs, kCGImageAlphaPremultipliedLast) };
-    ctx.set_allows_font_smoothing(false);
-    ctx.set_should_smooth_fonts(false);
+    // CoreGraphics draws into `out`, which holds w * h * 4 bytes and outlives the context: the context drops before this returns.
+    let ctx = CGContext::create_bitmap_context(Some(out.as_mut_ptr().cast()), w, h, 8, w * 4, &cs, kCGImageAlphaPremultipliedLast);
+    let smooth = crate::config::font_smoothing();
+    ctx.set_allows_font_smoothing(smooth);
+    ctx.set_should_smooth_fonts(smooth);
     ctx.set_allows_antialiasing(true);
     ctx.set_should_antialias(true);
     ctx.set_allows_font_subpixel_positioning(true);
@@ -196,7 +190,7 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
     }
     // horizontal scroll bars
     for (i, hs) in page.hscroll.iter().enumerate() {
-        if hs.max <= 0.0 || hs.y > top as f32 + h as f32 || hs.y + hs.h < top as f32 {
+        if hs.max <= 0.0 || hs.y > top + h as f32 || hs.y + hs.h < top {
             continue;
         }
         let off = cx.ov.hoff.get(i).copied().unwrap_or(0.0);
@@ -211,10 +205,10 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
     }
     // buttons
     for (i, b) in page.buttons.iter().enumerate() {
-        if b.y > top + h as f32 || b.y + b.h < top {
+        if b.w <= 0.0 || b.y > top + h as f32 || b.y + b.h < top {
             continue;
         }
-        draw_button(&ctx, cx, b, cx.ov.hover_btn == Some(i), cx.ov.copied_btn == Some(i));
+        draw_button(&ctx, cx, b, cx.ov.hover_btn == Some(i), cx.ov.copied_btn == Some(i), z);
         let hover = cx.ov.hover_btn == Some(i);
         let copied = cx.ov.copied_btn == Some(i);
         let label = if copied {
@@ -255,30 +249,114 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
         ctx.fill_rect(CGRect::new(&CGPoint::new(x as f64, y as f64), &CGSize::new(w as f64, hh as f64)));
     }
     // An expanded diagram covers the page under it.
-    if let Some(e) = &cx.ov.expanded {
-        if e.y <= top + h as f32 && e.y + e.h >= top {
-            set_fill(&ctx, cx.th.bg, 1.0);
-            ctx.fill_rect(CGRect::new(&CGPoint::new(0.0, e.y as f64), &CGSize::new(page.w as f64, e.h as f64)));
-            let img = cg_image(&e.bmp);
-            let (iw, ih) = (e.bmp.w as f64, e.bmp.h as f64);
-            ctx.save();
-            ctx.clip_to_rect(CGRect::new(&CGPoint::new(0.0, e.y as f64), &CGSize::new(page.w as f64, e.h as f64)));
-            ctx.translate(e.x as f64, e.top as f64 + ih);
-            ctx.scale(1.0, -1.0);
-            ctx.draw_image(CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(iw, ih)), &img);
-            ctx.restore();
-        }
+    if let Some(e) = &cx.ov.expanded
+        && e.y <= top + h as f32
+        && e.y + e.h >= top
+    {
+        set_fill(&ctx, cx.th.bg, 1.0);
+        ctx.fill_rect(CGRect::new(&CGPoint::new(0.0, e.y as f64), &CGSize::new(page.w as f64, e.h as f64)));
+        let img = cg_image(&e.bmp);
+        let (iw, ih) = (e.bmp.w as f64, e.bmp.h as f64);
+        ctx.save();
+        ctx.clip_to_rect(CGRect::new(&CGPoint::new(0.0, e.y as f64), &CGSize::new(page.w as f64, e.h as f64)));
+        ctx.translate(e.x as f64, e.top as f64 + ih);
+        ctx.scale(1.0, -1.0);
+        ctx.draw_image(CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(iw, ih)), &img);
+        ctx.restore();
     }
     drop(ctx);
 }
 
-fn draw_button(ctx: &CGContext, cx: &Ctx, b: &Button, hover: bool, copied: bool) {
+/// A diagram button's icon as SVG in `color`: GitHub's octicons for expand, copy and copied, and pele's Lucide
+/// strokes for the zoom bar.
+fn icon_svg(kind: BtnKind, copied: bool, color: u32) -> String {
+    const OCTICON: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="#{C}" fill-rule="evenodd">{P}</svg>"##;
+    const LUCIDE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#{C}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{P}</svg>"##;
+    let path = |d: &str| format!(r#"<path d="{d}"/>"#);
+    let (frame, paths) = match (kind, copied) {
+        (BtnKind::Expand, _) => (
+            OCTICON,
+            path(
+                "M3.72 3.72a.75.75 0 011.06 1.06L2.56 7h10.88l-2.22-2.22a.75.75 0 011.06-1.06l3.5 3.5a.75.75 0 010 1.06l-3.5 3.5a.75.75 0 11-1.06-1.06l2.22-2.22H2.56l2.22 2.22a.75.75 0 11-1.06 1.06l-3.5-3.5a.75.75 0 010-1.06l3.5-3.5z",
+            ),
+        ),
+        (_, true) => (OCTICON, path("M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z")),
+        (BtnKind::ZoomIn, _) => (LUCIDE, path("M5 12h14M12 5v14")),
+        (BtnKind::ZoomOut, _) => (LUCIDE, path("M5 12h14")),
+        (BtnKind::ZoomReset, _) => (LUCIDE, path("M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5")),
+        _ => (
+            OCTICON,
+            path(
+                "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z",
+            ) + &path(
+                "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z",
+            ),
+        ),
+    };
+    frame.replace("{C}", &format!("{color:06x}")).replace("{P}", &paths)
+}
+
+thread_local! {
+    static ICONS: std::cell::RefCell<std::collections::HashMap<String, Rc<Bitmap>>> = Default::default();
+}
+
+/// The icon drawn `px` pixels square, kept for the next tile.
+fn icon(kind: BtnKind, copied: bool, color: u32, px: u32) -> Option<Rc<Bitmap>> {
+    let svg = icon_svg(kind, copied, color);
+    let key = format!("{px}{svg}");
+    ICONS.with_borrow_mut(|m| {
+        if let Some(b) = m.get(&key) {
+            return Some(b.clone());
+        }
+        let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).ok()?;
+        let b = Rc::new(crate::native::images::render_svg(&tree, px, px)?);
+        m.insert(key, b.clone());
+        Some(b)
+    })
+}
+
+/// Draws a diagram button: GitHub's bordered box for copy and expand, and pele's bare icon for the zoom bar,
+/// faded when off. `z` is output pixels per layout pixel, so the icon is drawn sharp.
+fn draw_button(ctx: &CGContext, cx: &Ctx, b: &Button, hover: bool, copied: bool, z: f64) {
+    if b.kind == BtnKind::CopyCode {
+        return draw_code_button(ctx, cx, b, hover, copied);
+    }
+    let s = cx.scale as f64;
+    let (x, y, w, h) = (b.x as f64, b.y as f64, b.w as f64, b.h as f64);
+    let color = match b.kind {
+        BtnKind::Expand | BtnKind::CopyDiagram => {
+            // As in the WebKit build, the pointer changes only the cursor here.
+            set_fill(ctx, cx.th.button_bg, 1.0);
+            rrect(ctx, x, y, w, h, 6.0 * s);
+            ctx.fill_path();
+            set_stroke(ctx, cx.th.border, 1.0);
+            ctx.set_line_width(s);
+            rrect(ctx, x + s / 2.0, y + s / 2.0, w - s, h - s, 5.5 * s);
+            ctx.stroke_path();
+            if copied { cx.th.alerts[1] } else { cx.th.fg_muted }
+        }
+        _ => cx.th.text,
+    };
+    let size = 16.0 * s;
+    let Some(img) = icon(b.kind, copied, color, (size * z).round() as u32) else { return };
+    ctx.save();
+    if b.off {
+        ctx.set_alpha(0.35);
+    }
+    ctx.translate(x + ((w - size) / 2.0).round(), y + ((h - size) / 2.0).round() + size);
+    ctx.scale(1.0, -1.0);
+    ctx.draw_image(CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(size, size)), &cg_image(&img));
+    ctx.restore();
+}
+
+/// A code block's copy button.
+fn draw_code_button(ctx: &CGContext, cx: &Ctx, b: &Button, hover: bool, copied: bool) {
     let s = cx.scale as f64;
     let (x, y, w, h) = (b.x as f64, b.y as f64, b.w as f64, b.h as f64);
     set_fill(ctx, cx.th.pre_bg, 1.0);
     rrect(ctx, x, y, w, h, 6.0 * s);
     ctx.fill_path();
-    if hover && matches!(b.kind, BtnKind::CopyCode) {
+    if hover {
         set_fill(ctx, cx.th.rule, 0.6);
         rrect(ctx, x, y, w, h, 6.0 * s);
         ctx.fill_path();
@@ -288,74 +366,19 @@ fn draw_button(ctx: &CGContext, cx: &Ctx, b: &Button, hover: bool, copied: bool)
     ctx.set_line_cap(core_graphics::context::CGLineCap::CGLineCapRound);
     ctx.set_line_join(core_graphics::context::CGLineJoin::CGLineJoinRound);
     let (mx, my) = (x + w / 2.0, y + h / 2.0);
-    match b.kind {
-        BtnKind::CopyCode | BtnKind::CopyDiagram => {
-            if copied {
-                set_stroke(ctx, cx.th.alerts[1], 1.0);
-                ctx.set_line_width(2.0 * s);
-                ctx.begin_path();
-                ctx.move_to_point(mx - 5.0 * s, my);
-                ctx.add_line_to_point(mx - 1.5 * s, my + 4.0 * s);
-                ctx.add_line_to_point(mx + 5.5 * s, my - 4.0 * s);
-                ctx.stroke_path();
-            } else {
-                rrect(ctx, mx - 3.0 * s, my - 6.0 * s, 9.0 * s, 10.0 * s, 1.5 * s);
-                ctx.stroke_path();
-                rrect(ctx, mx - 6.0 * s, my - 3.0 * s, 9.0 * s, 10.0 * s, 1.5 * s);
-                set_fill(ctx, cx.th.pre_bg, 1.0);
-                ctx.draw_path(core_graphics::context::CGPathDrawingMode::CGPathFillStroke);
-            }
-        }
-        BtnKind::Expand => {
-            ctx.begin_path();
-            for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-                ctx.move_to_point(mx + sx * 3.0 * s, my + sy * 6.0 * s);
-                ctx.add_line_to_point(mx + sx * 6.0 * s, my + sy * 6.0 * s);
-                ctx.add_line_to_point(mx + sx * 6.0 * s, my + sy * 3.0 * s);
-            }
-            ctx.stroke_path();
-        }
-        BtnKind::ZoomIn => {
-            ctx.begin_path();
-            ctx.move_to_point(mx - 5.0 * s, my);
-            ctx.add_line_to_point(mx + 5.0 * s, my);
-            ctx.move_to_point(mx, my - 5.0 * s);
-            ctx.add_line_to_point(mx, my + 5.0 * s);
-            ctx.stroke_path();
-        }
-        BtnKind::ZoomReset => {
-            ctx.begin_path();
-            for i in 0..=16 {
-                let a = 0.6 + 5.4 * i as f64 / 16.0;
-                let (px, py) = (mx + 5.0 * s * a.cos(), my + 5.0 * s * a.sin());
-                if i == 0 { ctx.move_to_point(px, py) } else { ctx.add_line_to_point(px, py) }
-            }
-            ctx.stroke_path();
-        }
+    if copied {
+        set_stroke(ctx, cx.th.alerts[1], 1.0);
+        ctx.set_line_width(2.0 * s);
+        ctx.begin_path();
+        ctx.move_to_point(mx - 5.0 * s, my);
+        ctx.add_line_to_point(mx - 1.5 * s, my + 4.0 * s);
+        ctx.add_line_to_point(mx + 5.5 * s, my - 4.0 * s);
+        ctx.stroke_path();
+    } else {
+        rrect(ctx, mx - 3.0 * s, my - 6.0 * s, 9.0 * s, 10.0 * s, 1.5 * s);
+        ctx.stroke_path();
+        rrect(ctx, mx - 6.0 * s, my - 3.0 * s, 9.0 * s, 10.0 * s, 1.5 * s);
+        set_fill(ctx, cx.th.pre_bg, 1.0);
+        ctx.draw_path(core_graphics::context::CGPathDrawingMode::CGPathFillStroke);
     }
 }
-
-pub fn tile_items(page: &Page, tile_h: f32) -> Vec<Vec<u32>> {
-    let n = ((page.h / tile_h).ceil() as usize).max(1);
-    let mut v: Vec<Vec<u32>> = vec![vec![]; n];
-    for (i, it) in page.items.iter().enumerate() {
-        let (y0, y1) = if it.clip > 0 {
-            let hs = &page.hscroll[it.clip as usize - 1];
-            (it.y.max(hs.y), (it.y + it.h).min(hs.y + hs.h))
-        } else {
-            (it.y, it.y + it.h)
-        };
-        if y1 < y0 {
-            continue;
-        }
-        let a = ((y0 / tile_h).floor().max(0.0)) as usize;
-        let b = (((y1 / tile_h).floor()).max(0.0) as usize).min(n - 1);
-        for t in a.min(n - 1)..=b {
-            v[t].push(i as u32);
-        }
-    }
-    v
-}
-
-#[allow(dead_code)]
-fn _o(_: &Opts) {}

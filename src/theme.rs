@@ -75,13 +75,15 @@ enum Kind {
     Color,
     /// Font names, first choice first, as CSS's `font-family` lists them.
     Fonts,
-    /// Six sizes, one per heading level, in em.
-    Scale,
-    /// One positive number.
-    Number,
+    /// Six font weights from 100 to 900, one per heading level.
+    Weights,
+    /// A count of positive numbers, and what the error asks for.
+    Nums(usize, &'static str),
+    /// One of these words.
+    Choice(&'static [&'static str]),
 }
 
-/// Every token but `--mddog-base` and `--mddog-mermaid`, without the `--mddog-` prefix. GitHub's themes set them all, so any other theme can leave some out.
+/// Every token but `--mddog-base`, without the `--mddog-` prefix. GitHub's themes set them all, so any other theme can leave some out.
 #[rustfmt::skip]
 const TOKENS: &[(&str, Kind)] = &[
     // The terminal chrome (VARS).
@@ -92,12 +94,18 @@ const TOKENS: &[(&str, Kind)] = &[
     ("code-bg", Kind::Color), ("pre-bg", Kind::Color), ("alt-bg", Kind::Color), ("rule", Kind::Color), ("mark-bg", Kind::Color),
     ("match-bg", Kind::Color), ("match-current-bg", Kind::Color), ("text-selection", Kind::Color),
     ("alert-note", Kind::Color), ("alert-tip", Kind::Color), ("alert-important", Kind::Color), ("alert-warning", Kind::Color), ("alert-caution", Kind::Color),
-    ("diff-add-bg", Kind::Color), ("diff-del-bg", Kind::Color),
+    ("diff-add-bg", Kind::Color), ("diff-del-bg", Kind::Color), ("button-bg", Kind::Color),
     // Code.
     ("pl-comment", Kind::Color), ("pl-keyword", Kind::Color), ("pl-string", Kind::Color), ("pl-constant", Kind::Color),
-    ("pl-entity", Kind::Color), ("pl-inserted", Kind::Color), ("pl-deleted", Kind::Color),
+    ("pl-entity", Kind::Color), ("pl-inserted", Kind::Color), ("pl-deleted", Kind::Color), ("pl-variable", Kind::Color), ("pl-tag", Kind::Color),
     // Type.
-    ("font-body", Kind::Fonts), ("font-code", Kind::Fonts), ("heading-scale", Kind::Scale), ("line-height", Kind::Number), ("code-size", Kind::Number),
+    ("font-body", Kind::Fonts), ("font-code", Kind::Fonts),
+    ("heading-scale", Kind::Nums(6, "six sizes in em, one per heading level, such as 2 1.5 1.25 1 0.875 0.85")),
+    ("heading-weight", Kind::Weights),
+    ("line-height", Kind::Nums(1, "a positive number such as 1.5")), ("code-size", Kind::Nums(1, "a positive number such as 0.85")),
+    ("code-line-height", Kind::Nums(1, "a positive number such as 1.45")),
+    // The rules that place blocks: GitHub's README or Obsidian's reading view.
+    ("layout", Kind::Choice(&["github", "obsidian"])),
 ];
 
 /// A token's value.
@@ -105,8 +113,9 @@ const TOKENS: &[(&str, Kind)] = &[
 pub enum Value {
     Color(Rgb),
     Fonts(Vec<String>),
-    Scale([f32; 6]),
-    Number(f32),
+    Weights([u16; 6]),
+    Nums(Vec<f32>),
+    Choice(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,8 +126,6 @@ pub struct Theme {
     pub palette: Palette,
     /// Every token, with the ones the theme leaves out taken from its base, else from GitHub's theme of its mode.
     tokens: BTreeMap<&'static str, Value>,
-    /// The Mermaid engine its `--mddog-mermaid` names, or its base's. The config's engine wins.
-    pub mermaid: Option<crate::config::Mermaid>,
 }
 
 impl Theme {
@@ -141,17 +148,34 @@ impl Theme {
         }
     }
 
-    pub fn number(&self, name: &str) -> f32 {
+    /// A token of numbers.
+    pub fn nums(&self, name: &str) -> &[f32] {
         match self.token(name) {
-            Value::Number(n) => *n,
-            v => panic!("{name} is {v:?}, not a number"),
+            Value::Nums(n) => n,
+            v => panic!("{name} is {v:?}, not numbers"),
+        }
+    }
+
+    /// A token of one number.
+    pub fn number(&self, name: &str) -> f32 {
+        self.nums(name)[0]
+    }
+
+    pub fn choice(&self, name: &str) -> &'static str {
+        match self.token(name) {
+            Value::Choice(c) => c,
+            v => panic!("{name} is {v:?}, not a word"),
         }
     }
 
     pub fn heading_scale(&self) -> [f32; 6] {
-        match self.token("heading-scale") {
-            Value::Scale(s) => *s,
-            v => panic!("heading-scale is {v:?}"),
+        self.nums("heading-scale").try_into().expect("six sizes")
+    }
+
+    pub fn heading_weight(&self) -> [u16; 6] {
+        match self.token("heading-weight") {
+            Value::Weights(w) => *w,
+            v => panic!("heading-weight is {v:?}"),
         }
     }
 }
@@ -234,12 +258,6 @@ fn read(name: &str, css: &str, under: Option<&Theme>, file: &mut dyn FnMut(&str)
         (None, Some(b)) => b.dark,
         (None, None) => return Err(format!("{name}: set color-scheme: light or dark on :root, or a base theme with --mddog-base")),
     };
-    let mermaid = match last("--mddog-mermaid").map(|v| v.trim_matches(['"', '\''])) {
-        None => base.as_ref().and_then(|b| b.mermaid),
-        Some("pele") => Some(crate::config::Mermaid::Pele),
-        Some("obsidian") => Some(crate::config::Mermaid::Obsidian),
-        Some(v) => return Err(format!("{name}: --mddog-mermaid must be obsidian or pele, but got {v:?}")),
-    };
     let mut tokens = match (&base, under) {
         (Some(b), _) => b.tokens.clone(),
         (None, Some(u)) => u.tokens.clone(),
@@ -248,7 +266,7 @@ fn read(name: &str, css: &str, under: Option<&Theme>, file: &mut dyn FnMut(&str)
         (None, None) => github(dark).tokens.clone(),
     };
     for (p, value) in &decls {
-        if matches!(p.as_str(), "color-scheme" | "--mddog-base" | "--mddog-mermaid") {
+        if matches!(p.as_str(), "color-scheme" | "--mddog-base") {
             continue;
         }
         let Some((key, kind)) = p.strip_prefix("--mddog-").and_then(|t| TOKENS.iter().find(|(k, _)| *k == t)) else {
@@ -264,20 +282,20 @@ fn read(name: &str, css: &str, under: Option<&Theme>, file: &mut dyn FnMut(&str)
         })
         .collect();
     let palette = Palette::from(std::array::from_fn(|i| colors[i]));
-    Ok(Theme { name: name.to_string(), dark, palette, tokens, mermaid })
+    Ok(Theme { name: name.to_string(), dark, palette, tokens })
 }
 
-fn expected(kind: Kind) -> &'static str {
+fn expected(kind: Kind) -> String {
     match kind {
-        Kind::Color => "a hex color such as #0d1117",
-        Kind::Fonts => "a list of font names such as \"SF Pro Text\", system-ui",
-        Kind::Scale => "six sizes in em, one per heading level, such as 2 1.5 1.25 1 0.875 0.85",
-        Kind::Number => "a positive number such as 1.5",
+        Kind::Color => "a hex color such as #0d1117".into(),
+        Kind::Fonts => "a list of font names such as \"SF Pro Text\", system-ui".into(),
+        Kind::Weights => "six font weights from 100 to 900, one per heading level, such as 700 680 660 640 620 600".into(),
+        Kind::Nums(_, what) => what.into(),
+        Kind::Choice(words) => words.join(" or "),
     }
 }
 
 fn value_of(kind: Kind, v: &str) -> Option<Value> {
-    let number = |s: &str| s.parse::<f32>().ok().filter(|n| n.is_finite() && *n > 0.0);
     match kind {
         Kind::Color => rgb(v).filter(|_| matches!(v.len(), 4 | 7)).map(Value::Color),
         Kind::Fonts => {
@@ -285,11 +303,15 @@ fn value_of(kind: Kind, v: &str) -> Option<Value> {
             // A font name is plain text: letters, digits, spaces and `-_.`.
             names.iter().all(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || " -_.".contains(c))).then_some(Value::Fonts(names))
         }
-        Kind::Scale => {
-            let sizes: Vec<f32> = v.split_whitespace().map(number).collect::<Option<_>>()?;
-            <[f32; 6]>::try_from(sizes).ok().map(Value::Scale)
+        Kind::Weights => {
+            let weights: Vec<u16> = v.split_whitespace().map(|w| w.parse().ok().filter(|w| (100..=900).contains(w))).collect::<Option<_>>()?;
+            <[u16; 6]>::try_from(weights).ok().map(Value::Weights)
         }
-        Kind::Number => number(v).map(Value::Number),
+        Kind::Nums(n, _) => {
+            let nums: Vec<f32> = v.split_whitespace().map(|s| s.parse::<f32>().ok().filter(|x| x.is_finite() && *x > 0.0)).collect::<Option<_>>()?;
+            (nums.len() == n).then_some(Value::Nums(nums))
+        }
+        Kind::Choice(words) => words.iter().find(|w| **w == v).map(|w| Value::Choice(w)),
     }
 }
 
@@ -396,11 +418,17 @@ mod tests {
 
     #[test]
     fn type_tokens_read() {
-        let t = parse("x.css", ":root{color-scheme:light;--mddog-font-body:\"Avenir Next\", 'Inter',system-ui;--mddog-heading-scale:1.6 1.4 1.2 1 1 .9;--mddog-line-height:1.6;--mddog-code-size:0.9}")
+        let t = parse("x.css", ":root{color-scheme:light;--mddog-font-body:\"Avenir Next\", 'Inter',system-ui;--mddog-heading-scale:1.6 1.4 1.2 1 1 .9;--mddog-heading-weight:800 700 650 600 500 400;--mddog-line-height:1.6;--mddog-code-size:0.9}")
             .unwrap();
         assert_eq!(t.fonts("font-body"), ["Avenir Next", "Inter", "system-ui"]);
         assert_eq!(t.heading_scale(), [1.6, 1.4, 1.2, 1.0, 1.0, 0.9]);
+        assert_eq!(t.heading_weight(), [800, 700, 650, 600, 500, 400]);
         assert_eq!((t.number("line-height"), t.number("code-size")), (1.6, 0.9));
+        let t = parse("x.css", ":root{color-scheme:dark;--mddog-layout:obsidian;--mddog-code-line-height:1.7}").unwrap();
+        assert_eq!((t.choice("layout"), t.number("code-line-height")), ("obsidian", 1.7));
+        // A theme without the token keeps GitHub's layout.
+        assert_eq!(parse("y.css", ":root{color-scheme:dark}").unwrap().choice("layout"), "github");
+        assert_eq!(parse("z.css", ":root{--mddog-base:obsidian-light}").unwrap().choice("layout"), "obsidian");
     }
 
     #[test]
@@ -412,7 +440,16 @@ mod tests {
         assert!(e(":root{color-scheme:dark;--mddog-fg:#ffffff80}").starts_with("x.css: --mddog-fg: expected a hex color"));
         assert_eq!(e(":root{color-scheme:dark;--mddog-tint:#fff}"), "x.css: --mddog-tint: unknown token. A theme sets color-scheme and the --mddog-* tokens that docs/themes.md lists");
         assert!(e(":root{color-scheme:dark;--fgColor-default:#fff}").starts_with("x.css: --fgColor-default: unknown token"));
+        assert_eq!(e(":root{color-scheme:dark;--mddog-layout:notion}"), "x.css: --mddog-layout: expected github or obsidian, but got \"notion\"");
+        assert!(e(":root{color-scheme:dark;--mddog-code-line-height:0}").starts_with("x.css: --mddog-code-line-height: expected a positive number"));
         assert!(e(":root{color-scheme:dark;--mddog-heading-scale:2 1.5}").starts_with("x.css: --mddog-heading-scale: expected six sizes"));
+        assert_eq!(
+            e(":root{color-scheme:dark;--mddog-heading-weight:600 600 600}"),
+            "x.css: --mddog-heading-weight: expected six font weights from 100 to 900, one per heading level, such as 700 680 660 640 620 600, but got \"600 600 600\""
+        );
+        for bad in ["950 600 600 600 600 600", "bold 600 600 600 600 600", "600.5 600 600 600 600 600", "50 600 600 600 600 600"] {
+            assert!(e(&format!(":root{{color-scheme:dark;--mddog-heading-weight:{bad}}}")).starts_with("x.css: --mddog-heading-weight: expected six font weights"), "{bad}");
+        }
         assert!(e(":root{color-scheme:dark;--mddog-line-height:-1}").starts_with("x.css: --mddog-line-height: expected a positive number"));
         assert!(e(":root{color-scheme:dark;--mddog-font-body:a,,b}").starts_with("x.css: --mddog-font-body: expected a list of font names"));
         assert!(e(":root{color-scheme:dark;--mddog-font-body:\"a</style>\"}").starts_with("x.css: --mddog-font-body: expected a list of font names"));
@@ -450,22 +487,6 @@ mod tests {
     }
 
     #[test]
-    fn a_theme_picks_its_mermaid_engine() {
-        use crate::config::Mermaid;
-        assert_eq!(builtin("obsidian-dark").unwrap().mermaid, Some(Mermaid::Obsidian));
-        assert_eq!(builtin("obsidian-light").unwrap().mermaid, Some(Mermaid::Obsidian));
-        assert_eq!(builtin("github-dark").unwrap().mermaid, Some(Mermaid::Pele));
-        assert_eq!(builtin("github-light").unwrap().mermaid, Some(Mermaid::Pele));
-        assert_eq!(parse("x.css", ":root{--mddog-base:obsidian-dark}").unwrap().mermaid, Some(Mermaid::Obsidian));
-        assert_eq!(parse("x.css", ":root{--mddog-base:obsidian-dark;--mddog-mermaid:'pele'}").unwrap().mermaid, Some(Mermaid::Pele));
-        let e = parse("x.css", ":root{color-scheme:dark;--mddog-mermaid:dot}").unwrap_err();
-        assert_eq!(e, "x.css: --mddog-mermaid must be obsidian or pele, but got \"dot\"");
-        // No config loaded in tests, so the theme's choice stands.
-        assert_eq!(crate::config::mermaid(builtin("obsidian-dark").unwrap()), Mermaid::Obsidian);
-        assert_eq!(crate::config::mermaid(builtin("github-dark").unwrap()), Mermaid::Pele);
-    }
-
-    #[test]
     fn base_files_chain_and_loops_fail() {
         let dir = std::env::temp_dir().join(format!("mddog-base-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("sub")).unwrap();
@@ -491,6 +512,10 @@ mod tests {
         let (light, dark) = (builtin("obsidian-light").unwrap(), builtin("obsidian-dark").unwrap());
         assert!(!light.dark && dark.dark);
         assert_eq!(light.heading_scale(), dark.heading_scale());
+        assert_eq!(dark.heading_weight(), [700, 680, 660, 640, 620, 600]);
+        assert_eq!(light.heading_weight(), dark.heading_weight());
+        assert_eq!(builtin("github-dark").unwrap().heading_weight(), [600; 6]);
+        assert_eq!(builtin("github-light").unwrap().heading_weight(), [600; 6]);
     }
 
     #[test]

@@ -33,8 +33,8 @@ src/
   sweep.rs           names and writes private temp files, and removes the temp files and remote cache files that dead runs left behind
   render/            highlighting, GitHub's math rules, and which local images a page may show
     markdown.rs      GitHub's math detection rules, and which local images a page may show
-    highlight.rs     tree-sitter highlighting, as `pl-*` spans
-    textmate.rs      TextMate highlighting (irosashi), as `pl-*` spans
+    highlight.rs     tree-sitter highlighting into per-line token runs, TextMate as the fallback
+    textmate.rs      TextMate tokens (irosashi), each with its `pl-*` classes
   native/            the renderer (CoreText and CoreGraphics)
     doc.rs           Markdown to a block tree, with pulldown-cmark and a small raw HTML reader
     layout.rs        block tree to a Page: a display list plus the data the viewer asks about
@@ -44,7 +44,7 @@ src/
     math.rs          TeX math: parser and box layout
     mermaid.rs       Mermaid source to a bitmap, with mermaid-rs-renderer and resvg
     images.rs        local and remote images, SVG and raster decode
-    highlight.rs     reads the `pl-*` spans into tokens, on a small thread pool with a memo
+    highlight.rs     runs render::highlight on a small thread pool with a memo
     theme.rs         the theme's tokens as the renderer uses them
   engine/
     mod.rs           the typed engine API (types, `display_scale`, `SCALE_GUESS`), and `Engine`
@@ -197,7 +197,7 @@ The terminal parts draw with the theme's `Palette`: the file list, the status ba
 
 - `protect_math` (in `render/markdown.rs`) runs first. See Math.
 - pulldown-cmark reads the Markdown, with offsets. The block tree (`Block`) has paragraphs, headings, code, quotes, GitHub alerts, lists with task boxes, tables, rules, math, Mermaid, `<details>`, aligned blocks, and footnotes. Inline content is flat runs with style flags (`Sty`): bold, italic, strike, code, kbd, sub, sup, underline, mark, and a link index.
-- A small tokenizer reads the raw HTML that Markdown files use: `<details>`, `<summary>`, `<p align>`, `<div align>`, `<br>`, `<img>`, `<kbd>`, `<sub>`, `<sup>`, `<mark>`, `<ins>`, and similar. The contents of `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, and `<template>` are dropped. Other tags have no effect of their own, and their text stays.
+- A small tokenizer reads the raw HTML that Markdown files use: `<details>`, `<summary>`, `<p align>`, `<div align>`, `<br>`, `<img>`, `<kbd>`, `<sub>`, `<sup>`, `<mark>`, `<ins>`, and similar. The contents of `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, and `<template>` are dropped. Other tags have no effect of their own, and their text stays. Text that sits in a raw HTML block outside a `<p>` becomes `Block::Text`, which draws like a paragraph with no gap below it, as a browser draws it.
 - `lines` holds the 1-based source lines of each top-level block, from the parser's offsets. This is how the viewer keeps its position (see Position keeping).
 - Front matter becomes a table with an empty head row (`front_matter_rows`). Raw URLs become links (`autolink`). Heading ids come from `slug`.
 - An empty file becomes `*This file is empty.*`.
@@ -215,7 +215,7 @@ The terminal parts draw with the theme's `Palette`: the file list, the status ba
 
 ### Raster
 
-`native::raster::render_into` draws the items that touch a tile with CoreGraphics into an RGBA buffer, then draws the overlay on top: search marks (the current match in another color), the selection, button hover and "Copied!" state, the scroll bars of wide blocks, and the expanded diagram. The overlay lives outside the display list, so a search or selection change never needs a new layout. Text is drawn with antialiasing and sub-pixel positions, and with font smoothing off. `Engine::snapshot_into` takes a CSS-pixel range and a scale, and draws at that scale even when it differs from the layout scale (headless uses this for its small WebP copies).
+`native::raster::render_into` draws the items that touch a tile with CoreGraphics into an RGBA buffer, then draws the overlay on top: search marks (the current match in another color), the selection, button hover and "Copied!" state, the scroll bars of wide blocks, and the expanded diagram. The overlay lives outside the display list, so a search or selection change never needs a new layout. Text is drawn with antialiasing and sub-pixel positions, and with font smoothing off. `Engine::snapshot` takes a CSS-pixel range and a scale, and draws at that scale even when it differs from the layout scale (headless uses this for its small WebP copies).
 
 ### Engine
 
@@ -224,7 +224,7 @@ The terminal parts draw with the theme's `Palette`: the file list, the status ba
 | Group | Calls |
 |---|---|
 | Page | `new(width, scale)`, `load(src, base, wrap, theme)`, `resize(width)`, `rescale(scale, width)`, `layout()`, `anchor_y(id)`, `set_wrap(bool)` |
-| Tiles | `snapshot(y, h, scale)`, `snapshot_into(y, h, scale, buf)` |
+| Tiles | `snapshot(y, h, scale)` |
 | Search | `search(query, keep)` returns the rects of every match, `search_current(i)` returns the rects of the old and the new current match, `search_clear()` |
 | Mouse | `hover(x, y)` returns the pointer shape and the rects of buttons whose hover changed, `link(x, y)`, `press(x, y)`, `reset_copy()` |
 | Selection | `select(Select)` with `Range`, `Word`, or `Clear`, `selection_text()`, `has_selection()` |
@@ -247,7 +247,7 @@ Layout needs the display's backing scale. `engine::display_scale()` reads it fro
 
 ### Highlighting
 
-Code is highlighted in two steps. `render::highlight` (tree-sitter) and `render::textmate` (irosashi, a Rust port of vscode-textmate) write the way GitHub does, as HTML spans with `pl-*` classes. `native::highlight::from_html` reads those spans back into tokens (`Tok`: keyword, string, comment, number, function, type, punctuation, added, removed, meta). Layout then colors each token with the theme's syntax colors.
+Code is highlighted in two steps. `render::highlight` (tree-sitter) and `render::textmate` (irosashi, a Rust port of vscode-textmate) classify code the way GitHub does, with `pl-*` classes. `render::highlight::block` maps each class to a token (`Tok`: keyword, string, comment, number, function, type, punctuation, added, removed, meta) and returns per-line runs. Layout then colors each token with the theme's syntax colors.
 
 - tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, and PHP. TextMate covers the rest with 128 grammars from starry-night. `tests/textmate.golden` pins the TextMate output.
 - Grammars are embedded deflated. `build.rs` compresses each one into `OUT_DIR` (2.9 MB to 0.54 MB) and lists them by scope. A page inflates only the grammars it needs, and the highlighter is built again when a new language's include chain adds grammars. It reads a grammar's header when it registers it, and parses the grammar when tokenizing first reaches it.
@@ -319,15 +319,15 @@ In both, the background, text, line, and cluster colors come from the theme's to
 - `spawn` queues each fetch for a pool of up to 16 worker threads, started as needed and then kept. A worker takes the oldest job whose host has fewer than 6 running (`PER_HOST`), so one busy host doesn't hold up the others. A job whose stop flag is set while it waits is dropped without a fetch. A job that panics is caught, so the worker keeps going.
 - `fetch` uses ureq with native TLS. It follows up to 5 redirects (`HOPS`), takes up to 30 s, and connects within 5 s. It sends a `mddog/<version>` user agent with a contact URL, because Wikimedia answers 429 to one without. A proxy from the environment is ignored, since ureq would resolve the proxy instead of the host.
 - **Private addresses.** ureq resolves through `Checked`. It refuses a reserved name (`.local`, `.localhost`, `.internal`, `.lan`, `.home`, `.home.arpa`, `.intranet`, `.corp`, or a name with no dot) and returns a host's addresses only when every one is public (`private_ip`). ureq connects only to the addresses it returns, so the address checked is the address used. Each redirect hop resolves through `Checked` again. That also closes DNS rebinding.
-- Only `image/*`, `video/*`, `audio/*`, and octet-stream bodies are passed on, up to 32 MiB (`MAX_BODY`).
-- **Memory cache.** Whole responses and blocks stay in memory, up to 64 MiB, oldest out first, for their `max-age`, between 1 minute and 1 hour, else 5 minutes. A live reload asks for every image again on each save, so even `max-age=0` is kept a minute. `no-store` is not kept.
+- Only `image/*` and octet-stream bodies are passed on, up to 32 MiB (`MAX_BODY`). Every fetch is a plain GET of the whole body.
+- **Memory cache.** Whole responses stay in memory, up to 64 MiB, oldest out first, for their `max-age`, between 1 minute and 1 hour, else 5 minutes. A live reload asks for every image again on each save, so even `max-age=0` is kept a minute. `no-store` is not kept.
 - **Disk cache.** A whole response is also written to `~/Library/Caches/mddog/remote/<hash>`: a JSON line with its URL, type, and expiry, then the body. It goes through a temp file and a rename, so a reader never sees half a file. A reopen in a new process skips the network. The sweep removes it (see Sweep).
 
 ## Drawing in the terminal
 
 ### Tiles
 
-Tiles are pane-wide, a whole number of cell rows tall, and at most 8 MiB and 10,000 px tall each.
+Tiles are pane-wide, a whole number of cell rows tall, and at most 8 MiB (`TILE_BYTES`) and 10,000 px tall each (`MAX_IMAGE_SIDE`: Ghostty and herdr's libghostty-vt refuse a taller image).
 
 **Transfer.** The startup probe picks the route: shared memory, then a temp file under `$TMPDIR`, then PNG chunks. PNG is the only route over SSH, where it makes a tile about 30 times smaller. macOS limits shm names to 31 characters.
 
@@ -449,7 +449,7 @@ Code blocks, wide tables, and zoomed diagrams scroll sideways on their own. The 
 
 - Shift + wheel (`code_scroll`), `h` and `l` (`code_scroll_view`, for every wide block in view), and dragging a bar (`code_grab`, `code_drag`, `code_release`) change the offset. Only the affected tiles are sent again, because each call returns the block's rect.
 - A press on the thumb holds it where it is. A press on the track centers the thumb there first. The grip keeps the thumb under the pointer in a drag.
-- `code_positions` saves the offsets as opaque JSON, and `code_restore` puts them back after a reload, so a reload keeps each block where it was.
+- `code_positions` saves the offsets as a list in page order, and `code_restore` puts them back after a reload, so a reload keeps each block where it was.
 - `w` toggles wrapping for all code blocks (`set_wrap`), which lays the page out again.
 
 ### Mouse, links, and selection
@@ -608,7 +608,7 @@ Opening a file fetches only what the document names: remote images. mddog fetche
   - ureq resolves through `remote::Checked`, which refuses a local name (`.local`, `.internal`, no dot, and so on) and returns a host's addresses only when every one is public (`private_ip`). ureq connects only to the addresses it returns, so the address checked is the address used.
   - ureq follows up to 5 redirects, and each hop resolves through `Checked` again. A proxy from the environment is ignored, since ureq would resolve the proxy instead of the host.
   - Unit tests run a local server with a stub resolver: redirects to a name that resolves to 127.0.0.1, to a `.local` name, and to an IPv4-mapped literal are all refused before any connection, and a rebinding answer is looked up once per connection.
-- Only `image/*`, `video/*`, `audio/*`, and octet-stream bodies are kept, up to 32 MiB, and the page decodes only what the `image` crate and resvg accept.
+- Only `image/*` and octet-stream bodies are kept, up to 32 MiB, and the page decodes only what the `image` crate and resvg accept.
 - Text the terminal draws has control characters replaced, so a file can't inject escape sequences. This covers the status row and the contents sidebar.
 - mddog never writes the previewed file. Selecting text writes the clipboard only with `copy_on_select` on. Otherwise only `c`, Cmd-c, and the copy buttons do.
 
@@ -641,7 +641,7 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 
 - `tests/help.rs` runs mdd in a pty as its own session leader, so Ctrl-z can't stop it there. `ctrl_z_suspends_and_resumes` passes `job: true` to `launch`, which forks a small job-control parent as a shell does: mdd runs in its own foreground group, and the parent passes its stops and exit status up to the test.
 - `tests/search.rs` is an ordinary test file. Each test makes an `Engine`, loads a Markdown string, and calls the same methods the viewer does. Points on the page come from search rects and the layout, not from fixed pixels. `docs/behavior.md` names these tests.
-- `tests/native_math.rs` renders each `fixtures/math/` file's `Doc` into one line per block that holds math or a `$`: inline math as `⟨...⟩`, display math as `⟦...⟧`, and code spans in backticks. It compares that with `tests/math.golden` and allows up to 9 known differences (footnote back-arrows, display style next to dropped HTML, and one `<div>` that splits a paragraph). It writes `tmp/native-math.diff`. `fixtures/math/SOURCES.md` lists where each fixture came from.
+- `tests/native_math.rs` renders each `fixtures/math/` file's `Doc` into one line per block that holds math or a `$`: inline math as `⟨...⟩`, display math as `⟦...⟧`, and code spans in backticks. It must match `tests/math.golden` exactly. `UPDATE_GOLDEN=1 cargo test --test native_math` rewrites it. `fixtures/math/SOURCES.md` lists where each fixture came from.
 - Every test that launches mdd sets `MDDOG_CACHE_DIR` to `$TMPDIR/mddog-test-cache`, so `./check.sh` leaves `~/Library/Caches/mddog/` alone. Unit tests skip the remote disk cache.
 - A unit test in `src/render/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
 

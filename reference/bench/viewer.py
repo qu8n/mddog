@@ -114,12 +114,22 @@ def press(trace, key, timeout=5.0):
     return v[0] - k[0][0], v
 
 
+def loads(rest):
+    for y in rest:
+        if y[2] == "mark" and y[3] == "file event":
+            return False
+        if y[2] == "mark" and y[3] == "page loaded":
+            return True
+    return False
+
+
 def mark_to_view(trace, mark, n_lines_before, timeout=8.0):
     def find():
         ls = lines(trace)[n_lines_before:]
         for i, x in enumerate(ls):
-            # The watcher also reports a no-op event after each reload; count only events that start a render.
-            if mark == "file event" and not (i + 1 < len(ls) and ls[i + 1][3] == "page written"):
+            # The watcher also reports a no-op event after each reload; count only events that load the page
+            # before the next event.
+            if mark == "file event" and not loads(ls[i + 1:]):
                 continue
             if x[2] == "mark" and x[3] == mark:
                 for y in ls[i + 1:]:

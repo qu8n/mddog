@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use crate::native::doc::{Block, Doc};
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tok {
     Plain,
     Keyword,
@@ -18,6 +18,16 @@ pub enum Tok {
     Added,
     Removed,
     Meta,
+    /// A plain identifier (`pl-s1`), which GitHub's highlighter colors like a string.
+    Ident,
+    /// A tag or JSON key (`pl-ent`).
+    Tag,
+    /// A variable or constructor (`pl-v`).
+    Var,
+    /// A type or imported name (`pl-smi`, `pl-sc`).
+    Import,
+    /// An escape (`pl-cce`).
+    Escape,
 }
 
 struct Lang {
@@ -296,108 +306,13 @@ pub fn highlight(langname: &str, text: &str) -> Runs {
     MEMO.with_borrow(|m| m.get(&(langname.to_string(), text.to_string())).cloned()).unwrap_or_else(|| compute(langname, text))
 }
 
-/// From mddog's highlighter (tree-sitter and TextMate grammars), read back from its `pl-*` spans.
-/// `MDDOG_NATIVE_HL=b` uses the rebuild's small highlighter.
+/// From mddog's highlighter (tree-sitter and TextMate grammars). `MDDOG_NATIVE_HL=b` uses the rebuild's
+/// small highlighter.
 fn compute(langname: &str, text: &str) -> Runs {
     if std::env::var("MDDOG_NATIVE_HL").as_deref() == Ok("b") || langname.is_empty() {
         return highlight_b(langname, text);
     }
-    from_html(&crate::render::highlight::block(langname, text), text).unwrap_or_else(|| highlight_b(langname, text))
-}
-
-fn tok_of(class: &str) -> Tok {
-    match class.split_whitespace().next().unwrap_or("") {
-        "pl-c" => Tok::Comment,
-        "pl-k" | "pl-ent" => Tok::Keyword,
-        "pl-s" | "pl-pds" | "pl-sr" | "pl-s1" => Tok::Str,
-        "pl-c1" | "pl-cce" => Tok::Number,
-        "pl-en" | "pl-e" => Tok::Func,
-        "pl-smi" | "pl-v" | "pl-sc" => Tok::Type,
-        "pl-mi1" | "pl-mi2" => Tok::Added,
-        "pl-md" => Tok::Removed,
-        "pl-mh" | "pl-mdr" | "pl-ms" => Tok::Meta,
-        _ => Tok::Plain,
-    }
-}
-
-/// Reads `<pre>`'s spans back into per-line runs of `text`. None when the text doesn't line up.
-fn from_html(html: &str, text: &str) -> Option<Vec<Vec<(usize, usize, Tok)>>> {
-    let a = html.find("<pre")?;
-    let body = &html[a + html[a..].find('>')? + 1..];
-    let body = &body[..body.find("</pre>")?];
-    let mut stack: Vec<Tok> = vec![];
-    let mut runs: Vec<(usize, usize, Tok)> = vec![];
-    let mut pos = 0usize;
-    let tb = text.as_bytes();
-    let mut i = 0;
-    let b = body.as_bytes();
-    while i < b.len() {
-        if b[i] == b'<' {
-            let end = i + body[i..].find('>')?;
-            let tag = &body[i + 1..end];
-            if let Some(rest) = tag.strip_prefix("span class=\"") {
-                stack.push(tok_of(rest.trim_end_matches('"')));
-            } else if tag.starts_with("/span") {
-                stack.pop();
-            } else if tag.starts_with("code") || tag.starts_with("/code") {
-            } else {
-                return None;
-            }
-            i = end + 1;
-            continue;
-        }
-        let (ch, len) = if b[i] == b'&' {
-            let semi = i + body[i..].find(';')?;
-            let c = match &body[i + 1..semi] {
-                "lt" => b'<',
-                "gt" => b'>',
-                "amp" => b'&',
-                "quot" => b'"',
-                "#39" | "#x27" => b'\'',
-                _ => return None,
-            };
-            (c, semi + 1 - i)
-        } else {
-            (b[i], 1)
-        };
-        if pos >= tb.len() {
-            break;
-        }
-        if tb[pos] != ch {
-            return None;
-        }
-        let t = stack.last().copied().unwrap_or(Tok::Plain);
-        match runs.last_mut() {
-            Some(r) if r.1 == pos && r.2 == t => r.1 += 1,
-            _ => runs.push((pos, pos + 1, t)),
-        }
-        pos += 1;
-        i += len;
-    }
-    // Split the runs at newlines into per-line spans with byte offsets relative to the line.
-    let mut out: Vec<Vec<(usize, usize, Tok)>> = vec![];
-    let mut line_start = 0;
-    let mut cur: Vec<(usize, usize, Tok)> = vec![];
-    let mut ri = 0;
-    for (k, c) in tb.iter().enumerate().chain(std::iter::once((tb.len(), &b'\n'))) {
-        if *c == b'\n' {
-            while ri < runs.len() && runs[ri].0 < k {
-                let (s, e, t) = runs[ri];
-                let (s2, e2) = (s.max(line_start), e.min(k));
-                if s2 < e2 && t != Tok::Plain {
-                    cur.push((s2 - line_start, e2 - line_start, t));
-                }
-                if e <= k {
-                    ri += 1;
-                } else {
-                    break;
-                }
-            }
-            out.push(std::mem::take(&mut cur));
-            line_start = k + 1;
-        }
-    }
-    Some(out)
+    crate::render::highlight::block(langname, text).unwrap_or_else(|| highlight_b(langname, text))
 }
 
 fn highlight_b(langname: &str, text: &str) -> Vec<Vec<(usize, usize, Tok)>> {
@@ -429,20 +344,21 @@ fn highlight_b(langname: &str, text: &str) -> Vec<Vec<(usize, usize, Tok)>> {
         let b = line.as_bytes();
         let mut spans: Vec<(usize, usize, Tok)> = vec![];
         let mut i = 0;
-        let mut push = |s: usize, e: usize, t: Tok, spans: &mut Vec<(usize, usize, Tok)>| {
+        let push = |s: usize, e: usize, t: Tok, spans: &mut Vec<(usize, usize, Tok)>| {
             if e > s {
-                if let Some(l) = spans.last_mut() {
-                    if l.2 == t && l.1 == s {
-                        l.1 = e;
-                        return;
-                    }
+                if let Some(l) = spans.last_mut()
+                    && l.2 == t
+                    && l.1 == s
+                {
+                    l.1 = e;
+                    return;
                 }
                 spans.push((s, e, t));
             }
         };
         while i < b.len() {
             if state == 1 {
-                let end = lg.block.unwrap().1;
+                let Some((_, end)) = lg.block else { break };
                 match line[i..].find(end) {
                     Some(p) => {
                         push(i, i + p + end.len(), Tok::Comment, &mut spans);
@@ -458,7 +374,7 @@ fn highlight_b(langname: &str, text: &str) -> Vec<Vec<(usize, usize, Tok)>> {
             }
             if state == 2 {
                 let pat = [tq; 3];
-                match line[i..].as_bytes().windows(3).position(|w| w == pat) {
+                match b[i..].windows(3).position(|w| w == pat) {
                     Some(p) => {
                         push(i, i + p + 3, Tok::Str, &mut spans);
                         i += p + 3;
@@ -476,13 +392,13 @@ fn highlight_b(langname: &str, text: &str) -> Vec<Vec<(usize, usize, Tok)>> {
                 push(i, b.len(), Tok::Comment, &mut spans);
                 break;
             }
-            if let Some((s, _)) = lg.block {
-                if rest.starts_with(s) {
-                    state = 1;
-                    push(i, i + s.len(), Tok::Comment, &mut spans);
-                    i += s.len();
-                    continue;
-                }
+            if let Some((s, _)) = lg.block
+                && rest.starts_with(s)
+            {
+                state = 1;
+                push(i, i + s.len(), Tok::Comment, &mut spans);
+                i += s.len();
+                continue;
             }
             let c = b[i];
             if lg.quotes.as_bytes().contains(&c) {
@@ -526,7 +442,7 @@ fn highlight_b(langname: &str, text: &str) -> Vec<Vec<(usize, usize, Tok)>> {
                     Tok::Keyword
                 } else if line[j..].starts_with('(') {
                     Tok::Func
-                } else if w.chars().next().unwrap().is_ascii_uppercase() && w.len() > 1 {
+                } else if w.chars().next().is_some_and(|c| c.is_ascii_uppercase()) && w.len() > 1 {
                     Tok::Type
                 } else {
                     Tok::Plain
@@ -535,7 +451,7 @@ fn highlight_b(langname: &str, text: &str) -> Vec<Vec<(usize, usize, Tok)>> {
                 i = j;
                 continue;
             }
-            let n = rest.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+            let n = rest.chars().next().map(char::len_utf8).unwrap_or(1);
             push(i, i + n, if "=<>!+-*/%&|^~?:".contains(c as char) { Tok::Punct } else { Tok::Plain }, &mut spans);
             i += n;
         }
@@ -552,18 +468,5 @@ mod tests {
         super::prefetch(&crate::native::doc::parse(&md));
         assert!(super::WORKERS.with_borrow(Vec::len) <= super::WORKERS_MAX);
         assert_eq!(super::MEMO.with_borrow(std::collections::HashMap::len), 50);
-    }
-
-    use super::*;
-
-    #[test]
-    fn reads_mddogs_spans() {
-        let html = crate::render::highlight::block("rust", "let s = \"<a>\"; // hi");
-        let runs = from_html(&html, "let s = \"<a>\"; // hi").expect("lines up");
-        assert_eq!(runs.len(), 1);
-        assert!(runs[0].iter().any(|r| r.2 == Tok::Comment) && runs[0].iter().any(|r| r.2 == Tok::Str), "{runs:?}");
-        // TextMate-only languages read back too.
-        let yaml = "a: 1\n# c\n";
-        assert!(from_html(&crate::render::highlight::block("yaml", yaml), yaml.trim_end()).is_some());
     }
 }

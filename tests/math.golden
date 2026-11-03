@@ -398,7 +398,7 @@ Here, ⟨$$j$$⟩ is the index of each camera, ⟨$$\widetilde{X}$$⟩ is the ho
 5. Perspective-$$n$$-Points:
 Now, since we have a set of ⟨$$n$$⟩ 3D points in the world, their ⟨$$2D$$⟩ projections in the image and the intrinsic parameter; the 6 DOF camera pose can be estimated using linear least squares. This fundamental problem, in general is known as Persepective-$$n$$-Point (PnP). For there to exist a solution, ⟨$$n\geq 3$$⟩. There are multiple methods to solve the P$$n$$P problem and have an assumptions in most of them that the camera is calibrated. Methods such as Unified P$$n$$P (or UPnP) do not abide with the said assumption as they estimate both intrinsic and extrinsic parameters.
 P$$n$$P is prone to error as there are outliers in the given set of point correspondences. To overcome this error, we can use RANSAC (yes, again!) to make our camera pose more robust to outliers. The alogrithm below depicts the solution with RANSAC.
-⟨$$\underset{C,R}{\operatorname{min}} \sum_{i=1,J} \left(u^j - \frac{P_1^{jT}\widetilde{X_j}}{P_3^{jT}{\widetilde{X_j}}}\right)^2 + \left(v^j - \frac{P_2^{jT}\widetilde{X_j}}{P_3^{jT}{X_j}}\right)^2$$⟩
+⟦$$\underset{C,R}{\operatorname{min}} \sum_{i=1,J} \left(u^j - \frac{P_1^{jT}\widetilde{X_j}}{P_3^{jT}{\widetilde{X_j}}}\right)^2 + \left(v^j - \frac{P_2^{jT}\widetilde{X_j}}{P_3^{jT}{X_j}}\right)^2$$⟧
 ⟨$$\underset{\{C_i, q_i\}_{i=1}^i,\{X\}_{j=1}^J}{\operatorname{min}}\sum_{i=1}^I\sum_{j=1}^J V_{ij}\left(\left(u^j - \dfrac{P_1^{jT}\tilde{\phi}}{P_3^{jT}\tilde{X}}\right)^2 + \left(v^j - \dfrac{P_2^{jT}\tilde{\phi}}{P_3^{jT}\tilde{X}}\right)^2\right)$$⟩ where ⟨$$V_{ij}$$⟩ is the visibility matrix. (Don't scratch your head yet!)
 Visibility matrix signifies the relationship between the camera and a point. ⟨$$V_{ij}$$⟩ is one if ⟨$$j^{th}$$⟩ point is visible from the ⟨$$i^{th}$$⟩ camera and zero otherwise. One can use a nonlinear optimization toolbox such as `fminunc` or `lsqnonlin` in MATLAB but is extremely slow as the number of parameters are large. The Sparse Bundle Adjustment toolbox is designed to solve such optimization problem by exploiting sparsity of visibility matrix, ⟨$$V$$⟩.
 === edge-cases
@@ -446,7 +446,7 @@ The ⟨$L_2$⟩ norm
 Summary ⟨$x_1$⟩
 Hidden ⟨$y_2$⟩ math.
 Term ⟨$t_1$⟩
-The bound ⟨$O(n \log n)$⟩ holds for ⟨$n_1 > 0$⟩. ↩
+The bound ⟨$O(n \log n)$⟩ holds for ⟨$n_1 > 0$⟩.
 === factorion-math
 ⟦$$n? = \frac{n(n+1)}{2}$$⟧
 ⟦$$n?_k = k \left\lfloor\frac{n}{k}\right\rfloor? + \left\lceil\frac{n}{k}\right\rceil (n \mod k)$$⟧
@@ -467,6 +467,7 @@ The bound ⟨$O(n \log n)$⟩ holds for ⟨$n_1 > 0$⟩. ↩
 ⟦$$n? = \frac{n(n+1)}{2}$$⟧
 === html-in-math
 Inline: ⟨$a<b$⟩ and $xz$ and $
+$ end.
 $$ ac $$
 After the HTML: ⟨$x_1$⟩ should still be math.
 === ibl-atlas-readme
@@ -681,8 +682,8 @@ Code-span math: ⟨$\sqrt{2}$⟩ and ⟨$a_1 * b_2$⟩, plus `$`x`$` and an actu
 === reduced-footnotes
 The sample mean ⟨$\bar{X}_n$⟩ of ⟨$n$⟩ independent draws converges in distribution.1 The rate depends on the variance ⟨$\sigma^2$⟩.2
 For i.i.d. ⟨$X_i$⟩ with mean ⟨$\mu$⟩ and variance ⟨$\sigma^2 < \infty$⟩,
-⟨$$\sqrt{n},(\bar{X}_n - \mu) \xrightarrow{d} \mathcal{N}(0, \sigma^2).$$⟩ ↩ ↩2
-The Berry-Esseen bound gives ⟨$\sup_x |F_n(x) - \Phi(x)| \le \frac{C \rho}{\sigma^3 \sqrt{n}}$⟩ with ⟨$C < 0.48$⟩, where ⟨$\rho = E|X - \mu|^3$⟩. ↩
+⟦$$\sqrt{n},(\bar{X}_n - \mu) \xrightarrow{d} \mathcal{N}(0, \sigma^2).$$⟧
+The Berry-Esseen bound gives ⟨$\sup_x |F_n(x) - \Phi(x)| \le \frac{C \rho}{\sigma^3 \sqrt{n}}$⟩ with ⟨$C < 0.48$⟩, where ⟨$\rho = E|X - \mu|^3$⟩.
 === reduced-money
 A coffee costs $5 and a sandwich costs $10, so lunch is $15 in total.
 The budget is $5 and $10 for two people, and the sum $5 + $10 is not math.

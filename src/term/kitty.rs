@@ -15,6 +15,8 @@ pub enum Medium {
 }
 
 pub const TILE_BYTES: usize = 8 << 20;
+/// Ghostty (`graphics_image.zig`) and herdr's libghostty-vt refuse an image taller or wider than this many pixels.
+pub const MAX_IMAGE_SIDE: u32 = 10_000;
 
 pub fn storage_limit(herdr: bool) -> usize {
     if herdr { 56 << 20 } else { 300 << 20 }

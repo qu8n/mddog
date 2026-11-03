@@ -92,6 +92,8 @@ pub enum Press {
     },
     /// Opens Mermaid diagram `i` over the view.
     Expand(usize),
+    /// Something on the page changed in place: draw these boxes again.
+    Redraw(Vec<Rect>),
     /// The page changed, so lay it out again.
     Other,
 }

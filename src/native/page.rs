@@ -73,12 +73,13 @@ pub struct HScroll {
     pub bar_y: f32,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BtnKind {
     CopyCode,
     CopyDiagram,
     Expand,
     ZoomIn,
+    ZoomOut,
     ZoomReset,
 }
 
@@ -90,12 +91,42 @@ pub struct Button {
     pub kind: BtnKind,
     /// Index into `Page::copies` or `Page::diagrams`.
     pub data: usize,
+    /// Drawn dimmed, and takes no clicks.
+    pub off: bool,
+}
+
+impl Button {
+    pub fn new(x: f32, y: f32, w: f32, h: f32, kind: BtnKind, data: usize) -> Button {
+        Button { x, y, w, h, kind, data, off: false }
+    }
+
+    /// Whether a click at the point lands on it. A hidden button has no width.
+    pub fn hit(&self, x: f32, y: f32) -> bool {
+        self.w > 0.0 && !self.off && x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
+    }
 }
 
 pub struct Diagram {
+    pub tree: Rc<resvg::usvg::Tree>,
+    /// The display item that draws it.
+    pub item: usize,
+    /// The item's place and picture at the fit size, to put back on reset.
+    pub rect: (f32, f32, f32, f32),
     pub bmp: Rc<Bitmap>,
-    /// The Mermaid source, to draw the diagram again at the expanded size.
-    pub src: String,
+    /// Device pixels per SVG unit at the fit size.
+    pub fit: f32,
+    /// Set when the diagram was shrunk to fit, so it zooms.
+    pub zoom: Option<ZoomBar>,
+}
+
+/// A shrunk diagram's frame, which a zoomed view fills, and its zoom bar (device px).
+pub struct ZoomBar {
+    pub frame: (f32, f32, f32, f32),
+    /// The bar's box item, and its right end.
+    pub item: usize,
+    pub right: f32,
+    /// The zoom in, zoom out and reset buttons.
+    pub buttons: [usize; 3],
 }
 
 /// A top-level block: its 1-based source lines, where it sits (device px), and its span of `Page::text`.

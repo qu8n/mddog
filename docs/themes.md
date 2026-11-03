@@ -41,17 +41,18 @@ A theme is one file of tokens. It sets the page's colors and type, and it colors
 | `--mddog-text-muted` | level 6 headings and other quiet text |
 | `--mddog-heading` | headings 1 to 5 |
 | `--mddog-link` | links |
-| `--mddog-accent` | accents, such as diagram borders under the Obsidian Mermaid engine |
+| `--mddog-accent` | the quote bar and done checkboxes in the `obsidian` layout |
 | `--mddog-code-bg` | inline code |
-| `--mddog-pre-bg` | code blocks, diagrams and keys |
+| `--mddog-pre-bg` | code blocks, diagram nodes, the diagram zoom bar, and keys |
 | `--mddog-alt-bg` | every other table row |
-| `--mddog-rule` | rules, heading lines, quote bars and table borders |
+| `--mddog-rule` | rules, heading lines, quote bars and table borders (the `obsidian` layout draws quote bars in `--mddog-accent`) |
 | `--mddog-mark-bg` | `<mark>` text |
 | `--mddog-match-bg` | search matches |
 | `--mddog-match-current-bg` | the current search match |
 | `--mddog-text-selection` | selected text |
 | `--mddog-alert-note`, `-tip`, `-important`, `-warning`, `-caution` | each alert's bar, icon and title |
 | `--mddog-diff-add-bg`, `--mddog-diff-del-bg` | added and removed lines in a `diff` block |
+| `--mddog-button-bg` | a diagram's copy and expand buttons. Their border and the zoom bar's take `--mddog-border` |
 
 ### Code
 
@@ -63,6 +64,7 @@ A theme is one file of tokens. It sets the page's colors and type, and it colors
 | `--mddog-pl-constant` | numbers, constants and types |
 | `--mddog-pl-entity` | function names |
 | `--mddog-pl-inserted`, `--mddog-pl-deleted` | the text of added and removed `diff` lines |
+| `--mddog-pl-variable`, `--mddog-pl-tag` | variables, and tags and JSON keys, in the `obsidian` layout. The `github` layout draws them as constants and keywords |
 
 ### Type
 
@@ -71,17 +73,29 @@ A theme is one file of tokens. It sets the page's colors and type, and it colors
 | `--mddog-font-body` | font names, first choice first | `system-ui` |
 | `--mddog-font-code` | font names, first choice first | `ui-monospace, SFMono-Regular, Menlo` |
 | `--mddog-heading-scale` | six sizes in em, for `h1` to `h6` | `2 1.5 1.25 1 0.875 0.85` |
+| `--mddog-heading-weight` | six font weights from 100 to 900, for `h1` to `h6` | `600 600 600 600 600 600` |
 | `--mddog-line-height` | body line height, in em | `1.5` |
 | `--mddog-code-size` | code size, in em of the text around it | `0.85` |
+| `--mddog-code-line-height` | line height in code blocks | `1.45` |
 
 A font list works like CSS's `font-family`: mddog takes the first installed font. `system-ui` is the macOS system font, and `ui-monospace` is SF Mono. Quote a name with spaces. When no name matches, body text uses the system font and code uses Menlo.
+
+A heading weight works like CSS's `font-weight`. The system font draws every weight, so Obsidian's `700 680 660 640 620 600` steps down smoothly. A font with fixed cuts takes its nearest one: Menlo has only regular and bold, so its 600 is bold. Bold text and table headers stay at 600 whatever the headings use.
+
+### Layout
+
+`--mddog-layout` picks the rules that place blocks on the page. It is `github` (the default) or `obsidian`.
+
+- `github` lays out a page as github.com draws a README.
+- `obsidian` lays it out as Obsidian's reading view draws a note. Headings have no line under them, sit 40 px below other blocks and 16 px below a heading, and use Obsidian's line heights and letter spacing. `h6` takes the heading color. Lists have small gray dots and gray numbers at every depth, tighter items, and a guide line beside nested lists. Done tasks get a filled box in `--mddog-accent` and struck-through muted text. Links out of the page get a small arrow. Tables are compact with no stripes. Quotes have a thin bar in `--mddog-accent` and normal text. Alerts are tinted boxes with no bar and Octicon icons. Code colors plain names, types and operators in the text color. Rules are thinner with more space around them. Footnotes are larger and in normal text, with a faint way back. Summary lines are regular weight. List numbers use tabular figures. Code blocks and inline code have smaller corners and padding. Diagrams sit at the left edge, in mermaid's default colors.
+
+The `obsidian` layout takes its grays from `--mddog-text` laid over `--mddog-bg`, so a theme with other colors keeps the look. To get Obsidian's layout with your own colors, set `--mddog-layout: obsidian`, or use an Obsidian theme as the base.
 
 ### Other
 
 | Token | Sets |
 |---|---|
 | `--mddog-base` | the theme this one builds on (see below) |
-| `--mddog-mermaid` | the Mermaid engine, `pele` or `obsidian`. Unset, the base's, else `pele`. The config's `[mermaid] engine` wins. |
 
 ## Building on another theme
 
@@ -91,6 +105,6 @@ Name a base with `--mddog-base`, a built-in name or a `.css` path. A relative pa
 :root { --mddog-base: obsidian-dark; --mddog-bg: #202a44; }
 ```
 
-The theme starts from every token of its base, then sets its own, so it keeps the base's updates. It takes the base's `color-scheme` and Mermaid engine. A different `color-scheme`, or a chain of bases that loops, stops mddog with an error.
+The theme starts from every token of its base, then sets its own, so it keeps the base's updates. It takes the base's `color-scheme`. A different `color-scheme`, or a chain of bases that loops, stops mddog with an error.
 
 The four built-in themes in [`assets/themes/`](../assets/themes/) set every token, so they are a full example.

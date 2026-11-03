@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
-use super::escape;
+use crate::native::highlight::{Runs, Tok};
 
 const CAPTURES: &[(&str, &str)] = &[
     ("comment", "pl-c"),
@@ -39,127 +39,192 @@ const CAPTURES: &[(&str, &str)] = &[
     ("embedded", "pl-s1"),
 ];
 
-struct Lang {
-    scope: &'static str,
-    config: HighlightConfiguration,
-}
-
-fn ts_config(name: &str) -> Option<(&'static str, HighlightConfiguration)> {
-    let (scope, language, highlights, injections, locals): (&str, tree_sitter::Language, String, &str, &str) = match name {
+fn ts_config(name: &str) -> Option<HighlightConfiguration> {
+    let (language, highlights, injections, locals): (tree_sitter::Language, String, &str, &str) = match name {
         "js" | "javascript" | "jsx" | "mjs" | "cjs" | "node" => (
-            "source.js",
             tree_sitter_javascript::LANGUAGE.into(),
             format!("{}\n{}", tree_sitter_javascript::JSX_HIGHLIGHT_QUERY, tree_sitter_javascript::HIGHLIGHT_QUERY),
             tree_sitter_javascript::INJECTIONS_QUERY,
             tree_sitter_javascript::LOCALS_QUERY,
         ),
         "ts" | "typescript" | "mts" | "cts" => (
-            "source.ts",
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             format!("{}\n{}", tree_sitter_typescript::HIGHLIGHTS_QUERY, tree_sitter_javascript::HIGHLIGHT_QUERY),
             "",
             tree_sitter_typescript::LOCALS_QUERY,
         ),
         "tsx" => (
-            "source.tsx",
             tree_sitter_typescript::LANGUAGE_TSX.into(),
             format!("{}\n{}\n{}", tree_sitter_typescript::HIGHLIGHTS_QUERY, tree_sitter_javascript::JSX_HIGHLIGHT_QUERY, tree_sitter_javascript::HIGHLIGHT_QUERY),
             "",
             tree_sitter_typescript::LOCALS_QUERY,
         ),
-        "python" | "py" | "python3" | "py3" | "gyp" => {
-            ("source.python", tree_sitter_python::LANGUAGE.into(), tree_sitter_python::HIGHLIGHTS_QUERY.replace("(decorator\n  (identifier) @function)", ""), "", "")
-        }
-        "rust" | "rs" => ("source.rust", tree_sitter_rust::LANGUAGE.into(), tree_sitter_rust::HIGHLIGHTS_QUERY.to_string(), tree_sitter_rust::INJECTIONS_QUERY, ""),
-        "go" | "golang" => ("source.go", tree_sitter_go::LANGUAGE.into(), tree_sitter_go::HIGHLIGHTS_QUERY.to_string(), "", ""),
-        "ruby" | "rb" | "jruby" | "macruby" | "rake" | "rbx" => ("source.ruby", tree_sitter_ruby::LANGUAGE.into(), tree_sitter_ruby::HIGHLIGHTS_QUERY.to_string(), "", tree_sitter_ruby::LOCALS_QUERY),
-        "css" => ("source.css", tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.to_string(), "", ""),
-        "html" | "htm" | "xhtml" => ("text.html.basic", tree_sitter_html::LANGUAGE.into(), tree_sitter_html::HIGHLIGHTS_QUERY.to_string(), tree_sitter_html::INJECTIONS_QUERY, ""),
-        "php" | "inc" => ("text.html.php", tree_sitter_php::LANGUAGE_PHP.into(), tree_sitter_php::HIGHLIGHTS_QUERY.to_string(), tree_sitter_php::INJECTIONS_QUERY, ""),
+        "python" | "py" | "python3" | "py3" | "gyp" => (tree_sitter_python::LANGUAGE.into(), tree_sitter_python::HIGHLIGHTS_QUERY.replace("(decorator\n  (identifier) @function)", ""), "", ""),
+        "rust" | "rs" => (tree_sitter_rust::LANGUAGE.into(), tree_sitter_rust::HIGHLIGHTS_QUERY.to_string(), tree_sitter_rust::INJECTIONS_QUERY, ""),
+        "go" | "golang" => (tree_sitter_go::LANGUAGE.into(), tree_sitter_go::HIGHLIGHTS_QUERY.to_string(), "", ""),
+        "ruby" | "rb" | "jruby" | "macruby" | "rake" | "rbx" => (tree_sitter_ruby::LANGUAGE.into(), tree_sitter_ruby::HIGHLIGHTS_QUERY.to_string(), "", tree_sitter_ruby::LOCALS_QUERY),
+        "css" => (tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.to_string(), "", ""),
+        "html" | "htm" | "xhtml" => (tree_sitter_html::LANGUAGE.into(), tree_sitter_html::HIGHLIGHTS_QUERY.to_string(), tree_sitter_html::INJECTIONS_QUERY, ""),
+        "php" | "inc" => (tree_sitter_php::LANGUAGE_PHP.into(), tree_sitter_php::HIGHLIGHTS_QUERY.to_string(), tree_sitter_php::INJECTIONS_QUERY, ""),
         _ => return None,
     };
     let mut config = HighlightConfiguration::new(language, name, &highlights, injections, locals).ok()?;
     let names: Vec<&str> = CAPTURES.iter().map(|(n, _)| *n).collect();
     config.configure(&names);
-    Some((scope, config))
+    Some(config)
 }
 
 thread_local! {
-    static CACHE: RefCell<HashMap<String, Option<Lang>>> = RefCell::new(HashMap::new());
+    static CACHE: RefCell<HashMap<String, Option<HighlightConfiguration>>> = RefCell::new(HashMap::new());
 }
 
-pub fn block(info: &str, code: &str) -> String {
+/// Highlights a fenced block: per line of `code`, its `(start, end, token)` spans, plain text left out.
+/// Tree-sitter grammars first, then TextMate ones; a language with neither comes back plain. None when the
+/// TextMate grammar's offsets can't line up with `code` (it reads `\r` as a line end).
+pub fn block(info: &str, code: &str) -> Option<Runs> {
     let lang = info.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
-    let code = code.strip_suffix('\n').unwrap_or(code);
+    let body = code.strip_suffix('\n').unwrap_or(code);
     let ts = CACHE.with(|c| {
         let mut c = c.borrow_mut();
-        let entry = c.entry(lang.clone()).or_insert_with(|| ts_config(&lang).map(|(scope, config)| Lang { scope, config }));
-        entry.as_ref().map(|l| (l.scope, tree_sitter_html_spans(&l.config, code)))
+        c.entry(lang.clone()).or_insert_with(|| ts_config(&lang)).as_ref().and_then(|config| ts_spans(config, body))
     });
-    let body = match ts {
-        Some((_, Some(body))) => body,
-        _ => super::textmate::highlight(&lang, code).map_or_else(|| escape(code), |(_, body)| body),
+    let spans = match ts {
+        Some(spans) => spans.into_iter().map(|(s, e, class)| (s, e, tok_of(class))).collect(),
+        None => {
+            let mut spans = vec![];
+            let mut line_start = 0;
+            let mut line = 0;
+            let found = super::textmate::tokens(&lang, body, |i, s, e, path| {
+                while line < i {
+                    line_start += body[line_start..].find('\n').map_or(body.len() - line_start, |n| n + 1);
+                    line += 1;
+                }
+                let class = path.last().map_or("", |p| p.1);
+                spans.push((line_start + s, line_start + e, tok_of(class)));
+            });
+            match found {
+                Some(_) if body.contains('\r') => return None,
+                Some(_) => spans,
+                None => vec![],
+            }
+        }
     };
-    format!("<pre>{body}</pre>")
+    Some(by_line(code, spans))
 }
 
-fn tree_sitter_html_spans(config: &HighlightConfiguration, code: &str) -> Option<String> {
+/// The token for a GitHub `pl-*` class.
+fn tok_of(class: &str) -> Tok {
+    match class {
+        "pl-c" => Tok::Comment,
+        "pl-k" => Tok::Keyword,
+        "pl-ent" => Tok::Tag,
+        "pl-s" | "pl-pds" | "pl-sr" => Tok::Str,
+        "pl-s1" => Tok::Ident,
+        "pl-c1" => Tok::Number,
+        "pl-cce" => Tok::Escape,
+        "pl-en" | "pl-e" => Tok::Func,
+        "pl-v" => Tok::Var,
+        "pl-smi" | "pl-sc" => Tok::Import,
+        "pl-mi1" | "pl-mi2" => Tok::Added,
+        "pl-md" => Tok::Removed,
+        "pl-mh" | "pl-mdr" | "pl-ms" => Tok::Meta,
+        _ => Tok::Plain,
+    }
+}
+
+/// Splits `code`-wide spans, in order, into per-line spans with offsets from each line's start. Merges
+/// neighbours of one token and drops plain text.
+fn by_line(code: &str, spans: Vec<(usize, usize, Tok)>) -> Runs {
+    let mut merged: Vec<(usize, usize, Tok)> = vec![];
+    for (s, e, t) in spans {
+        match merged.last_mut() {
+            Some(r) if r.1 == s && r.2 == t => r.1 = e,
+            _ if s < e => merged.push((s, e, t)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    let mut line_start = 0;
+    let mut runs = merged.into_iter().filter(|r| r.2 != Tok::Plain).peekable();
+    for line in code.split('\n') {
+        let end = line_start + line.len();
+        let mut cur = vec![];
+        while let Some(&(s, e, t)) = runs.peek() {
+            if s > end {
+                break;
+            }
+            let (s2, e2) = (s.max(line_start), e.min(end));
+            if s2 < e2 {
+                cur.push((s2 - line_start, e2 - line_start, t));
+            }
+            if e <= end + 1 {
+                runs.next();
+            } else {
+                break;
+            }
+        }
+        out.push(cur);
+        line_start = end + 1;
+    }
+    out
+}
+
+/// Tree-sitter's spans over `code`, each with the class of its innermost capture.
+fn ts_spans(config: &HighlightConfiguration, code: &str) -> Option<Vec<(usize, usize, &'static str)>> {
     let mut hl = Highlighter::new();
     let events = hl.highlight(config, code.as_bytes(), None, None, |_| None).ok()?;
-    let mut out = String::with_capacity(code.len() * 2);
-    let mut open: Vec<&str> = Vec::new();
+    let mut out = vec![];
+    let mut open: Vec<&'static str> = vec![];
     for ev in events {
         match ev.ok()? {
-            HighlightEvent::HighlightStart(h) => {
-                let class = CAPTURES[h.0].1;
-                out.push_str("<span class=\"");
-                out.push_str(class);
-                out.push_str("\">");
-                open.push(class);
-            }
+            HighlightEvent::HighlightStart(h) => open.push(CAPTURES[h.0].1),
             HighlightEvent::HighlightEnd => {
                 open.pop();
-                out.push_str("</span>");
             }
-            HighlightEvent::Source { start, end } => push_lines(&mut out, &code[start..end], &open),
+            HighlightEvent::Source { start, end } => out.push((start, end, open.last().copied().unwrap_or(""))),
         }
     }
     Some(out)
 }
 
-pub fn push_lines(out: &mut String, text: &str, open: &[&str]) {
-    let mut first = true;
-    for line in text.split('\n') {
-        if !first {
-            for _ in open {
-                out.push_str("</span>");
-            }
-            out.push('\n');
-            for class in open {
-                out.push_str("<span class=\"");
-                out.push_str(class);
-                out.push_str("\">");
-            }
-        }
-        first = false;
-        out.push_str(&escape(line));
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The class tree-sitter gives the first `needle` in `code`.
+    fn class_of(lang: &str, code: &str, needle: &str) -> &'static str {
+        let config = ts_config(lang).unwrap();
+        let at = code.find(needle).unwrap();
+        let spans = ts_spans(&config, code).unwrap();
+        let (s, e, c) = spans.into_iter().find(|&(s, e, _)| s <= at && at < e).unwrap();
+        assert_eq!(&code[s..e], needle, "{lang}: {needle:?} is split");
+        c
+    }
+
     #[test]
     fn ruby_symbols_get_github_class() {
-        let html = super::block("ruby", "f(:a, b: 1)\n");
-        assert!(html.contains(r#"<span class="pl-pds">:a</span>"#), "{html}");
-        assert!(html.contains(r#"<span class="pl-pds">b</span>"#), "{html}");
+        assert_eq!(class_of("ruby", "f(:a, b: 1)\n", ":a"), "pl-pds");
+        assert_eq!(class_of("ruby", "f(:a, b: 1)\n", "b"), "pl-pds");
     }
 
     #[test]
     fn ruby_builtins_and_regexes_get_github_class() {
-        let html = super::block("ruby", "require \"a\"\ndefined?(x)\n/b/\n");
-        assert!(html.contains(r#"<span class="pl-en">require</span>"#), "{html}");
-        assert!(html.contains(r#"<span class="pl-en">defined?</span>"#), "{html}");
-        assert!(html.contains(r#"<span class="pl-sr">/b/</span>"#), "{html}");
+        let code = "require \"a\"\ndefined?(x)\n/b/\n";
+        assert_eq!(class_of("ruby", code, "require"), "pl-en");
+        assert_eq!(class_of("ruby", code, "defined?"), "pl-en");
+        assert_eq!(class_of("ruby", code, "/b/"), "pl-sr");
+    }
+
+    #[test]
+    fn runs_are_per_line() {
+        let runs = block("rust", "let s = \"<a>\"; // hi").unwrap();
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].iter().any(|r| r.2 == Tok::Comment) && runs[0].iter().any(|r| r.2 == Tok::Str), "{runs:?}");
+        // TextMate-only languages too, and a trailing newline gives an empty last line.
+        let yaml = block("yaml", "a: 1\n# c\n").unwrap();
+        assert_eq!(yaml.len(), 3);
+        assert_eq!(yaml[1], [(0, 3, Tok::Comment)]);
+        assert!(block("yaml", "a: 1\r\n").is_none());
+        assert_eq!(block("nosuchlang", "x\ny").unwrap(), [vec![], vec![]]);
     }
 }

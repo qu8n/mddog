@@ -13,7 +13,7 @@ fn keys_scroll_a_wide_code_block_sideways() {
     let e = engine(&format!("```\n{}\n```\n", "x".repeat(400)));
     assert!(!e.code_scroll_view(0.0, 400.0, 80.0).is_empty(), "the visible wide block didn't move");
     let saved = e.code_positions();
-    assert_ne!(saved, "[0.0]");
+    assert_ne!(saved, [0.0]);
     let back = engine(&format!("```\n{}\n```\n", "x".repeat(400)));
     back.code_restore(&saved);
     assert_eq!(back.code_positions(), saved);
@@ -94,4 +94,65 @@ fn a_diagram_expands_over_the_view_and_collapses() {
     assert_eq!(e.collapse(), vec![[0.0, 0.0, 640.0, 200.0]]);
     assert_eq!(shot(&e), before);
     assert!(e.collapse().is_empty());
+}
+
+#[test]
+fn a_selection_across_words_is_one_span_per_line() {
+    let e = engine("alpha beta gamma beta\n");
+    let b = e.layout().blocks[0];
+    let y = b.top + b.height / 2.0;
+    let (n, rects) = e.select(Select::Range(0.0, y, 2000.0, y));
+    assert_eq!(rects.len() - n, 1, "the spaces between words are not highlighted: {rects:?}");
+    let found = e.search("alpha beta gamma", None);
+    assert_eq!(found[0].len(), 1, "a multi-word match is one span: {found:?}");
+}
+
+#[test]
+fn table_cells_stay_separate_spans() {
+    let e = engine("| alpha | beta |\n|---|---|\n| gamma | delta |\n");
+    let found = e.search("alpha", None);
+    assert_eq!(found.len(), 1);
+    let b = e.layout().blocks[0];
+    let y = b.top + 4.0;
+    let (n, rects) = e.select(Select::Range(0.0, y, 2000.0, y));
+    assert!(rects.len() - n >= 2, "a selection across cells skips the gap between them: {rects:?}");
+}
+
+#[test]
+fn tagfilter_tags_show_as_text() {
+    let e = engine(
+        "<script>alert(\"hi\")</script>\n<p>Para.</p>\n<iframe src=\"https://example.com\"></iframe>\n\n<title>T</title> <textarea>A</textarea> <style>s</style> <xmp>x</xmp> <noembed>n</noembed> <noframes>f</noframes> <plaintext>p\n\nkeep <object>o</object><embed><template>t</template> end\n",
+    );
+    let all = e.layout().texts.join("\n");
+    assert!(all.contains("<script>alert(\"hi\")</script>"), "{all}");
+    assert!(all.contains("<iframe src=\"https://example.com\"></iframe>"), "{all}");
+    for src in ["\"https://example.com\"", "'https://example.com'", "https://example.com"] {
+        let links = mddog::native::doc::parse(&format!("<iframe src={src}></iframe>\n")).links;
+        assert_eq!(links, ["https://example.com"], "the link stops at the attribute's end: {src}");
+    }
+    for t in ["<title>T</title>", "<textarea>A</textarea>", "<style>s</style>", "<xmp>x</xmp>", "<noembed>n</noembed>", "<noframes>f</noframes>", "<plaintext>p"] {
+        assert!(all.contains(t), "{t} missing: {all}");
+    }
+    assert!(all.contains("keep") && !all.contains("<object") && !all.contains("<embed") && !all.contains("<template"), "{all}");
+}
+
+#[test]
+fn a_selection_spans_inline_code_and_bold() {
+    let e = engine("alpha `beta` **gamma** delta\n");
+    let b = e.layout().blocks[0];
+    let y = b.top + b.height / 2.0;
+    let (n, rects) = e.select(Select::Range(0.0, y, 2000.0, y));
+    assert_eq!(rects.len() - n, 1, "{rects:?}");
+}
+
+/// Text loose in a raw HTML block draws with no margin, as HTML has it. A `<p>` in the same block keeps its own.
+#[test]
+fn loose_html_text_has_no_margin() {
+    use mddog::native::doc::{Block, parse};
+    let d = parse("<script>x</script>\n<p>Para.</p>\n<iframe></iframe>\n\nAfter.\n");
+    let kinds: Vec<_> = d.blocks.iter().map(|b| matches!(b, Block::Text(_))).collect();
+    assert_eq!(kinds, [true, false, true, false], "Text, Para, Text, Para");
+    let p = |s: &str| engine(s).layout().height;
+    // The loose line and the paragraph under it sit as close as two lines of one paragraph.
+    assert_eq!(p("<script>x</script>\n<p>Para.</p>\n"), p("x  \nPara.\n"));
 }

@@ -1,4 +1,4 @@
-import { webkit, chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -6,7 +6,7 @@ const PAGES = {
   'gfm.md': { url: 'https://github.com/qu8n/gfm-test/blob/main/README.md', body: 'article.markdown-body', origin: 'https://github.com' },
 };
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []));
-const engineName = args.engine || 'webkit';
+const engineName = args.engine || 'chromium';
 const file = args.file || 'gfm.md';
 const width = Number(args.width || 898);
 const scheme = args.scheme || 'dark';
@@ -18,7 +18,7 @@ fs.mkdirSync(out, { recursive: true });
 const source = args.url ? { ...PAGES[file], url: args.url } : PAGES[file];
 if (!PAGES[file]) throw new Error(`no reference page for ${file}; known: ${Object.keys(PAGES).join(', ')}`);
 const sel = source.body;
-const engine = engineName === 'chromium' ? chromium : webkit;
+const engine = engineName === 'webkit' ? webkit : chromium;
 const browser = await engine.launch();
 
 async function open(viewportWidth) {

@@ -16,7 +16,8 @@ pub struct Config {
     pub glide_ms_per_page: u32,
     /// Releasing a drag or double-click selection copies it.
     pub copy_on_select: bool,
-    pub mermaid: MermaidConfig,
+    /// Unset, mddog follows the macOS font smoothing setting.
+    pub font_smoothing: Option<bool>,
     pub file_list: FileListConfig,
     /// The `theme` key's themes, read.
     #[serde(skip)]
@@ -27,7 +28,7 @@ impl Default for Config {
     fn default() -> Config {
         let theme = ThemeSpec::default();
         let themes = theme.load(Path::new("")).expect("built-in themes");
-        Config { theme, live_reload: true, smooth_scroll: true, glide_ms_per_page: 200, copy_on_select: false, mermaid: MermaidConfig::default(), file_list: FileListConfig::default(), themes }
+        Config { theme, live_reload: true, smooth_scroll: true, glide_ms_per_page: 200, copy_on_select: false, font_smoothing: None, file_list: FileListConfig::default(), themes }
     }
 }
 
@@ -99,26 +100,6 @@ impl Default for Themes {
     fn default() -> Themes {
         Config::default().themes
     }
-}
-
-#[derive(Deserialize, Debug, Default, PartialEq, Eq)]
-#[serde(deny_unknown_fields, default)]
-pub struct MermaidConfig {
-    /// Unset, the theme's `--mddog-mermaid` picks the engine.
-    pub engine: Option<Mermaid>,
-}
-
-#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Mermaid {
-    #[default]
-    Pele,
-    Obsidian,
-}
-
-/// The Mermaid engine for a page in this theme: the config's, else the theme's, else the style's.
-pub fn mermaid(t: &Theme) -> Mermaid {
-    get().mermaid.engine.or(t.mermaid).unwrap_or_default()
 }
 
 #[derive(Deserialize, Debug, PartialEq, Eq)]
@@ -237,6 +218,21 @@ pub fn theme() -> &'static Theme {
     }
 }
 
+/// Whether text is drawn with font smoothing: the config's choice, else the macOS setting at startup.
+pub fn font_smoothing() -> bool {
+    static SYSTEM: OnceLock<bool> = OnceLock::new();
+    get().font_smoothing.unwrap_or_else(|| *SYSTEM.get_or_init(system_smoothing))
+}
+
+/// macOS's `AppleFontSmoothing`: 0 turns smoothing off, and unset or 1 to 3 leave it on. CoreGraphics
+/// bitmap contexts ignore it, so mddog reads it itself.
+fn system_smoothing() -> bool {
+    use objc2_foundation::{NSString, NSUserDefaults};
+    let d = NSUserDefaults::standardUserDefaults();
+    let key = NSString::from_str("AppleFontSmoothing");
+    d.objectForKey(&key).is_none() || d.integerForKey(&key) != 0
+}
+
 fn system_dark() -> bool {
     use objc2_foundation::{NSString, NSUserDefaults};
     let style = NSUserDefaults::standardUserDefaults().stringForKey(&NSString::from_str("AppleInterfaceStyle"));
@@ -257,8 +253,8 @@ mod tests {
         assert!(Config::default().live_reload);
         assert!(Config::default().smooth_scroll);
         assert!(!Config::default().copy_on_select);
+        assert_eq!(Config::default().font_smoothing, None);
         assert_eq!(Config::default().glide_ms_per_page, 200);
-        assert_eq!(Config::default().mermaid.engine, None);
         assert_eq!(Config::default().file_list.extensions, ["md", "markdown"]);
         let t = Config::default().themes;
         assert_eq!((t.light.name.as_str(), t.dark.map(|d| d.name)), ("github-light", Some("github-dark".into())));
@@ -271,15 +267,15 @@ mod tests {
 
     #[test]
     fn full() {
-        let c = parse("theme = \"github-dark\"\nlive_reload = false\nsmooth_scroll = false\nglide_ms_per_page = 100\ncopy_on_select = true\n[mermaid]\nengine = \"pele\"\n").unwrap();
+        let c = parse("theme = \"github-dark\"\nlive_reload = false\nsmooth_scroll = false\nglide_ms_per_page = 100\ncopy_on_select = true\n").unwrap();
         assert_eq!(c.theme, ThemeSpec::One(Source::Builtin(theme::builtin("github-dark").unwrap())));
         assert_eq!((c.themes.light.name.as_str(), c.themes.dark), ("github-dark", None));
         assert!(!c.live_reload);
         assert!(!c.smooth_scroll);
         assert!(c.copy_on_select);
         assert_eq!(c.glide_ms_per_page, 100);
-        assert_eq!(c.mermaid.engine, Some(Mermaid::Pele));
-        assert_eq!(parse("[mermaid]\nengine = \"obsidian\"\n").unwrap().mermaid.engine, Some(Mermaid::Obsidian));
+        assert_eq!(parse("font_smoothing = true\n").unwrap().font_smoothing, Some(true));
+        assert_eq!(parse("font_smoothing = false\n").unwrap().font_smoothing, Some(false));
     }
 
     #[test]
@@ -320,17 +316,17 @@ mod tests {
             assert!(!e.contains('\n'), "{e}");
             e
         };
-        let e = one_line("[mermaid]\nengine = \"dot\"\n");
-        assert!(e.starts_with("line 2: mermaid.engine: unknown variant `dot`"), "{e}");
-        let e = one_line("[mermaid]\nengin = \"pele\"\n");
-        assert!(e.starts_with("line 2: mermaid.engin: unknown field `engin`"), "{e}");
         let e = one_line("[background]\ndark = \"terminal\"\n");
         assert!(e.starts_with("line 1: background: unknown field `background`"), "{e}");
         let e = one_line("live_reload = \"yes\"\n");
         assert!(e.starts_with("line 1: live_reload: invalid type"), "{e}");
+        let e = one_line("font_smoothing = 2\n");
+        assert!(e.starts_with("line 1: font_smoothing: invalid type: integer `2`, expected a boolean"), "{e}");
         // Removed keys get the unknown-key error like any other.
         let e = one_line("prewarm = false\n");
         assert!(e.starts_with("line 1: prewarm: unknown field `prewarm`"), "{e}");
+        let e = one_line("[mermaid]\nengine = \"pele\"\n");
+        assert!(e.starts_with("line 1: mermaid: unknown field `mermaid`"), "{e}");
         let e = one_line("[file_list]\nextensions = [\".md\"]\n");
         assert!(e.starts_with("line 2: file_list.extensions: \".md\" is not an extension"), "{e}");
         let e = one_line("[file_list]\nextensions = [\"md\", \"\"]\n");

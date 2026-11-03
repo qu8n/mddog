@@ -4,8 +4,6 @@ use std::sync::Arc;
 
 use irosashi::{CodeToTokensOptions, Highlighter, HighlighterBuilder};
 
-use super::escape;
-
 // `GRAMMARS`: each grammar's JSON, deflated by build.rs, sorted by scope.
 include!(concat!(env!("OUT_DIR"), "/textmate/textmate.rs"));
 const ALIASES: &[u8] = include_bytes!("../../assets/textmate/aliases.json");
@@ -96,7 +94,11 @@ fn class_for<'a>(classes: &'a HashMap<String, String>, scope: &str) -> Option<&'
     }
 }
 
-pub fn highlight(lang: &str, code: &str) -> Option<(String, String)> {
+/// Tokenizes `code` with the TextMate grammar for `lang` and calls `f(line, start, end, path)` for each token,
+/// where `path` lists the `(scope, class)` of each enclosing scope that has a GitHub class, outermost first.
+/// Offsets are bytes within the line, and lines split at `\n`, `\r\n` or `\r`. Returns the grammar's scope,
+/// or None when no grammar fits or it reports problems; then `f` was never called.
+pub fn tokens(lang: &str, code: &str, mut f: impl FnMut(usize, usize, usize, &[(&str, &str)])) -> Option<String> {
     TM.with(|cell| {
         let tm = cell.get_or_init(load).as_ref()?;
         let scope = tm.scope(lang)?;
@@ -108,38 +110,63 @@ pub fn highlight(lang: &str, code: &str) -> Option<(String, String)> {
         if !result.diagnostics.is_empty() {
             return None;
         }
-        let mut out = String::with_capacity(code.len() * 2);
-        for (i, line) in text.split('\n').enumerate() {
-            if i > 0 {
-                out.push('\n');
-            }
-            let mut open: Vec<(&str, &str)> = Vec::new();
-            for token in result.lines.get(i).map_or(&[][..], |l| &l.tokens[..]) {
+        let mut all = vec![];
+        for (i, line) in result.lines.iter().enumerate() {
+            for token in &line.tokens {
                 let path: Vec<(&str, &str)> = result.scopes_of(token)?.iter().skip(1).filter_map(|s| class_for(&tm.classes, s).map(|c| (&**s, c))).collect();
-                let keep = open.iter().zip(&path).take_while(|(a, b)| a.0 == b.0).count();
-                for _ in keep..open.len() {
-                    out.push_str("</span>");
-                }
-                open.truncate(keep);
-                for (s, c) in &path[keep..] {
-                    out.push_str("<span class=\"");
-                    out.push_str(c);
-                    out.push_str("\">");
-                    open.push((s, c));
-                }
-                out.push_str(&escape(line.get(token.start..token.end).unwrap_or("")));
-            }
-            for _ in &open {
-                out.push_str("</span>");
+                all.push((i, token.start, token.end, path));
             }
         }
-        Some((scope, out))
+        for (i, s, e, path) in &all {
+            f(*i, *s, *e, path);
+        }
+        Some(scope)
     })
 }
 
 #[cfg(test)]
 mod tests {
     use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+
+    fn escape(s: &str) -> String {
+        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    }
+
+    /// A token's start, end, and `(scope, class)` path.
+    type Token = (usize, usize, Vec<(String, String)>);
+
+    /// The tokens as GitHub's `pl-*` spans, the golden's format.
+    fn html(lang: &str, code: &str) -> Option<(String, String)> {
+        let mut lines: Vec<Vec<Token>> = vec![];
+        let scope = super::tokens(lang, code, |i, s, e, path| {
+            lines.resize_with(lines.len().max(i + 1), Vec::new);
+            lines[i].push((s, e, path.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()));
+        })?;
+        let text = code.replace("\r\n", "\n").replace('\r', "\n");
+        let mut out = String::new();
+        for (i, line) in text.split('\n').enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            let mut open: Vec<&(String, String)> = vec![];
+            for (s, e, path) in lines.get(i).map_or(&[][..], |l| &l[..]) {
+                let keep = open.iter().zip(path).take_while(|(a, b)| a.0 == b.0).count();
+                for _ in keep..open.len() {
+                    out.push_str("</span>");
+                }
+                open.truncate(keep);
+                for p in &path[keep..] {
+                    out.push_str(&format!("<span class=\"{}\">", p.1));
+                    open.push(p);
+                }
+                out.push_str(&escape(line.get(*s..*e).unwrap_or("")));
+            }
+            for _ in &open {
+                out.push_str("</span>");
+            }
+        }
+        Some((scope, out))
+    }
 
     #[test]
     fn grammars_are_sorted_for_binary_search() {
@@ -168,7 +195,7 @@ mod tests {
                         // A fresh thread starts with no grammars, so each block proves its language loads what it includes.
                         let code = literal.strip_suffix('\n').unwrap_or(&literal).to_string();
                         let lang2 = lang.clone();
-                        if let Some((scope, html)) = std::thread::spawn(move || super::highlight(&lang2, &code)).join().unwrap() {
+                        if let Some((scope, html)) = std::thread::spawn(move || html(&lang2, &code)).join().unwrap() {
                             out.push_str(&format!("--- {f} {lang} {scope}\n{html}\n"));
                         }
                     }

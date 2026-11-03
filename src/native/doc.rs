@@ -1,8 +1,8 @@
 //! Markdown to a block tree. Inline content is flat runs with style flags.
-use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Sty {
     pub bold: bool,
     pub italic: bool,
@@ -27,7 +27,7 @@ pub enum Inl {
     FootRef(usize, String),
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Alert {
     Note,
     Tip,
@@ -45,16 +45,34 @@ pub struct LItem {
 #[derive(Clone, Debug)]
 pub enum Block {
     Para(Vec<Inl>),
+    /// Text that sits in a raw HTML block outside any `<p>`. HTML draws it as a line box with no margin, so no gap follows it.
+    Text(Vec<Inl>),
     Heading(u8, Vec<Inl>, String),
-    Code { lang: String, text: String },
+    Code {
+        lang: String,
+        text: String,
+    },
     Quote(Vec<Block>),
     Alert(Alert, Vec<Block>),
-    List { start: Option<u64>, items: Vec<LItem>, tight: bool },
-    Table { aligns: Vec<u8>, head: Vec<Vec<Inl>>, rows: Vec<Vec<Vec<Inl>>> },
+    List {
+        start: Option<u64>,
+        items: Vec<LItem>,
+        tight: bool,
+    },
+    Table {
+        aligns: Vec<u8>,
+        head: Vec<Vec<Inl>>,
+        rows: Vec<Vec<Vec<Inl>>>,
+    },
     Rule,
     Math(String),
     Mermaid(String),
-    Details { summary: Vec<Inl>, open: bool, body: Vec<Block>, id: usize },
+    Details {
+        summary: Vec<Inl>,
+        open: bool,
+        body: Vec<Block>,
+        id: usize,
+    },
     Align(u8, Vec<Block>),
     Footnotes(Vec<(usize, String, Vec<Block>)>),
 }
@@ -73,7 +91,6 @@ enum Fk {
     List(Option<u64>),
     Details { open: bool, id: usize },
     Align(u8, &'static str),
-    Html(&'static str),
     Heading(u8, String),
     Foot(String),
 }
@@ -127,6 +144,8 @@ struct B {
     details_n: usize,
     in_image: Option<(String, String, Vec<Inl>)>,
     html_buf: String,
+    /// Set while a raw HTML block is read, so its loose text becomes `Block::Text`.
+    raw: bool,
 }
 
 impl B {
@@ -158,7 +177,7 @@ impl B {
     }
 
     fn top(&mut self) -> &mut Frame {
-        self.stack.last_mut().unwrap()
+        self.stack.last_mut().expect("the root frame is never popped")
     }
 
     fn push_block(&mut self, b: Block) {
@@ -173,18 +192,18 @@ impl B {
         let v = std::mem::take(&mut self.inl);
         let v = finish_inlines(v, &mut self.links);
         if v.iter().any(|i| !matches!(i, Inl::Text(t, _) if t.trim().is_empty()) && !matches!(i, Inl::Soft)) {
-            self.push_block(Block::Para(v));
+            let in_p = matches!(self.stack.last().map(|f| &f.kind), Some(Fk::Align(_, "p")));
+            self.push_block(if self.raw && !in_p { Block::Text(v) } else { Block::Para(v) });
         }
     }
 
     fn pop_frame(&mut self) -> Frame {
-        self.stack.pop().unwrap()
+        self.stack.pop().expect("every frame pops after its push")
     }
 
     fn end_html_container(&mut self, name: &str) {
         // find the nearest matching html frame
         let pos = self.stack.iter().rposition(|f| match &f.kind {
-            Fk::Html(n) => *n == name,
             Fk::Align(_, n) => *n == name,
             Fk::Details { .. } => name == "details",
             Fk::Heading(..) => name.len() == 2 && name.starts_with('h'),
@@ -202,7 +221,7 @@ impl B {
 
     /// Close html frames (details, align) left open inside a markdown container.
     fn close_html_frames(&mut self) {
-        while self.stack.len() > 1 && matches!(self.stack.last().map(|f| &f.kind), Some(Fk::Html(_) | Fk::Align(..) | Fk::Details { .. })) {
+        while self.stack.len() > 1 && matches!(self.stack.last().map(|f| &f.kind), Some(Fk::Align(..) | Fk::Details { .. })) {
             self.flush();
             self.close_frame();
         }
@@ -212,12 +231,6 @@ impl B {
         let f = self.pop_frame();
         let blocks = f.blocks;
         let b = match f.kind {
-            Fk::Html(_) => {
-                for b in blocks {
-                    self.push_block(b);
-                }
-                return;
-            }
             Fk::Align(a, _) => {
                 if a == 0 {
                     for b in blocks {
@@ -262,7 +275,7 @@ impl B {
         if matches!(self.inl.last(), Some(Inl::Text(..))) {
             self.text(&HTML_BREAK.to_string());
         }
-        for t in tokenize(h) {
+        for t in tokenize(&tagfilter(h)) {
             match t {
                 Tok::Text(s) => {
                     if self.skip.is_some() {
@@ -286,7 +299,7 @@ impl B {
         }
         let attr = |k: &str| attrs.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
         match name {
-            "script" | "iframe" | "style" | "object" | "embed" | "template" => {
+            "object" | "embed" | "template" => {
                 self.skip = Some(name.to_string());
             }
             "details" => {
@@ -333,7 +346,7 @@ impl B {
             }
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush();
-                let l = name[1..].parse().unwrap();
+                let l = name[1..].parse().unwrap_or(1);
                 self.stack.push(frame(Fk::Heading(l, String::new())));
             }
             "br" => self.inl.push(Inl::Hard),
@@ -369,10 +382,8 @@ impl B {
                     self.inl.push(Inl::Hard);
                 }
             }
-            "td" | "th" => {
-                if !self.inl.is_empty() {
-                    self.text("  ");
-                }
+            "td" | "th" if !self.inl.is_empty() => {
+                self.text("  ");
             }
             _ => {}
         }
@@ -396,7 +407,7 @@ impl B {
                 }
             }
             "details" | "div" | "p" | "center" | "section" | "article" | "header" | "footer" | "main" | "nav" | "figure" | "figcaption" | "picture" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-                self.end_html_container(name)
+                self.end_html_container(name);
             }
             "a" => {
                 self.link.pop();
@@ -427,13 +438,12 @@ pub fn finish_inlines(v: Vec<Inl>, links: &mut Vec<String>) -> Vec<Inl> {
     // merge adjacent text with equal style
     let mut m: Vec<Inl> = Vec::with_capacity(v.len());
     for i in v {
-        if let Inl::Text(s, st) = &i {
-            if let Some(Inl::Text(ps, pst)) = m.last_mut() {
-                if pst == st {
-                    ps.push_str(s);
-                    continue;
-                }
-            }
+        if let Inl::Text(s, st) = &i
+            && let Some(Inl::Text(ps, pst)) = m.last_mut()
+            && pst == st
+        {
+            ps.push_str(s);
+            continue;
         }
         m.push(i);
     }
@@ -493,7 +503,9 @@ fn autolink(s: &str, st: Sty, links: &mut Vec<String>, out: &mut Vec<Inl>) {
         let mut end = None;
         let mut url = String::new();
         if at_word && (rest.starts_with("http://") || rest.starts_with("https://") || rest.starts_with("www.")) {
-            let mut e = rest.find(|c: char| c.is_whitespace() || c == '<').unwrap_or(rest.len());
+            // A double quote or `>` ends it too, so `src="https://example.com">` from a filtered tag links only
+            // the URL (a trailing single quote is trimmed below).
+            let mut e = rest.find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"')).unwrap_or(rest.len());
             e = trim_url(&rest[..e]);
             let min = if rest.starts_with("www.") { 5 } else { 9 };
             if e >= min {
@@ -533,7 +545,7 @@ fn autolink(s: &str, st: Sty, links: &mut Vec<String>, out: &mut Vec<Inl>) {
             last = e;
             i = e;
         } else {
-            i += s[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+            i += s[i..].chars().next().map(char::len_utf8).unwrap_or(1);
         }
     }
     if last < s.len() {
@@ -562,6 +574,27 @@ fn trim_url(u: &str) -> usize {
         }
     }
     e
+}
+
+/// GFM's tagfilter: escapes the `<` of these nine tags, so they show as literal text, as on GitHub.
+fn tagfilter(h: &str) -> std::borrow::Cow<'_, str> {
+    const TAGS: [&str; 9] = ["title", "textarea", "style", "xmp", "iframe", "noembed", "noframes", "script", "plaintext"];
+    let hit = |rest: &str| {
+        let r = rest.strip_prefix('/').unwrap_or(rest);
+        TAGS.iter().any(|t| r.get(..t.len()).is_some_and(|n| n.eq_ignore_ascii_case(t)) && r[t.len()..].chars().next().is_none_or(|c| c.is_whitespace() || c == '>' || c == '/'))
+    };
+    if !h.match_indices('<').any(|(i, _)| hit(&h[i + 1..])) {
+        return h.into();
+    }
+    let mut out = String::with_capacity(h.len() + 16);
+    for (i, c) in h.char_indices() {
+        if c == '<' && hit(&h[i + 1..]) {
+            out.push_str("&lt;");
+        } else {
+            out.push(c);
+        }
+    }
+    out.into()
 }
 
 enum Tok {
@@ -629,13 +662,11 @@ fn tokenize(h: &str) -> Vec<Tok> {
                 continue;
             }
             let nc = rest[1..].chars().next().unwrap_or(' ');
-            let e = rest.find('>');
-            if !(nc.is_ascii_alphabetic() || nc == '/') || e.is_none() {
+            let Some(e) = rest.find('>').filter(|_| nc.is_ascii_alphabetic() || nc == '/') else {
                 out.push(Tok::Text("<".to_string()));
                 rest = &rest[1..];
                 continue;
-            }
-            let e = e.unwrap();
+            };
             let inner = &rest[1..e];
             rest = &rest[e + 1..];
             if let Some(name) = inner.strip_prefix('/') {
@@ -774,6 +805,7 @@ pub fn parse(src: &str) -> Doc {
         details_n: 0,
         in_image: None,
         html_buf: String::new(),
+        raw: false,
     };
     let mut meta = None;
     let starts: Vec<usize> = std::iter::once(0).chain(src.match_indices('\n').map(|(i, _)| i + 1)).collect();
@@ -962,7 +994,7 @@ impl B {
                 TagEnd::Heading(_) => {
                     let base = slug(&plain(&b.inl));
                     let n = b.anchors.entry(base.clone()).or_insert(0);
-                    let id = if *n > 0 { format!("{}-{}", base, n) } else { base };
+                    let id = if *n > 0 { format!("{base}-{n}") } else { base };
                     *n += 1;
                     if let Some(Frame { kind: Fk::Heading(_, i), .. }) = b.stack.last_mut() {
                         *i = id;
@@ -989,8 +1021,10 @@ impl B {
                 }
                 TagEnd::HtmlBlock => {
                     let h = std::mem::take(&mut b.html_buf);
+                    b.raw = true;
                     b.html(&h);
                     b.flush();
+                    b.raw = false;
                     b.skip = None;
                 }
                 TagEnd::List(_) => {
@@ -1081,7 +1115,7 @@ impl B {
                 let s: std::borrow::Cow<str> = if s.len() >= 2 && s.starts_with('`') && s.ends_with('`') { s[1..s.len() - 1].trim().to_string().into() } else { s.to_string().into() };
                 // `$20, 3$` is money, not math: a digit first and a space inside
                 if s.starts_with(|c: char| c.is_ascii_digit()) && s.contains(char::is_whitespace) {
-                    b.inl.push(Inl::Text(format!("${}$", s), st));
+                    b.inl.push(Inl::Text(format!("${s}$"), st));
                 } else {
                     b.inl.push(Inl::Math(s.to_string(), st));
                 }
@@ -1110,7 +1144,7 @@ impl B {
             }
             Event::SoftBreak => {
                 if b.in_image.is_none() {
-                    b.inl.push(Inl::Soft)
+                    b.inl.push(Inl::Soft);
                 }
             }
             Event::HardBreak => b.inl.push(Inl::Hard),
@@ -1123,7 +1157,6 @@ impl B {
                     f.task = Some(c);
                 }
             }
-            _ => {}
         }
     }
 }
@@ -1138,9 +1171,6 @@ fn heading_level(l: HeadingLevel) -> u8 {
         HeadingLevel::H6 => 6,
     }
 }
-
-#[allow(dead_code)]
-fn _unused(_: LinkType) {}
 
 /// The top-level `key: value` lines of YAML front matter, without its `---` lines, as GitHub's table shows them.
 pub fn front_matter_rows(yaml: &str) -> Vec<(String, String)> {

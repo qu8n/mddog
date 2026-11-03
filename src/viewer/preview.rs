@@ -866,8 +866,8 @@ impl Preview {
                 self.act_all(actions)
             }
             Click::Drag if self.bar_held => {
-                let (x, _) = grid.point(spot, 0.5);
-                let rects = self.engine.code_drag(x);
+                let (x, y) = grid.point(spot, 0.5);
+                let rects = self.engine.code_drag(x, y);
                 self.redraw(&rects)
             }
             Click::Release if self.bar_held => {
@@ -1000,6 +1000,7 @@ impl Preview {
                 self.app.expanded = shown;
                 shown
             }
+            Press::Redraw(rects) => self.redraw(&rects),
             Press::Other => {
                 self.relayout();
                 false
@@ -1169,7 +1170,7 @@ impl Preview {
     fn render_doc(&mut self, bytes: Vec<u8>, src: String, keep: bool) {
         let anchor = if keep { self.anchor() } else { None };
         let back = if keep { self.back_anchors() } else { Vec::new() };
-        let code = if keep { self.engine.code_positions() } else { String::new() };
+        let code = if keep { self.engine.code_positions() } else { Vec::new() };
         let mut old_src = std::mem::take(&mut self.src);
         let mut anchor = anchor;
         if let Some((a, src)) = self.restore_at.take() {
@@ -1185,7 +1186,7 @@ impl Preview {
         self.engine.load(&src, &base, self.app.wrap, theme);
         self.settle_scale();
         trace::mark("page loaded");
-        if !code.is_empty() && code != "[]" {
+        if !code.is_empty() {
             self.engine.code_restore(&code);
         }
         self.measure();
@@ -1308,7 +1309,7 @@ impl Preview {
     fn tile_height(&self) -> u32 {
         let width = u32::from(self.img_cols) * self.cell_w;
         // One row less than fits, for the row each tile is sent with below it.
-        let rows = (kitty::TILE_BYTES as u32 / (width.max(1) * 4) / self.cell_h).min(10_000 / self.cell_h);
+        let rows = (kitty::TILE_BYTES as u32 / (width.max(1) * 4) / self.cell_h).min(kitty::MAX_IMAGE_SIDE / self.cell_h);
         rows.saturating_sub(1).max(1) * self.cell_h
     }
 
@@ -1525,9 +1526,12 @@ impl Preview {
             }
         }
         if let Some(until) = self.late {
-            if Instant::now() > until || self.engine.images_done() {
-                self.late = None;
+            // Each engine relayout gets a measure here before the next tile goes out, so tiles and offsets agree.
+            if self.engine.take_images() {
                 self.relayout();
+            }
+            if self.engine.pending_images() == 0 || Instant::now() > until {
+                self.late = None;
             }
             return;
         }

@@ -342,7 +342,7 @@ impl P {
         self.c.get(self.i).copied()
     }
     fn ws(&mut self) {
-        while self.peek().map(|c| c.is_whitespace()).unwrap_or(false) {
+        while self.peek().map(char::is_whitespace).unwrap_or(false) {
             self.i += 1;
         }
     }
@@ -553,7 +553,7 @@ impl P {
             c if c.is_ascii_digit() => {
                 let mut s = c.to_string();
                 while let Some(d) = self.peek() {
-                    if d.is_ascii_digit() || d == '.' && self.c.get(self.i + 1).map(|x| x.is_ascii_digit()).unwrap_or(false) {
+                    if d.is_ascii_digit() || d == '.' && self.c.get(self.i + 1).map(char::is_ascii_digit).unwrap_or(false) {
                         s.push(d);
                         self.i += 1;
                     } else {
@@ -568,28 +568,28 @@ impl P {
     }
     fn command(&mut self) -> N {
         // escaped single characters
-        if let Some(c) = self.peek() {
-            if !c.is_ascii_alphabetic() {
-                self.i += 1;
-                return match c {
-                    '{' => N::Sym("{".into(), Cls::Open, false),
-                    '}' => N::Sym("}".into(), Cls::Close, false),
-                    '|' => N::Sym("‖".into(), Cls::Ord, false),
-                    ',' => N::Space(0.17),
-                    ':' | '>' => N::Space(0.22),
-                    ';' => N::Space(0.28),
-                    '!' => N::Space(-0.17),
-                    ' ' => N::Space(0.33),
-                    '$' | '%' | '#' | '&' | '_' => N::Sym(c.to_string(), Cls::Ord, false),
-                    '\\' => N::Space(0.0),
-                    c => N::Sym(c.to_string(), Cls::Ord, false),
-                };
-            }
+        if let Some(c) = self.peek()
+            && !c.is_ascii_alphabetic()
+        {
+            self.i += 1;
+            return match c {
+                '{' => N::Sym("{".into(), Cls::Open, false),
+                '}' => N::Sym("}".into(), Cls::Close, false),
+                '|' => N::Sym("‖".into(), Cls::Ord, false),
+                ',' => N::Space(0.17),
+                ':' | '>' => N::Space(0.22),
+                ';' => N::Space(0.28),
+                '!' => N::Space(-0.17),
+                ' ' => N::Space(0.33),
+                '$' | '%' | '#' | '&' | '_' => N::Sym(c.to_string(), Cls::Ord, false),
+                '\\' => N::Space(0.0),
+                c => N::Sym(c.to_string(), Cls::Ord, false),
+            };
         }
         let name = self.ident();
         let n = name.as_str();
         if let Some(g) = greek(n) {
-            return N::Sym(g.into(), Cls::Ord, !n.chars().next().unwrap().is_uppercase());
+            return N::Sym(g.into(), Cls::Ord, !n.chars().next().is_some_and(char::is_uppercase));
         }
         if let Some((s, c)) = symbol(n) {
             return N::Sym(s.into(), c, false);
@@ -726,7 +726,7 @@ impl P {
             _ if FUNCS.contains(&n) => N::Name(n.to_string(), if LIMIT_FUNCS.contains(&n) { Lim::Display } else { Lim::Side }),
             _ => {
                 UNKNOWN.with(|u| u.borrow_mut().push(n.to_string()));
-                N::Text(format!("\\{}", n))
+                N::Text(format!("\\{n}"))
             }
         }
     }
@@ -739,16 +739,16 @@ impl P {
             }
             Some('\\') => {
                 self.i += 1;
-                if let Some(c) = self.peek() {
-                    if !c.is_ascii_alphabetic() {
-                        self.i += 1;
-                        return match c {
-                            '{' => "{".into(),
-                            '}' => "}".into(),
-                            '|' => "‖".into(),
-                            c => c.to_string(),
-                        };
-                    }
+                if let Some(c) = self.peek()
+                    && !c.is_ascii_alphabetic()
+                {
+                    self.i += 1;
+                    return match c {
+                        '{' => "{".into(),
+                        '}' => "}".into(),
+                        '|' => "‖".into(),
+                        c => c.to_string(),
+                    };
                 }
                 let n = self.ident();
                 symbol(&n).map(|s| s.0.to_string()).unwrap_or_default()
@@ -825,7 +825,7 @@ fn append(dst: &mut MBox, src: MBox, dy: f32) {
 }
 
 fn shift(b: &mut MBox, dx: f32, dy: f32) {
-    for it in b.items.iter_mut() {
+    for it in &mut b.items {
         match it {
             MItem::Text { x, y, .. } => {
                 *x += dx;
@@ -854,7 +854,7 @@ fn class_space(l: Cls, r: Cls, script: bool) -> f32 {
         (Ord | Op | Close | Inner, Bin) | (Bin, Ord | Op | Open | Inner) => (med, false),
         (Ord | Op | Close | Inner, Rel) | (Rel, Ord | Op | Open | Inner) => (thick, false),
         (Punct, Ord | Op | Rel | Open | Close | Punct | Inner) => (thin, false),
-        (Ord | Close | Inner, Inner) | (Inner, Ord | Op | Open | Punct | Inner) => (thin, false),
+        (Ord | Close | Inner, Inner) | (Inner, Ord | Op | Open | Punct) => (thin, false),
         (Op, Inner) => (thin, false),
         _ => (0.0, true),
     };
@@ -868,7 +868,7 @@ const SHORT: &str = "acegmnopqrsuvwxyzıȷαγεηικμνοπρστυχωϵϱς
 fn delim_path(ch: &str, x: f32, top: f32, bot: f32, size: f32) -> Option<(MItem, f32)> {
     let h = bot - top;
     let w = (0.08 * size).max(1.0);
-    let mid = (top + bot) / 2.0;
+    let mid = f32::midpoint(top, bot);
     let arc = |cx: f32, cy: f32, rx: f32, ry: f32, a0: f32, a1: f32, n: usize| -> Vec<(f32, f32)> {
         (0..=n)
             .map(|i| {
@@ -1022,8 +1022,8 @@ fn quad(p0: (f32, f32), c: (f32, f32), p1: (f32, f32)) -> Vec<(f32, f32)> {
 
 /// A horizontal curly brace from `x0` to `x1`. Its ends sit at `edge` and its point at `tip`.
 fn hbrace(x0: f32, x1: f32, edge: f32, tip: f32) -> Vec<(f32, f32)> {
-    let mid = (edge + tip) / 2.0;
-    let xm = (x0 + x1) / 2.0;
+    let mid = f32::midpoint(edge, tip);
+    let xm = f32::midpoint(x0, x1);
     let q = ((x1 - x0) / 4.0).min((tip - edge).abs() * 1.2);
     let mut v = quad((x0, edge), (x0, mid), (x0 + q, mid));
     v.extend(quad((xm - q, mid), (xm, mid), (xm, tip)));
@@ -1077,7 +1077,7 @@ impl<'a> Lay<'a> {
         match n {
             N::Sym(s, _, var) => {
                 let bold = matches!(st.font, 1 | 4);
-                if *var && matches!(st.font, 255 | 4 | 5) && s.chars().all(|c| c.is_alphabetic()) {
+                if *var && matches!(st.font, 255 | 4 | 5) && s.chars().all(char::is_alphabetic) {
                     return self.text(s, st, bold, true);
                 }
                 let out: String = s
@@ -1147,7 +1147,7 @@ impl<'a> Lay<'a> {
                 let rw = 0.55 * st.size;
                 let x0 = out.w;
                 out.items.push(MItem::Path {
-                    pts: vec![(x0, bot - 0.45 * (top + bot)), (x0 + 0.14 * rw * 2.0, bot - 0.5 * (top + bot)), (x0 + 0.5 * rw, bot), (x0 + rw, -top)],
+                    pts: vec![(x0, bot - 0.45 * (top + bot)), (x0 + 0.14 * rw * 2.0, bot - f32::midpoint(top, bot)), (x0 + 0.5 * rw, bot), (x0 + rw, -top)],
                     w: (0.07 * st.size).max(1.0),
                 });
                 let body_x = out.w + rw;
@@ -1365,17 +1365,15 @@ impl<'a> Lay<'a> {
         if ch.is_empty() {
             return;
         }
-        if big {
-            if let Some((item, w)) = delim_path(ch, out.w, top, bot, st.size) {
-                out.items.push(item);
-                out.w += w;
-                return;
-            }
+        if big && let Some((item, w)) = delim_path(ch, out.w, top, bot, st.size) {
+            out.items.push(item);
+            out.w += w;
+            return;
         }
         let fs = if big { ((bot - top) * 1.05 / 0.93).max(st.size) } else { st.size };
         let f = FKey::new(fs, MATH);
         let w = self.fonts.measure(f, ch);
-        let y = if big { (top + bot) / 2.0 + 0.27 * fs } else { 0.0 };
+        let y = if big { f32::midpoint(top, bot) + 0.27 * fs } else { 0.0 };
         out.items.push(MItem::Text { s: ch.to_string(), f, x: out.w, y });
         out.w += w;
     }
@@ -1429,7 +1427,7 @@ impl<'a> Lay<'a> {
         }
         let align = |ci: usize| {
             if aligned {
-                if ci % 2 == 0 { 'r' } else { 'l' }
+                if ci.is_multiple_of(2) { 'r' } else { 'l' }
             } else if env == "cases" {
                 'l'
             } else {
@@ -1437,8 +1435,8 @@ impl<'a> Lay<'a> {
             }
         };
         // aligned pairs columns as `right&left`, with no gap inside a pair and 2em between pairs
-        let gap = |ci: usize| if aligned { if ci % 2 == 0 { 0.0 } else { 2.0 * st.size } } else { st.size };
-        let ncol = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        let gap = |ci: usize| if aligned { if ci.is_multiple_of(2) { 0.0 } else { 2.0 * st.size } } else { st.size };
+        let ncol = rows.iter().map(std::vec::Vec::len).max().unwrap_or(0);
         let mut cells: Vec<Vec<MBox>> = vec![];
         let mut colw = vec![0f32; ncol];
         for r in rows {
