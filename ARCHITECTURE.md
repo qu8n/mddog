@@ -573,7 +573,7 @@ There is no database. The binary reads `config.toml` from its config folder, and
 
 | Path | What it holds, and when it goes |
 |---|---|
-| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>` and a rename. The sweep removes it. |
+| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>-<n>`, a name of its own per write, and a rename. The sweep removes it. |
 | `$TMPDIR/mddog-<pid>-<hex>-stdin.md` | A copy of standard input. Removed when the viewer exits. |
 | `$TMPDIR/tty-graphics-protocol-mddog-<pid>-<hex>-<tag>` | A tile sent by temp file. The terminal deletes it. |
 | `$TMPDIR/mddog-tiles-<pid>-<hex>/` | Headless PNG or WebP tiles, mode 0700. Removed on a normal exit and on SIGTERM, SIGINT, or SIGHUP. |
@@ -624,9 +624,10 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 
 ### Releasing
 
-1. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
-2. Commit as `chore: release X.Y.Z`.
-3. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` builds both architectures and publishes the release.
+1. Run `claude plugin test plugins/claude-code`, since `./check.sh` and CI don't run the plugin's tests.
+2. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
+3. Commit as `chore: release X.Y.Z`.
+4. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` checks that the tag matches both versions, then builds both architectures and publishes the release.
 
 ### Integration tests
 
@@ -643,6 +644,7 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 - `tests/search.rs` is an ordinary test file. Each test makes an `Engine`, loads a Markdown string, and calls the same methods the viewer does. Points on the page come from search rects and the layout, not from fixed pixels. `docs/behavior.md` names these tests.
 - `tests/native_math.rs` renders each `fixtures/math/` file's `Doc` into one line per block that holds math or a `$`: inline math as `⟨...⟩`, display math as `⟦...⟧`, and code spans in backticks. It must match `tests/math.golden` exactly. `UPDATE_GOLDEN=1 cargo test --test native_math` rewrites it. `fixtures/math/SOURCES.md` lists where each fixture came from.
 - Every test that launches mdd sets `MDDOG_CACHE_DIR` to `$TMPDIR/mddog-test-cache`, so `./check.sh` leaves `~/Library/Caches/mddog/` alone. Unit tests skip the remote disk cache.
+- The pty tests in `tests/help.rs` that click at a cell and expect a given word or button set `MDDOG_SCALE=2`, since GitHub's macOS runners have a 1x screen. The others run at the screen's own scale, since a forced 2x on a 1x screen changes how tiles line up.
 - A unit test in `src/render/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
 
 ### Reference tools
@@ -667,6 +669,7 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 | Variable | Read by | Effect |
 |---|---|---|
 | `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, cell geometry, and the page height after each measure |
+| `MDDOG_SCALE` | mdd | Pixels per CSS pixel in place of the screen's, so pty tests click the same page points on a 1x CI runner. For tests |
 | `MDDOG_DUMP_VIEW=FILE` | mdd | With `MDDOG_TRACE`, write a PNG of the viewport after each frame |
 | `MDDOG_DUMP_TILES=DIR` | mdd | Write each tile as it is sent |
 | `MDDOG_DEBUG` | mdd | Print timing marks to stderr |

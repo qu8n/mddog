@@ -82,10 +82,6 @@ impl Glide {
         Glide { from, to, start: now, time }
     }
 
-    pub fn time(&self) -> std::time::Duration {
-        self.time
-    }
-
     pub fn restart(&mut self, now: std::time::Instant) {
         self.start = now;
     }
@@ -1644,9 +1640,9 @@ mod tests {
         let t0 = std::time::Instant::now();
         let per_page = std::time::Duration::from_millis(200);
         let pace = Pace::Page { per_page, page: 800 };
-        assert_eq!(Glide::new(0, 400, 800, pace, t0).time(), per_page / 2);
-        assert_eq!(Glide::new(0, 800, 800, pace, t0).time(), per_page);
-        assert_eq!(Glide::new(0, 9000, 800, pace, t0).time(), per_page, "a long jump glides one page");
+        assert_eq!(Glide::new(0, 400, 800, pace, t0).time, per_page / 2);
+        assert_eq!(Glide::new(0, 800, 800, pace, t0).time, per_page);
+        assert_eq!(Glide::new(0, 9000, 800, pace, t0).time, per_page, "a long jump glides one page");
     }
 
     #[test]

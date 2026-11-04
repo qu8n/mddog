@@ -156,3 +156,38 @@ fn loose_html_text_has_no_margin() {
     // The loose line and the paragraph under it sit as close as two lines of one paragraph.
     assert_eq!(p("<script>x</script>\n<p>Para.</p>\n"), p("x  \nPara.\n"));
 }
+
+#[test]
+fn a_table_image_measures_at_the_table_width() {
+    // Cell measure once read the width the previous paragraph left behind, 40 px at the page top.
+    let table = "| a |\n|---|\n| ![a](assets/spike.png) |\n";
+    let first = engine(table).layout().height;
+    let after = engine(&format!("hello\n\n{table}")).layout().height - engine("hello\n").layout().height;
+    assert!(first > 0.9 * after, "{first} vs {after}");
+}
+
+#[test]
+fn an_unclosed_summary_keeps_its_text() {
+    // The summary ran to the end of the file and was never shown.
+    let blocks = mddog::native::doc::parse("<details><summary>Title\n\nbody one\n").blocks;
+    let text = format!("{blocks:?}");
+    assert!(text.contains("Title") && text.contains("body one"), "{text}");
+}
+
+#[test]
+fn opening_details_fetches_its_remote_images() {
+    // Only the first layout's images were fetched, so these stayed loading for good.
+    let e = engine("<details><summary>More</summary>\n\n![a](https://example.invalid/a.png)\n\n</details>\n");
+    assert_eq!(e.pending_images(), 0);
+    assert!((0..40).step_by(2).any(|y| e.press(40.0, f64::from(y)) == Press::Other), "no summary to open");
+    assert_eq!(e.pending_images(), 1);
+    e.wait_images(std::time::Duration::from_secs(10));
+    assert_eq!(e.pending_images(), 0, "the fetch never ran");
+}
+
+#[test]
+fn a_stray_link_ends_with_its_paragraph() {
+    // GitHub closes an <a> left open in a paragraph; a stray <b> it carries on, so that stays.
+    let text = format!("{:?}", mddog::native::doc::parse("intro <a href=\"https://a.b\">stray\n\nlater text\n").blocks);
+    assert!(text.contains("\"later text\"") && text.ends_with("link: 0 })])]"), "{text}");
+}

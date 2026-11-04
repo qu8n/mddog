@@ -59,6 +59,8 @@ function stop() {
   for (const v of views.values()) {
     void v.child?.return(undefined)
     v.child = undefined
+    // A render at the same width starts a new child.
+    v.columns = 0
     v.moving?.cancel()
     v.moving = undefined
   }
@@ -209,22 +211,24 @@ async function show($: EngineInterface, path: string) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'mddog',
-      description: 'Preview a Markdown file with mddog in a pane',
-      argumentHint: '<file.md | @file.md>',
-    })
-    await $.tool.register({
-      name: 'open',
-      description:
-        'Show a Markdown file in the mddog preview pane beside the chat, rendered as a browser shows it (styled like GitHub by default). Use it when the user asks to see, preview, or view a Markdown file. The pane re-renders whenever the file changes, so edit the file to update what they see.',
-      inputSchema: {
-        type: 'object',
-        properties: { path: { type: 'string', description: 'The file, absolute or relative to the working directory' } },
-        required: ['path'],
-      },
-      isDeferred: false,
-    })
+    await Promise.all([
+      $.command.register({
+        name: 'mddog',
+        description: 'Preview a Markdown file with mddog in a pane',
+        argumentHint: '<file.md | @file.md>',
+      }),
+      $.tool.register({
+        name: 'open',
+        description:
+          'Show a Markdown file in the mddog preview pane beside the chat, rendered as a browser shows it (styled like GitHub by default). Use it when the user asks to see, preview, or view a Markdown file. The pane re-renders whenever the file changes, so edit the file to update what they see.',
+        inputSchema: {
+          type: 'object',
+          properties: { path: { type: 'string', description: 'The file, absolute or relative to the working directory' } },
+          required: ['path'],
+        },
+        isDeferred: false,
+      }),
+    ])
     return next(e)
   })
 
@@ -232,11 +236,11 @@ export const register: Register = on => {
     const arg = e.args.trim().replace(/^@/, '')
     if (!arg) return { text: 'Usage: /mddog <file.md>' }
     if (!(await $.fs.exists(arg))) return { text: `${arg} does not exist.` }
-    await show($, arg)
+    const [, cwd] = await Promise.all([show($, arg), $.session.cwd()])
     return {
       text: `Opened ${arg} in the mddog pane.`,
       context: [
-        `The user opened ${arg} (relative to ${await $.session.cwd()}) in a mddog preview pane beside the chat. The pane re-renders whenever the file changes on disk, so to change what they see, edit that file with your usual tools.`,
+        `The user opened ${arg} (relative to ${cwd}) in a mddog preview pane beside the chat. The pane re-renders whenever the file changes on disk, so to change what they see, edit that file with your usual tools.`,
       ],
     }
   })

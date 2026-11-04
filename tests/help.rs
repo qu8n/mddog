@@ -393,8 +393,7 @@ fn closing_help_sends_the_page_again() {
     wait_for(&out, 0, b"a=p,");
     tty.write_all(b"?").unwrap();
     wait_for(&out, 0, b"mddog keys");
-    std::thread::sleep(Duration::from_millis(1500));
-    let closed = out.lock().unwrap().len();
+    let closed = quiet(&out);
     tty.write_all(b"?").unwrap();
     let place = wait_for(&out, closed, b"a=p,i=");
     let all = out.lock().unwrap().clone();
@@ -403,6 +402,22 @@ fn closing_help_sends_the_page_again() {
     tty.write_all(b"q").unwrap();
     let _ = child.wait();
     assert!(sent.is_some_and(|s| s < place), "image {id} was placed after help closed but not sent again");
+}
+
+/// Waits for the terminal output to stop growing, and returns its length. The quiet spell outlasts the viewer's
+/// one-second idle fold, which redraws the page after the last key.
+fn quiet(out: &Mutex<Vec<u8>>) -> usize {
+    let end = Instant::now() + LIMIT;
+    let mut len = out.lock().unwrap().len();
+    loop {
+        std::thread::sleep(Duration::from_millis(1500));
+        let now = out.lock().unwrap().len();
+        if now == len {
+            return len;
+        }
+        assert!(Instant::now() < end, "the terminal output never stopped growing");
+        len = now;
+    }
 }
 
 /// Waits until `trace` holds `mark`, so a test acts on what the viewer has done rather than on a guess of how long it takes.
@@ -439,8 +454,7 @@ fn closing_the_contents_clears_its_text() {
     wait_for(&out, 0, b"a=p,");
     tty.write_all(b"t").unwrap();
     wait_for(&out, 0, b"CONTENTS");
-    std::thread::sleep(Duration::from_millis(1500));
-    let closed = out.lock().unwrap().len();
+    let closed = quiet(&out);
     tty.write_all(b"t").unwrap();
     let cleared = cleared_then_placed(&out, closed);
     tty.write_all(b"q").unwrap();
@@ -761,6 +775,9 @@ fn tiles_line_up_at_an_odd_cell_height() {
     assert_eq!(first, None, "the tiles differ from page row {first:?} on");
 }
 
+/// A click names a terminal cell, which lands on a Retina page point only at scale 2; a CI runner's screen is 1x.
+const RETINA: (&str, &str) = ("MDDOG_SCALE", "2");
+
 /// Sends `mouse` with `copy_on_select` set to `on`, and waits for a copy when `copies` says one should come. Returns
 /// the text of each OSC 52 copy the viewer wrote, and what it sent to a stand-in pbcopy.
 fn mouse_copies(on: bool, mouse: &[u8], copies: bool) -> (Vec<String>, String) {
@@ -773,7 +790,7 @@ fn mouse_copies(on: bool, mouse: &[u8], copies: bool) -> (Vec<String>, String) {
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let file = dir.join("a.md");
     std::fs::write(&file, "alpha beta gamma\n\ndelta epsilon zeta\n").unwrap();
-    let env = [("XDG_CONFIG_HOME", dir.to_str().unwrap()), ("PATH", &path)];
+    let env = [("XDG_CONFIG_HOME", dir.to_str().unwrap()), ("PATH", &path), RETINA];
     let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &env);
     wait_for(&out, 0, b"a=p,");
     let before = out.lock().unwrap().len();
@@ -923,7 +940,7 @@ fn buttons_show_the_hand() {
     std::fs::create_dir_all(dir.join("mddog")).unwrap();
     std::fs::write(dir.join("mddog/config.toml"), "theme = \"github-dark\"\n").unwrap();
     // The cells below are where the buttons sit at 80 columns.
-    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &[("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
+    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &[("XDG_CONFIG_HOME", dir.to_str().unwrap()), RETINA]);
     let drawn = wait_for(&out, 0, b"a=p,");
     // Text, then the code copy, Mermaid copy and Mermaid expand buttons, with text between.
     let mut at = drawn;

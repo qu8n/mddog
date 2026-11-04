@@ -50,10 +50,6 @@ pub fn bg((r, g, b): Rgb) -> String {
     format!("\x1b[48;2;{r};{g};{b}m")
 }
 
-pub fn hex((r, g, b): Rgb) -> String {
-    format!("#{r:02x}{g:02x}{b:02x}")
-}
-
 /// Reads `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`, dropping the alpha.
 pub fn rgb(s: &str) -> Option<Rgb> {
     let h = s.strip_prefix('#')?;
@@ -231,11 +227,6 @@ fn load(path: &Path, seen: &mut Vec<PathBuf>) -> Result<Theme, String> {
     read(&shown, &css, None, &mut |f| load(&resolve(dir, f), seen))
 }
 
-/// Reads theme text whose base, if any, is a built-in.
-pub fn parse(name: &str, css: &str) -> Result<Theme, String> {
-    read(name, css, None, &mut |f| Err(format!("{f}: only a theme file can have a file as its base")))
-}
-
 /// Reads a theme's tokens. `file` reads a base that is a file. `under` stands in for GitHub's theme while the built-ins load.
 fn read(name: &str, css: &str, under: Option<&Theme>, file: &mut dyn FnMut(&str) -> Result<Theme, String>) -> Result<Theme, String> {
     let decls = root_decls(css).map_err(|e| format!("{name}: {e}"))?;
@@ -382,6 +373,11 @@ fn masks(css: &str) -> (String, String) {
 mod tests {
     use super::*;
 
+    /// Reads theme text whose base, if any, is a built-in.
+    fn parse(name: &str, css: &str) -> Result<Theme, String> {
+        read(name, css, None, &mut |f| Err(format!("{f}: only a theme file can have a file as its base")))
+    }
+
     #[test]
     fn github_themes_set_every_token() {
         for name in ["github-light", "github-dark"] {
@@ -524,7 +520,6 @@ mod tests {
         assert_eq!(rgb("#fff8"), Some((255, 255, 255)));
         assert_eq!(rgb("#+1+1+1"), None);
         assert_eq!(rgb("var(--bgColor-default)"), None);
-        assert_eq!(hex((13, 17, 23)), "#0d1117");
     }
 
     fn luminance((r, g, b): Rgb) -> f64 {

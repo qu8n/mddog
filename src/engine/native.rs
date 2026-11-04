@@ -41,7 +41,6 @@ struct St {
     held: Option<usize>,
     /// How far right of the held thumb's center the press was, so a drag keeps the thumb under the pointer.
     grip: f32,
-    pending: usize,
 }
 
 type R = [f64; 4];
@@ -84,7 +83,6 @@ impl Engine {
             cur: None,
             held: None,
             grip: 0.0,
-            pending: 0,
         };
         Engine { width: Cell::new(width), scale: Cell::new(scale), st: RefCell::new(st) }
     }
@@ -103,6 +101,12 @@ impl Engine {
             crate::trace::mark("code highlighted");
         }
         st.images = Images::new(base.to_path_buf());
+        let mut srcs = vec![];
+        if let Some(doc) = &st.doc {
+            crate::native::images::sources(&doc.blocks, &mut srcs);
+        }
+        st.images.prefetch(srcs);
+        crate::trace::mark("local images decoded");
         st.wrap = wrap;
         st.toggled.clear();
         st.views.clear();
@@ -110,9 +114,6 @@ impl Engine {
         st.held = None;
         st.ov = Overlay::default();
         self.relayout(&mut st);
-        let wanted = std::mem::take(&mut st.page.wanted);
-        st.pending = wanted.len();
-        st.images.fetch(wanted);
         crate::trace::mark("native laid out");
     }
 
@@ -124,8 +125,15 @@ impl Engine {
         fonts.set_scale(o.scale);
         st.page = layout::layout(fonts, th, &o, &doc, images);
         st.doc = Some(doc);
+        // Each layout fetches the remote images it saw first, such as those in a <details> just opened.
+        let wanted = std::mem::take(&mut st.page.wanted);
+        st.images.fetch(wanted);
         st.runs = build_runs(&st.page);
+        // Offsets are kept by index, so a layout that adds or drops a wide block starts them all over.
         let n = st.page.hscroll.len();
+        if n != st.ov.hoff.len() {
+            st.ov.hoff.clear();
+        }
         st.ov.hoff.resize(n, 0.0);
         for (i, h) in st.page.hscroll.iter().enumerate() {
             st.ov.hoff[i] = st.ov.hoff[i].min(h.max);
@@ -162,7 +170,6 @@ impl Engine {
             changed |= st.images.poll();
         }
         if changed {
-            st.pending = 0;
             self.relayout(&mut st);
         }
     }
@@ -463,7 +470,7 @@ impl Engine {
 
     /// How many remote images are still loading.
     pub fn pending_images(&self) -> usize {
-        self.st.borrow().pending
+        self.st.borrow().images.loading()
     }
 
     /// Lays out again if remote images arrived. True when it did, so the caller measures the new page.
@@ -473,7 +480,6 @@ impl Engine {
         if changed {
             self.relayout(&mut st);
         }
-        st.pending = st.images.loading();
         changed
     }
 

@@ -52,6 +52,8 @@ pub struct Picker {
     rx: Option<Receiver<(Vec<Item>, bool)>>,
     stop: Arc<AtomicBool>,
     matcher: Matcher,
+    /// A press landed in the list, so the next release is a click. A release alone ends a drag begun on the page.
+    pressed: bool,
 }
 
 /// The folder the list starts from: the git repo that holds `start`, else `cwd`.
@@ -229,6 +231,7 @@ impl Picker {
             rx: None,
             stop: Arc::default(),
             matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pressed: false,
         }
     }
 
@@ -260,6 +263,7 @@ impl Picker {
         self.rows.clear();
         (self.sel, self.top) = (0, 0);
         self.done = false;
+        self.pressed = false;
         self.stop.store(true, Ordering::Relaxed);
         self.stop = Arc::default();
         walk(self.root.clone(), tx, wake, self.stop.clone());
@@ -390,6 +394,11 @@ impl Picker {
                 q.truncate(keep);
             }),
             Key::Char(c) if !c.is_control() => self.edit(|q| q.push(c)),
+            Key::Mouse(Click::Press, ..) => {
+                self.pressed = true;
+                Pick::Nothing
+            }
+            Key::Mouse(Click::Release, _, _) if !std::mem::take(&mut self.pressed) => Pick::Nothing,
             Key::Mouse(Click::Release, _, row) => {
                 let r = usize::from(row).checked_sub(HEADER_ROWS + 1).filter(|&r| r < Self::list_rows(rows));
                 match r.map(|r| r + self.top).filter(|&i| i < self.rows.len()) {
@@ -590,9 +599,15 @@ mod tests {
     #[test]
     fn p05_click_opens_a_row() {
         let mut p = picker(vec![item("a.md", "", 1), item("b.md", "", 2)]);
-        assert_eq!(p.handle(Key::Mouse(Click::Release, 5, 5), 24), Pick::Open(PathBuf::from("/r/b.md")));
-        assert_eq!(p.handle(Key::Mouse(Click::Release, 5, 9), 24), Pick::Nothing);
-        assert_eq!(p.handle(Key::Mouse(Click::Release, 5, 2), 24), Pick::Nothing);
+        let mut click = |row| {
+            p.handle(Key::Mouse(Click::Press, 5, row), 24);
+            p.handle(Key::Mouse(Click::Release, 5, row), 24)
+        };
+        assert_eq!(click(5), Pick::Open(PathBuf::from("/r/b.md")));
+        assert_eq!(click(9), Pick::Nothing);
+        assert_eq!(click(2), Pick::Nothing);
+        // The release of a drag begun on the page, before Ctrl-p opened the list.
+        assert_eq!(p.handle(Key::Mouse(Click::Release, 5, 5), 24), Pick::Nothing);
     }
 
     #[test]

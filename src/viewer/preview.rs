@@ -759,6 +759,10 @@ impl Preview {
                 p.follow(&from, &cwd);
                 p.list(tx);
                 self.listing = true;
+                // A drag's release would reach the list and open the file under the pointer.
+                self.drag = None;
+                self.bar_held = false;
+                self.app.toc_bar_release();
                 self.set_pointer(DEFAULT_POINTER);
                 true
             }
@@ -1026,10 +1030,14 @@ impl Preview {
             }
             Link::Anchor(id) => {
                 let Some(y) = self.engine.anchor_y(&id) else { return false };
-                let row = self.row_of(y);
+                let (row, from) = (self.row_of(y), self.app.scroll);
                 let actions = self.app.jump(row);
+                // A jump that didn't move saved no place to go back to.
+                let moved = self.app.scroll != from;
                 let show = self.act_all(actions);
-                self.notify(GO_BACK);
+                if moved {
+                    self.notify(GO_BACK);
+                }
                 show
             }
         }
@@ -1280,6 +1288,10 @@ impl Preview {
 
     fn settle(&mut self, scroll_px: u32) {
         self.glide = None;
+        // A layout after the first (a <details> opened, a resize) can start fetches of its own.
+        if self.late.is_none() && self.engine.pending_images() > 0 {
+            self.late = Some(Instant::now() + LATE_LIMIT);
+        }
         self.phase = scroll_px % self.cell_h;
         let headings: Vec<Heading> = self.layout.headings.iter().map(|(l, t, y)| Heading { level: *l, title: t.clone(), row: self.row_of(*y) }).collect();
         self.app.layout(self.viewport_rows(), self.doc_px.saturating_sub(self.phase).div_ceil(self.cell_h), scroll_px / self.cell_h, &headings);
@@ -1553,6 +1565,11 @@ impl Preview {
         let scroll_px = self.scroll_px();
         let anchor = self.anchor();
         let back = self.back_anchors();
+        // The expanded diagram's box was measured on the old page.
+        if self.app.expanded {
+            self.app.expanded = false;
+            self.engine.collapse();
+        }
         self.measure();
         self.stale_hover();
         let scroll_px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(scroll_px, |y| (y * self.scale).round() as u32);

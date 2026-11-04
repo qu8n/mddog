@@ -12,9 +12,13 @@ static SCALE: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
 
 /// The backing scale of the screen the terminal is on, from CoreGraphics. It needs a window-server
 /// connection, about 25 ms, so the viewer starts it on a thread at launch and lays out at `SCALE_GUESS`
-/// meanwhile. Unlike `NSScreen`, it runs off the main thread and starts no AppKit.
+/// meanwhile. Unlike `NSScreen`, it runs off the main thread and starts no AppKit. `MDDOG_SCALE` overrides it, so
+/// tests that click at terminal cells hit the same page points on a 1x CI runner as on a Retina Mac.
 pub fn display_scale() -> f64 {
     *SCALE.get_or_init(|| {
+        if let Some(s) = std::env::var("MDDOG_SCALE").ok().and_then(|s| s.parse().ok()).filter(|&s: &f64| s > 0.0) {
+            return s;
+        }
         use core_graphics::display::CGDisplay;
         let scale = |id| CGDisplay::new(id).display_mode().filter(|m| m.width() > 0).map(|m| m.pixel_width() as f64 / m.width() as f64);
         let scales: Vec<f64> = CGDisplay::active_displays().unwrap_or_default().into_iter().filter_map(scale).collect();

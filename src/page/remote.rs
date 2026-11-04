@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -288,9 +288,11 @@ fn read_disk(dir: &Path, url: &str) -> Option<Arc<Entry>> {
 }
 
 /// Writes through a temp file and a rename, so a reader never sees half a file.
+/// Each write gets its own temp file, since two workers can fetch the same URL at once.
 fn write_disk(dir: &Path, e: &Entry, keep: Duration) {
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     let path = disk_path(dir, &e.url);
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    let tmp = path.with_extension(format!("tmp{}-{}", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
     let head = serde_json::json!({ "url": e.url, "mime": e.mime, "until": epoch() + keep.as_secs() });
     let write = || -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
@@ -390,6 +392,22 @@ mod tests {
         assert!(read_disk(&dir, "https://x.test/b.png").is_none());
         write_disk(&dir, &e, Duration::ZERO);
         assert!(read_disk(&dir, "https://x.test/a.png").is_none(), "expired");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn same_url_writes_never_mix() {
+        let dir = std::env::temp_dir().join(format!("mddog-remote-race-{}", std::process::id()));
+        let entry = |byte: u8, len: usize| Entry { url: "https://x.test/a.png".into(), mime: "image/png".into(), body: Arc::new(vec![byte; len]), until: Instant::now() };
+        let (a, b) = (entry(b'a', 4 << 20), entry(b'b', 1 << 20));
+        for _ in 0..20 {
+            std::thread::scope(|s| {
+                s.spawn(|| write_disk(&dir, &a, Duration::from_secs(60)));
+                s.spawn(|| write_disk(&dir, &b, Duration::from_secs(60)));
+            });
+            let back = read_disk(&dir, "https://x.test/a.png").unwrap();
+            assert!(back.body == a.body || back.body == b.body, "a mixed or cut body of {} bytes", back.body.len());
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

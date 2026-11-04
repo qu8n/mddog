@@ -71,10 +71,6 @@ impl Shm {
         (p != libc::MAP_FAILED).then(|| Shm { name, ptr: p.cast(), len, owned })
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     /// Removes the name now and keeps the mapping, so a kill can't leave the object behind.
     /// Only for memory that no other process opens by name after this.
     pub fn unlink(&mut self) {
@@ -240,7 +236,7 @@ mod tests {
         let mut shm = Shm::create(shm_name(), 4).unwrap();
         shm.copy_from_slice(b"abcd");
         shm.unlink();
-        assert!(Shm::open(shm.name()).is_none());
+        assert!(Shm::open(&shm.name).is_none());
         assert_eq!(&shm[..], b"abcd");
     }
 
@@ -249,7 +245,7 @@ mod tests {
         let rgba: Vec<u8> = (0..3 * 2 * 4).map(|i| i as u8 * 10).collect();
         let mut shm = Shm::create(shm_name(), rgba.len()).unwrap();
         shm.copy_from_slice(&rgba);
-        let name = shm.name().to_string();
+        let name = shm.name.clone();
         let mut out = Vec::new();
         assert_eq!(transmit(&mut out, Medium::Direct, 7, 3, 2, shm, 0), Medium::Direct);
         assert!(Shm::open(&name).is_none(), "an object that was not handed off is unlinked");

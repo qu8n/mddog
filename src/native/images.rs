@@ -1,9 +1,11 @@
 //! Image loading: local files at once, remote files in a background thread through curl.
+use crate::native::doc::{Block, Inl};
 use crate::native::page::Bitmap;
 use resvg::usvg;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, OnceLock};
 
@@ -127,11 +129,30 @@ pub fn render_view(t: &usvg::Tree, w: u32, h: u32, z: f32, x: f32, y: f32) -> Op
     Some(Bitmap { w: pm.width(), h: pm.height(), px: pm.take() })
 }
 
+/// A decoded image before it is shared. `Rc` can't cross threads, so `prefetch`'s workers return this.
+enum Decoded {
+    Raster(Bitmap),
+    Svg(Box<usvg::Tree>),
+}
+
+impl From<Decoded> for Img {
+    fn from(d: Decoded) -> Img {
+        match d {
+            Decoded::Raster(b) => Img::Raster(Rc::new(b)),
+            Decoded::Svg(t) => Img::Svg(Rc::from(t)),
+        }
+    }
+}
+
 pub fn decode(data: &[u8]) -> Option<Img> {
+    decoded(data).map(Img::from)
+}
+
+fn decoded(data: &[u8]) -> Option<Decoded> {
     let head = &data[..data.len().min(512)];
     let is_svg = std::str::from_utf8(head).map(|s| s.contains("<svg")).unwrap_or(false) || String::from_utf8_lossy(head).contains("<svg");
     if is_svg {
-        return svg_tree(data).map(|t| Img::Svg(Rc::new(t)));
+        return svg_tree(data).map(|t| Decoded::Svg(Box::new(t)));
     }
     let im = image::load_from_memory(data).ok()?.to_rgba8();
     let (w, h) = im.dimensions();
@@ -142,7 +163,40 @@ pub fn decode(data: &[u8]) -> Option<Img> {
             *c = ((u32::from(*c) * a + 127) / 255) as u8;
         }
     }
-    Some(Img::Raster(Rc::new(Bitmap { w, h, px })))
+    Some(Decoded::Raster(Bitmap { w, h, px }))
+}
+
+fn remote(src: &str) -> bool {
+    src.split_once("://").is_some_and(|(s, _)| s.eq_ignore_ascii_case("http") || s.eq_ignore_ascii_case("https"))
+}
+
+/// Confined to the repo, else home, else the folder; `/` starts at that root, and the query is dropped.
+fn local(dir: &Path, src: &str) -> Option<Decoded> {
+    let path = crate::render::markdown::confined_media(src, dir);
+    path.filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file())).and_then(|p| std::fs::read(p).ok()).and_then(|d| decoded(&d))
+}
+
+/// The image sources layout will ask for: all but those in closed `<details>`, which it lays out only once opened.
+pub fn sources(blocks: &[Block], out: &mut Vec<String>) {
+    let inls = |is: &[Inl], out: &mut Vec<String>| {
+        out.extend(is.iter().filter_map(|i| if let Inl::Img { src, .. } = i { Some(src.clone()) } else { None }));
+    };
+    for b in blocks {
+        match b {
+            Block::Para(is) | Block::Text(is) | Block::Heading(_, is, _) => inls(is, out),
+            Block::Table { head, rows, .. } => head.iter().chain(rows.iter().flatten()).for_each(|c| inls(c, out)),
+            Block::Details { summary, open, body, .. } => {
+                inls(summary, out);
+                if *open {
+                    sources(body, out);
+                }
+            }
+            Block::Quote(bs) | Block::Alert(_, bs) | Block::Align(_, bs) => sources(bs, out),
+            Block::List { items, .. } => items.iter().for_each(|i| sources(&i.blocks, out)),
+            Block::Footnotes(notes) => notes.iter().for_each(|n| sources(&n.2, out)),
+            Block::Code { .. } | Block::Rule | Block::Math(_) | Block::Mermaid(_) => {}
+        }
+    }
 }
 
 impl Images {
@@ -159,16 +213,12 @@ impl Images {
                 St::Ready(i) => Status::Ready(i.clone()),
             };
         }
-        let scheme = src.split_once("://").map(|(s, _)| s.to_ascii_lowercase());
-        if matches!(scheme.as_deref(), Some("http" | "https")) {
+        if remote(src) {
             self.map.insert(src.to_string(), St::Loading);
             wanted.push(src.to_string());
             return Status::Pending;
         }
-        // Confined to the repo, else home, else the folder; `/` starts at that root, and the query is dropped.
-        let path = crate::render::markdown::confined_media(src, &self.dir);
-        let r = path.filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file())).and_then(|p| std::fs::read(p).ok()).and_then(|d| decode(&d));
-        match r {
+        match local(&self.dir, src).map(Img::from) {
             Some(i) => {
                 self.map.insert(src.to_string(), St::Ready(i.clone()));
                 Status::Ready(i)
@@ -177,6 +227,36 @@ impl Images {
                 self.map.insert(src.to_string(), St::Failed);
                 Status::Failed
             }
+        }
+    }
+
+    /// Reads and decodes the local images in `srcs` on several threads, so layout finds them ready instead of
+    /// decoding each in turn. A large photo takes tens of milliseconds to decode.
+    pub fn prefetch(&mut self, mut srcs: Vec<String>) {
+        srcs.sort_unstable();
+        srcs.dedup();
+        srcs.retain(|s| !remote(s) && !self.map.contains_key(s));
+        if srcs.is_empty() {
+            return;
+        }
+        let workers = std::thread::available_parallelism().map_or(4, usize::from).min(srcs.len());
+        let next = AtomicUsize::new(0);
+        let (dir, srcs_ref, next_ref) = (&self.dir, &srcs, &next);
+        let done: Vec<(usize, Option<Decoded>)> = std::thread::scope(|s| {
+            let work = move || {
+                let mut got = vec![];
+                loop {
+                    let i = next_ref.fetch_add(1, Ordering::Relaxed);
+                    let Some(src) = srcs_ref.get(i) else { break got };
+                    got.push((i, local(dir, src)));
+                }
+            };
+            // A worker that failed to start leaves its share to the others, and to layout if none started.
+            let handles: Vec<_> = (0..workers).filter_map(|_| std::thread::Builder::new().stack_size(crate::render::STACK).spawn_scoped(s, work).ok()).collect();
+            handles.into_iter().flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
+        });
+        for (i, d) in done {
+            self.map.insert(srcs[i].clone(), d.map_or(St::Failed, |d| St::Ready(d.into())));
         }
     }
 
@@ -226,6 +306,25 @@ impl Images {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prefetch_takes_the_images_layout_will_draw() {
+        let md = "![a](a.png)\n\n| ![b](b.png) |\n|---|\n\n> - ![c](c.svg)\n\n<details open><summary>s</summary>\n\n![d](d.png)\n\n</details>\n\n<details><summary>s</summary>\n\n![e](e.png)\n\n</details>\n\n![a](a.png) ![r](https://x.test/r.png)\n";
+        let mut srcs = vec![];
+        super::sources(&crate::native::doc::parse(md).blocks, &mut srcs);
+        assert_eq!(srcs, ["a.png", "b.png", "c.svg", "d.png", "a.png", "https://x.test/r.png"]);
+
+        let dir = std::env::temp_dir().join(format!("mddog-prefetch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("c.svg"), r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"/>"#).unwrap();
+        let mut images = super::Images::new(dir.clone());
+        images.prefetch(srcs);
+        // Ready or failed before layout asks, and the remote one is left to `fetch`.
+        assert!(matches!(images.map.get("c.svg"), Some(super::St::Ready(i)) if i.size() == (4.0, 2.0)));
+        assert!(matches!(images.map.get("a.png"), Some(super::St::Failed)));
+        assert!(!images.map.contains_key("https://x.test/r.png"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn the_system_font_names_reach_sf() {
         let fonts = ["system-ui", "-apple-system", "Avenir Next"].map(String::from);

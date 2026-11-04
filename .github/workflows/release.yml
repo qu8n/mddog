@@ -12,6 +12,16 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Check the tag matches both versions
+        run: |
+          set -euo pipefail
+          tag=${GITHUB_REF_NAME#v}
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          plugin=$(jq -er .version plugins/claude-code/.claude-plugin/plugin.json)
+          if [ "$tag" != "$cargo" ] || [ "$tag" != "$plugin" ]; then
+            echo "::error::tag $tag, Cargo.toml $cargo, plugin.json $plugin: set all three to the same version"
+            exit 1
+          fi
       - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - run: cargo build --release --locked --target aarch64-apple-darwin --target x86_64-apple-darwin
       - name: Package one tarball per architecture

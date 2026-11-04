@@ -133,6 +133,8 @@ struct B {
     inl: Vec<Inl>,
     cnt: Counts,
     link: Vec<u32>,
+    /// The link depth a paragraph started at: GitHub closes an `<a>` left open inside it at its end.
+    para_links: usize,
     links: Vec<String>,
     code: Option<(String, String)>,
     table: Option<TableB>,
@@ -227,7 +229,20 @@ impl B {
         }
     }
 
+    fn end_summary(&mut self) {
+        self.in_summary = false;
+        let v = std::mem::take(&mut self.inl);
+        let v = finish_inlines(v, &mut self.links);
+        if let Some(f) = self.stack.iter_mut().rev().find(|f| matches!(f.kind, Fk::Details { .. })) {
+            f.summary = v;
+        }
+    }
+
     fn close_frame(&mut self) {
+        // A <summary> its <details> outlived: keep its text, or flush() drops everything after it.
+        if self.in_summary && matches!(self.top().kind, Fk::Details { .. }) {
+            self.end_summary();
+        }
         let f = self.pop_frame();
         let blocks = f.blocks;
         let b = match f.kind {
@@ -398,14 +413,7 @@ impl B {
         }
         let dec = |c: &mut u32| *c = c.saturating_sub(1);
         match name {
-            "summary" => {
-                self.in_summary = false;
-                let v = std::mem::take(&mut self.inl);
-                let v = finish_inlines(v, &mut self.links);
-                if let Some(f) = self.stack.iter_mut().rev().find(|f| matches!(f.kind, Fk::Details { .. })) {
-                    f.summary = v;
-                }
-            }
+            "summary" => self.end_summary(),
             "details" | "div" | "p" | "center" | "section" | "article" | "header" | "footer" | "main" | "nav" | "figure" | "figcaption" | "picture" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.end_html_container(name);
             }
@@ -794,6 +802,7 @@ pub fn parse(src: &str) -> Doc {
         inl: vec![],
         cnt: Counts::default(),
         link: vec![],
+        para_links: 0,
         links: vec![],
         code: None,
         table: None,
@@ -926,6 +935,7 @@ impl B {
                 Tag::MetadataBlock(_) => *meta = Some(String::new()),
                 Tag::Paragraph => {
                     b.flush();
+                    b.para_links = b.link.len();
                     if matches!(b.stack.last().map(|f| &f.kind), Some(Fk::Item)) {
                         b.top().loose = true;
                     }
@@ -990,7 +1000,10 @@ impl B {
                 _ => {}
             },
             Event::End(t) => match t {
-                TagEnd::Paragraph => b.flush(),
+                TagEnd::Paragraph => {
+                    b.flush();
+                    b.link.truncate(b.para_links);
+                }
                 TagEnd::Heading(_) => {
                     let base = slug(&plain(&b.inl));
                     let n = b.anchors.entry(base.clone()).or_insert(0);

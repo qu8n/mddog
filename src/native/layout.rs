@@ -63,7 +63,6 @@ pub struct Layouter<'a> {
     pub fonts: &'a mut Fonts,
     pub th: &'a Theme,
     pub o: &'a Opts,
-    pub doc: &'a Doc,
     pub images: &'a mut Images,
     pub page: Page,
     s: f32,
@@ -113,24 +112,8 @@ pub fn place_bar(page: &mut Page, di: usize, zoom: Option<(f32, f32)>) {
 }
 
 pub fn layout(fonts: &mut Fonts, th: &Theme, o: &Opts, doc: &Doc, images: &mut Images) -> Page {
-    let mut l = Layouter {
-        fonts,
-        th,
-        o,
-        doc,
-        images,
-        page: Page::default(),
-        s: o.scale,
-        clip: 0,
-        pend_space: false,
-        align: 0,
-        list_depth: 0,
-        cur_w: 0.0,
-        ink: None,
-        struck: false,
-        after_head: false,
-        fsize: 16.0,
-    };
+    let mut l =
+        Layouter { fonts, th, o, images, page: Page::default(), s: o.scale, clip: 0, pend_space: false, align: 0, list_depth: 0, cur_w: 0.0, ink: None, struck: false, after_head: false, fsize: 16.0 };
     l.page.urls = doc.links.clone();
     l.page.w = o.width;
     let s = l.s;
@@ -747,6 +730,8 @@ impl<'a> Layouter<'a> {
         tch.bits = SEMIBOLD;
         let mut minw = vec![0f32; ncol];
         let mut maxw = vec![0f32; ncol];
+        // Images in cells cap at this width while measuring; the cell layout sets its own later.
+        self.cur_w = w;
         let mut measure_row = |me: &mut Self, r: &[Vec<Inl>], tc: &Tc| {
             for (c, cell) in r.iter().enumerate().take(ncol) {
                 let atoms = me.atoms(cell, tc);
