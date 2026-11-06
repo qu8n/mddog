@@ -5,7 +5,7 @@ use std::io::Write as _;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
 
-use crate::sweep::{self, write_private};
+use crate::tmp::{self, write_private};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Medium {
@@ -17,6 +17,11 @@ pub enum Medium {
 pub const TILE_BYTES: usize = 8 << 20;
 /// Ghostty (`graphics_image.zig`) and herdr's libghostty-vt refuse an image taller or wider than this many pixels.
 pub const MAX_IMAGE_SIDE: u32 = 10_000;
+
+/// The most rows of `cell_h` px a tile `width` px wide may take: under `TILE_BYTES` and `MAX_IMAGE_SIDE`.
+pub fn tile_rows(width: u32, cell_h: u32) -> u32 {
+    (TILE_BYTES as u32 / (width.max(1) * 4) / cell_h).min(MAX_IMAGE_SIDE / cell_h)
+}
 
 pub fn storage_limit(herdr: bool) -> usize {
     if herdr { 56 << 20 } else { 300 << 20 }
@@ -116,7 +121,7 @@ impl Drop for Shm {
 
 pub fn shm_name() -> String {
     static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    format!("/mddog-{:08x}-{}", crate::sweep::nonce() as u32, SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    format!("/mddog-{:08x}-{}", crate::tmp::nonce() as u32, SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
 pub fn shm_write(name: &str, data: &[u8]) -> bool {
@@ -148,7 +153,7 @@ fn shm_open(c: &CStr, flags: libc::c_int) -> Option<File> {
 }
 
 pub fn temp_path(tag: &str) -> String {
-    sweep::temp_path("tty-graphics-protocol-mddog-", &format!("-{tag}")).to_string_lossy().into_owned()
+    tmp::graphics_file(tag).to_string_lossy().into_owned()
 }
 
 pub fn transmit(out: &mut Vec<u8>, medium: Medium, id: u32, width: usize, height: usize, rgba: Shm, seq: u64) -> Medium {
@@ -157,7 +162,7 @@ pub fn transmit(out: &mut Vec<u8>, medium: Medium, id: u32, width: usize, height
         let _ = write!(out, "\x1b_Ga=t,f=32,s={width},v={height},t=s,S={len},i={id},q=2;{}\x1b\\", base64(rgba.hand_off().as_bytes()));
         return Medium::Shm;
     }
-    if matches!(medium, Medium::Shm | Medium::Temp) {
+    if medium == Medium::Temp {
         let path = temp_path(&seq.to_string());
         if write_private(Path::new(&path), &rgba).is_ok() {
             let _ = write!(out, "\x1b_Ga=t,f=32,s={width},v={height},t=t,i={id},q=2;{}\x1b\\", base64(path.as_bytes()));
@@ -180,7 +185,7 @@ pub fn transmit(out: &mut Vec<u8>, medium: Medium, id: u32, width: usize, height
     Medium::Direct
 }
 
-fn png(width: usize, height: usize, rgba: &[u8]) -> Option<Vec<u8>> {
+pub fn png(width: usize, height: usize, rgba: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     let mut enc = png::Encoder::new(&mut out, u32::try_from(width).ok()?, u32::try_from(height).ok()?);
     enc.set_color(png::ColorType::Rgba);
@@ -249,9 +254,9 @@ mod tests {
         let mut out = Vec::new();
         assert_eq!(transmit(&mut out, Medium::Direct, 7, 3, 2, shm, 0), Medium::Direct);
         assert!(Shm::open(&name).is_none(), "an object that was not handed off is unlinked");
-        let png = png(3, 2, &rgba).unwrap();
-        assert_eq!(String::from_utf8(out).unwrap(), format!("\x1b_Ga=t,f=100,t=d,i=7,q=2,m=0;{}\x1b\\", base64(&png)));
-        let mut reader = png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap();
+        let out = String::from_utf8(out).unwrap();
+        let payload = out.strip_prefix("\x1b_Ga=t,f=100,t=d,i=7,q=2,m=0;").and_then(|p| p.strip_suffix("\x1b\\")).unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(unbase64(payload))).read_info().unwrap();
         let mut back = vec![0; reader.output_buffer_size().unwrap()];
         reader.next_frame(&mut back).unwrap();
         assert_eq!(back, rgba);
@@ -302,7 +307,6 @@ mod tests {
             assert!(data.len() <= 4096, "chunk {i}: {}", data.len());
             payload.push_str(data);
         }
-        assert_eq!(payload, base64(&png(64, 64, &rgba).unwrap()));
         let bytes = unbase64(&payload);
         let mut reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().unwrap();
         let mut back = vec![0; reader.output_buffer_size().unwrap()];

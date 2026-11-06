@@ -27,7 +27,7 @@ test('/mddog shows the tiles mddog prints and tells the model the file', async (
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.spawn', async function* (_, e) {
     spawned.push([...e.argv])
-    yield { stream: 'stdout', text: '{"columns":40,"tiles":[{"file":"/tmp/t/1-0.png","rows":100},' }
+    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":100},' }
     yield { stream: 'stdout', text: '{"file":"/tmp/t/1-1.png","rows":7}]}\n' }
     return { value: { code: 0, signal: null } }
   })
@@ -56,7 +56,7 @@ test('the model opens a file in the pane with the open tool', async ($, on) => {
   on('fs.exists', (_, e) => ({ value: e.path.endsWith('notes/plan.md') }))
   on('process.spawn', async function* (_, e) {
     spawned.push([...e.argv])
-    yield { stream: 'stdout', text: '{"columns":40,"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
+    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
     return { value: { code: 0, signal: null } }
   })
 
@@ -82,7 +82,7 @@ test('only the tiles nearest the view are mounted, so the images stay under the 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   const tiles = Array.from({ length: 10 }, (_, i) => ({ file: `/tmp/t/1-${i}.png`, rows: 50 }))
   on('process.spawn', async function* () {
-    yield { stream: 'stdout', text: `${JSON.stringify({ columns: 40, keep: 3, tiles })}\n` }
+    yield { stream: 'stdout', text: `${JSON.stringify({ keep: 3, tiles })}\n` }
     return { value: { code: 0, signal: null } }
   })
 
@@ -108,7 +108,7 @@ test('a child that a newer render aborts starts again', async ($, on) => {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.spawn', async function* () {
     if (++spawns === 1) throw new Error('aborted')
-    yield { stream: 'stdout', text: '{"columns":40,"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
+    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
     return { value: { code: 0, signal: null } }
   })
 
@@ -133,7 +133,7 @@ test('a child that keeps failing to start ends in an error until the next /mddog
   on('process.spawn', async function* () {
     spawns++
     if (failing || spawns === 5) throw new Error('aborted')
-    yield { stream: 'stdout', text: '{"columns":40,"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
+    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
     return { value: { code: 0, signal: null } }
   })
 
@@ -161,7 +161,7 @@ test('the open tool says so when the pane waits undrawn on a narrow terminal', a
   on('fs.exists', () => ({ value: true }))
   on('process.spawn', async function* () {
     spawns++
-    yield { stream: 'stdout', text: '{"columns":40,"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
+    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
     return { value: { code: 0, signal: null } }
   })
 

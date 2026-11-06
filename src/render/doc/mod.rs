@@ -2,6 +2,8 @@
 use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 
+mod dollars;
+
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Sty {
     pub bold: bool,
@@ -27,13 +29,38 @@ pub enum Inl {
     FootRef(usize, String),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// A GitHub alert's kind. Its place in this list indexes the theme's alert colors and the alert icons.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Alert {
     Note,
     Tip,
     Important,
     Warning,
     Caution,
+}
+
+impl Alert {
+    pub const ALL: [Alert; 5] = [Alert::Note, Alert::Tip, Alert::Important, Alert::Warning, Alert::Caution];
+
+    /// The title GitHub draws, which is also the theme token's name in lower case.
+    pub fn title(self) -> &'static str {
+        match self {
+            Alert::Note => "Note",
+            Alert::Tip => "Tip",
+            Alert::Important => "Important",
+            Alert::Warning => "Warning",
+            Alert::Caution => "Caution",
+        }
+    }
+}
+
+/// How a block's lines sit across its width: from a table column, or the HTML `align` attribute.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Align {
+    #[default]
+    Left,
+    Center,
+    Right,
 }
 
 #[derive(Clone, Debug)]
@@ -60,7 +87,7 @@ pub enum Block {
         tight: bool,
     },
     Table {
-        aligns: Vec<u8>,
+        aligns: Vec<Align>,
         head: Vec<Vec<Inl>>,
         rows: Vec<Vec<Vec<Inl>>>,
     },
@@ -73,8 +100,22 @@ pub enum Block {
         body: Vec<Block>,
         id: usize,
     },
-    Align(u8, Vec<Block>),
+    Align(Align, Vec<Block>),
     Footnotes(Vec<(usize, String, Vec<Block>)>),
+}
+
+/// Calls `f` on each block the first layout draws, a parent before its children. A closed `<details>` lays
+/// out its body only once opened, so the body is left out.
+pub fn walk_shown<'a>(blocks: &'a [Block], f: &mut impl FnMut(&'a Block)) {
+    for b in blocks {
+        f(b);
+        match b {
+            Block::Quote(bs) | Block::Alert(_, bs) | Block::Align(_, bs) | Block::Details { body: bs, open: true, .. } => walk_shown(bs, f),
+            Block::List { items, .. } => items.iter().for_each(|i| walk_shown(&i.blocks, f)),
+            Block::Footnotes(notes) => notes.iter().for_each(|n| walk_shown(&n.2, f)),
+            _ => {}
+        }
+    }
 }
 
 pub struct Doc {
@@ -90,7 +131,7 @@ enum Fk {
     Item,
     List(Option<u64>),
     Details { open: bool, id: usize },
-    Align(u8, &'static str),
+    Align(Align, String),
     Heading(u8, String),
     Foot(String),
 }
@@ -109,7 +150,7 @@ fn frame(kind: Fk) -> Frame {
 }
 
 struct TableB {
-    aligns: Vec<u8>,
+    aligns: Vec<Align>,
     head: Vec<Vec<Inl>>,
     rows: Vec<Vec<Vec<Inl>>>,
     row: Vec<Vec<Inl>>,
@@ -194,7 +235,7 @@ impl B {
         let v = std::mem::take(&mut self.inl);
         let v = finish_inlines(v, &mut self.links);
         if v.iter().any(|i| !matches!(i, Inl::Text(t, _) if t.trim().is_empty()) && !matches!(i, Inl::Soft)) {
-            let in_p = matches!(self.stack.last().map(|f| &f.kind), Some(Fk::Align(_, "p")));
+            let in_p = matches!(self.stack.last().map(|f| &f.kind), Some(Fk::Align(_, n)) if n == "p");
             self.push_block(if self.raw && !in_p { Block::Text(v) } else { Block::Para(v) });
         }
     }
@@ -204,7 +245,6 @@ impl B {
     }
 
     fn end_html_container(&mut self, name: &str) {
-        // find the nearest matching html frame
         let pos = self.stack.iter().rposition(|f| match &f.kind {
             Fk::Align(_, n) => *n == name,
             Fk::Details { .. } => name == "details",
@@ -247,7 +287,7 @@ impl B {
         let blocks = f.blocks;
         let b = match f.kind {
             Fk::Align(a, _) => {
-                if a == 0 {
+                if a == Align::Left {
                     for b in blocks {
                         self.push_block(b);
                     }
@@ -308,8 +348,7 @@ impl B {
     }
 
     fn open_tag(&mut self, name: &str, attrs: &[(String, String)]) {
-        if let Some(s) = &self.skip {
-            let _ = s;
+        if self.skip.is_some() {
             return;
         }
         let attr = |k: &str| attrs.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
@@ -331,33 +370,11 @@ impl B {
             "div" | "p" | "center" | "section" | "article" | "header" | "footer" | "main" | "nav" | "figure" | "figcaption" | "picture" => {
                 self.flush();
                 let a = match (name, attr("align").as_deref()) {
-                    ("center", _) | (_, Some("center")) => 1,
-                    (_, Some("right")) => 2,
-                    _ => 0,
+                    ("center", _) | (_, Some("center")) => Align::Center,
+                    (_, Some("right")) => Align::Right,
+                    _ => Align::Left,
                 };
-                let n: &'static str = match name {
-                    "div" => "div",
-                    "p" => "p",
-                    "center" => "center",
-                    "section" => "section",
-                    "figure" => "figure",
-                    _ => "div",
-                };
-                let n = if matches!(name, "article" | "header" | "footer" | "main" | "nav" | "figcaption" | "picture") {
-                    // closing tag name differs; keep a unique static per name
-                    match name {
-                        "article" => "article",
-                        "header" => "header",
-                        "footer" => "footer",
-                        "main" => "main",
-                        "nav" => "nav",
-                        "figcaption" => "figcaption",
-                        _ => "picture",
-                    }
-                } else {
-                    n
-                };
-                self.stack.push(frame(Fk::Align(a, n)));
+                self.stack.push(frame(Fk::Align(a, name.to_string())));
             }
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush();
@@ -443,7 +460,6 @@ impl B {
 const HTML_BREAK: char = '\u{e025}';
 
 pub fn finish_inlines(v: Vec<Inl>, links: &mut Vec<String>) -> Vec<Inl> {
-    // merge adjacent text with equal style
     let mut m: Vec<Inl> = Vec::with_capacity(v.len());
     for i in v {
         if let Inl::Text(s, st) = &i
@@ -471,8 +487,7 @@ pub fn finish_inlines(v: Vec<Inl>, links: &mut Vec<String>) -> Vec<Inl> {
         }
         i += 1;
     }
-    // math, then extended autolinks
-    let held = crate::render::markdown::HELD_DOLLAR;
+    let held = dollars::HELD_DOLLAR;
     let mut out = Vec::with_capacity(m.len());
     for i in m {
         match i {
@@ -521,7 +536,6 @@ fn autolink(s: &str, st: Sty, links: &mut Vec<String>, out: &mut Vec<Inl>) {
                 url = if rest.starts_with("www.") { format!("http://{}", &rest[..e]) } else { rest[..e].to_string() };
             }
         } else if b[i] == b'@' && i > 0 {
-            // email: local part backwards
             let mut st_i = i;
             while st_i > last && (b[st_i - 1].is_ascii_alphanumeric() || b"._+-".contains(&b[st_i - 1])) {
                 st_i -= 1;
@@ -788,7 +802,7 @@ pub fn slug(s: &str) -> String {
 
 pub fn parse(src: &str) -> Doc {
     // mddog's math pre-pass: escapes Markdown inside math spans and holds `\$`, so the parser keeps math text.
-    let protected = crate::render::markdown::protect_math(src);
+    let protected = dollars::protect_math(src);
     let src = protected.as_str();
     let mut o = Options::empty();
     o.insert(Options::ENABLE_TABLES);
@@ -797,6 +811,7 @@ pub fn parse(src: &str) -> Doc {
     o.insert(Options::ENABLE_TASKLISTS);
     o.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
     o.insert(Options::ENABLE_GFM);
+    // Not ENABLE_MATH: `protect_math` finds math by GitHub's rules, and `split_math` reads it from the text.
     let mut b = B {
         stack: vec![frame(Fk::Root)],
         inl: vec![],
@@ -898,7 +913,7 @@ fn display_paras(bs: &mut [Block]) {
 /// Splits text into text and math by mddog's `inline_math` (GitHub's rules). Math keeps its delimiters.
 fn split_math(s: &str, st: Sty, out: &mut Vec<Inl>, links: &mut Vec<String>) {
     let mut last = 0;
-    for (a, e) in crate::render::markdown::inline_math(s, false).into_iter().filter(|&(a, e)| !s[a..e].contains("://") && !s[a..e].contains("www.")) {
+    for (a, e) in dollars::inline_math(s, false).into_iter().filter(|&(a, e)| !s[a..e].contains("://") && !s[a..e].contains("www.")) {
         if a > last {
             autolink(&s[last..a], st, links, out);
         }
@@ -923,7 +938,7 @@ impl B {
                     *meta = None;
                     if !rows.is_empty() {
                         // Its keys are `th` cells, which browsers center.
-                        b.push_block(Block::Table { aligns: vec![1, 0], head: vec![], rows });
+                        b.push_block(Block::Table { aligns: vec![Align::Center, Align::Left], head: vec![], rows });
                     }
                 }
                 _ => {}
@@ -976,9 +991,9 @@ impl B {
                     let a = al
                         .iter()
                         .map(|a| match a {
-                            pulldown_cmark::Alignment::Center => 1,
-                            pulldown_cmark::Alignment::Right => 2,
-                            _ => 0,
+                            pulldown_cmark::Alignment::Center => Align::Center,
+                            pulldown_cmark::Alignment::Right => Align::Right,
+                            _ => Align::Left,
                         })
                         .collect();
                     b.table = Some(TableB { aligns: a, head: vec![], rows: vec![], row: vec![] });
@@ -988,8 +1003,6 @@ impl B {
                 Tag::Emphasis => b.cnt.italic += 1,
                 Tag::Strong => b.cnt.bold += 1,
                 Tag::Strikethrough => b.cnt.strike += 1,
-                Tag::Superscript => b.cnt.sup += 1,
-                Tag::Subscript => b.cnt.sub += 1,
                 Tag::Link { dest_url, .. } => {
                     let id = b.add_link(dest_url.to_string());
                     b.link.push(id);
@@ -1091,8 +1104,6 @@ impl B {
                 TagEnd::Emphasis => b.cnt.italic = b.cnt.italic.saturating_sub(1),
                 TagEnd::Strong => b.cnt.bold = b.cnt.bold.saturating_sub(1),
                 TagEnd::Strikethrough => b.cnt.strike = b.cnt.strike.saturating_sub(1),
-                TagEnd::Superscript => b.cnt.sup = b.cnt.sup.saturating_sub(1),
-                TagEnd::Subscript => b.cnt.sub = b.cnt.sub.saturating_sub(1),
                 TagEnd::Link => {
                     b.link.pop();
                 }
@@ -1122,26 +1133,8 @@ impl B {
                     b.inl.push(Inl::Text(s.to_string(), st));
                 }
             }
-            Event::InlineMath(s) => {
-                let st = b.sty();
-                // $`x`$ is math written with a code span
-                let s: std::borrow::Cow<str> = if s.len() >= 2 && s.starts_with('`') && s.ends_with('`') { s[1..s.len() - 1].trim().to_string().into() } else { s.to_string().into() };
-                // `$20, 3$` is money, not math: a digit first and a space inside
-                if s.starts_with(|c: char| c.is_ascii_digit()) && s.contains(char::is_whitespace) {
-                    b.inl.push(Inl::Text(format!("${s}$"), st));
-                } else {
-                    b.inl.push(Inl::Math(s.to_string(), st));
-                }
-            }
-            Event::DisplayMath(s) => {
-                if b.table.is_some() {
-                    let st = b.sty();
-                    b.inl.push(Inl::Math(s.to_string(), st));
-                } else {
-                    b.flush();
-                    b.push_block(Block::Math(s.to_string()));
-                }
-            }
+            // The parser runs without ENABLE_MATH, so it sends neither.
+            Event::InlineMath(_) | Event::DisplayMath(_) => {}
             Event::Html(h) => b.html_buf.push_str(&h),
             Event::InlineHtml(h) => b.html(&h),
             Event::FootnoteReference(l) => {

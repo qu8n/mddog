@@ -1,4 +1,5 @@
-use super::app::{self, App};
+use super::app::{self, App, Hint};
+use super::keys;
 use crate::term::{self, Key};
 use crate::theme::{Palette, bg, fg};
 
@@ -32,16 +33,16 @@ impl Chrome<'_> {
 
     pub fn hint_at(&self, col: u16) -> Option<Key> {
         let x = usize::from(col.saturating_sub(1));
-        self.bottom().2.into_iter().find(|&(a, b, _)| x >= a && x < b).and_then(|(.., k)| App::hint_key(k))
+        self.bottom().2.into_iter().find(|&(a, b, _)| x >= a && x < b).map(|(.., k)| k)
     }
 
-    fn bottom(&self) -> (String, usize, Vec<(usize, usize, &'static str)>) {
+    fn bottom(&self) -> (String, usize, Vec<(usize, usize, Key)>) {
         let cols = usize::from(self.cols);
         let left = term::printable(&self.app.status(self.name));
         let base = term::width(&term::printable(&self.app.status_base(self.name))).max(NOTICE_ROOM.min(cols / 3));
         let mut right = format!(" {:>3}% ", self.app.percent());
         let mut hints = self.app.hints();
-        let hints_width = |h: &[(&str, &str)]| h.iter().map(|(k, l)| term::width(k) + term::width(l) + 3).sum::<usize>();
+        let hints_width = |h: &[Hint]| h.iter().map(|(k, l, _)| term::width(k) + term::width(l) + 3).sum::<usize>();
         while hints.len() > 1 && base + 2 + hints_width(&hints) + right.len() > cols {
             hints.pop();
         }
@@ -61,9 +62,9 @@ impl Chrome<'_> {
         line.push_str(&" ".repeat(fill));
         let mut spans = Vec::new();
         let mut at = lw + fill;
-        for (k, l) in hints {
+        for (k, l, key) in hints {
             let w = term::width(k) + term::width(l) + 3;
-            spans.push((at, at + w - 2, k));
+            spans.push((at, at + w - 2, key));
             at += w;
             line.push_str(&format!("{}{k}{} {l}  ", fg(self.palette.fg_bright), fg(self.palette.fg_muted)));
         }
@@ -118,7 +119,8 @@ impl Chrome<'_> {
     }
 }
 
-fn view_rows(rows: u16) -> usize {
+/// The rows above the status row, which the page or a screen over it fills.
+pub fn view_rows(rows: u16) -> usize {
     usize::from(rows.saturating_sub(1).max(1))
 }
 
@@ -150,9 +152,9 @@ pub fn help(out: &mut String, cols: u16, rows: u16, top: &mut u32, p: &Palette) 
 }
 
 fn help_lines(cols: usize) -> Vec<String> {
-    let full = app::KEYS.lines().map(|l| term::width(l.trim_end())).max().unwrap_or(0) + 2;
+    let full = keys::KEYS.lines().map(|l| term::width(l.trim_end())).max().unwrap_or(0) + 2;
     let mut lines = vec!["mddog keys. Press ? or Esc to go back to the page".to_string(), String::new()];
-    for l in app::KEYS.lines().map(str::trim_end) {
+    for l in keys::KEYS.lines().map(str::trim_end) {
         let t = l.trim_start();
         match (full > cols && l.starts_with("  ")).then(|| t.split_once("  ").unwrap_or(("", t))) {
             Some((k, d)) => {
@@ -185,7 +187,7 @@ mod tests {
     }
 
     fn colors(s: &str) -> Vec<Rgb> {
-        crate::viewer::loading::tests::sgr_colors(s)
+        crate::viewer::sgr_colors(s)
     }
 
     #[test]
@@ -223,7 +225,7 @@ mod tests {
     #[test]
     fn a_long_notice_hides_the_hints() {
         let mut app = App::default();
-        app.notice = Some("x".repeat(60));
+        app.notice = Some(app::Notice { text: "x".repeat(60), click: app::OnClick::Hints });
         assert!(keys(&Chrome { app: &app, name: "a.md", cols: 80, rows: 24, img_col: 0, palette: dark() }).is_empty());
     }
 

@@ -10,7 +10,7 @@ It is a macOS-only Rust binary, `mdd`, with no library users. It runs in three w
 | File list | `mdd`, `mdd FOLDER`, or Ctrl-p in the viewer | Lists the Markdown files under a folder to pick from |
 | Headless | `mdd --headless COLS [--webp] FILE` | Writes PNG or WebP tiles and prints JSON, for the Claude Code plugin |
 
-The **theme** decides how a page looks. It is one file of tokens: colors, fonts, and a few sizes. It can only recolor GitHub's look, as `github-light` and `github-dark` do, or restyle most of it, as `obsidian-light` and `obsidian-dark` do. By default mddog uses the GitHub pair and follows the macOS appearance. A theme can't change the page's layout rules. Those are in `src/native/layout.rs`.
+The **theme** decides how a page looks. It is one file of tokens: colors, fonts, and a few sizes. It can only recolor GitHub's look, as `github-light` and `github-dark` do, or restyle most of it, as `obsidian-light` and `obsidian-dark` do. By default mddog uses the GitHub pair and follows the macOS appearance. A theme can't change the page's layout rules. Those are in `src/render/layout.rs`.
 
 Related docs:
 
@@ -24,37 +24,36 @@ Related docs:
 src/
   lib.rs             crate root: exports render, the other modules are hidden and serve the binary
   main.rs            CLI: options, file and stdin checks
-  config.rs          optional config file: theme, live reload, smooth scroll, glide time, copy on select, Mermaid engine
+  config.rs          optional config file: theme, live reload, smooth scroll, glide time, copy on select, font smoothing, file list extensions
   theme.rs           themes: the token list, built-in themes, theme files and bases, and the terminal chrome palette
   headless.rs        --headless: render to PNG or WebP files, for the Claude Code plugin
   watch.rs           file watcher
   editor.rs          runs $EDITOR
   trace.rs           test and debug logging
-  sweep.rs           names and writes private temp files, and removes the temp files and remote cache files that dead runs left behind
-  render/            highlighting, GitHub's math rules, and which local images a page may show
-    markdown.rs      GitHub's math detection rules, and which local images a page may show
-    highlight.rs     tree-sitter highlighting into per-line token runs, TextMate as the fallback
-    textmate.rs      TextMate tokens (irosashi), each with its `pl-*` classes
-  native/            the renderer (CoreText and CoreGraphics)
-    doc.rs           Markdown to a block tree, with pulldown-cmark and a small raw HTML reader
+  tmp.rs             names and writes private temp files, and reads a temp name's pid back
+  sweep.rs           removes the temp files that dead runs left behind, and tells the remote cache to prune
+  render/            the renderer (CoreText and CoreGraphics)
+    doc/mod.rs       Markdown to a block tree, with pulldown-cmark and a small raw HTML reader
+    doc/dollars.rs   GitHub's math detection rules
     layout.rs        block tree to a Page: a display list plus the data the viewer asks about
     page.rs          the Page types: items, links, buttons, wide blocks, anchors, diagrams
     raster.rs        Page to RGBA pixels, with the overlay of search marks, selection, and hover
     text.rs          fonts, text measure, and text drawing through CoreText
     math.rs          TeX math: parser and box layout
     mermaid.rs       Mermaid source to a bitmap, with mermaid-rs-renderer and resvg
-    images.rs        local and remote images, SVG and raster decode
-    highlight.rs     runs render::highlight on a small thread pool with a memo
-    theme.rs         the theme's tokens as the renderer uses them
-  engine/
-    mod.rs           the typed engine API (types, `display_scale`, `SCALE_GUESS`), and `Engine`
-    native.rs        Engine: owns the fonts, theme, doc, page, and overlay, and answers the viewer's calls
-  page/
-    mod.rs           `PAD`, `base_dir`
+    icons.rs         the alert and button icons: one set of paths, one cache
+    images.rs        local and remote images, raster decode, and `base_dir`
+    svg.rs           SVG parsing with the system fonts, and drawing into bitmaps, for images, diagrams and icons
+    media.rs         which image sources are remote, and which local files a page may show
     remote.rs        fetches remote images: private-address checks, worker pool, memory and disk caches
+    highlight/mod.rs      runs the highlighter on a small thread pool with a memo
+    highlight/classify.rs tree-sitter highlighting into per-line token runs, with TextMate as the fallback
+    highlight/textmate.rs TextMate tokens (irosashi), each with its `pl-*` classes
+    theme.rs         the theme's tokens as the renderer uses them, with the differences between the two looks
+    engine.rs        Engine: owns the fonts, theme, doc, page, and overlay, answers the viewer's calls, and defines the types it returns
   viewer/
-    mod.rs           module list
-    preview.rs       the viewer: first paint, event loop, mouse, links, selection, terminal writes
+    mod.rs           module list, and `Event`, what the viewer's loop reads
+    preview.rs       the viewer: first paint, event loop, mouse, selection, terminal writes
     cache.rs         tile ids, resident bytes, eviction, herdr bands, placements
     app.rs           key-to-action state machine (scroll, search, contents, history)
     chrome.rs        status row, contents sidebar, and the ? screen, drawn from App
@@ -62,16 +61,19 @@ src/
     loading.rs       the loading skeleton drawn in terminal cells
     picker.rs        the file list: walk, fuzzy filter, drawing, and keys
     position.rs      keeps the view on the same content across re-renders
+    clipboard.rs     copies text through pbcopy and OSC 52
+    link.rs          which links the viewer follows, and opening one
   term/
     mod.rs           /dev/tty raw mode, terminal probe, key and mouse parser
     kitty.rs         Kitty graphics: transmit, place, free
+    screen.rs        the display's backing scale (`display_scale`, `SCALE_GUESS`)
 assets/
   themes/            built-in themes: github-light, github-dark (Primer's colors), obsidian-light, obsidian-dark
   textmate/          128 grammars from starry-night, scope-to-class map
   spike.png, mddog-themes.webp  README images
 build.rs             deflates each TextMate grammar into OUT_DIR and lists them
 fixtures/            gfm.md, diagram.svg, math/ (real-world math files), themes/ (sample theme files)
-tests/               integration tests (help over a pty, native engine checks, search, watch, headless, math and textmate goldens)
+tests/               integration tests (help over a pty, engine checks, search, watch, headless, math and textmate goldens)
 reference/           Node and Python dev tools: GitHub capture, grammar export, e2e, bench
 docs/                behavior spec, theme guide, terminal UAT notes, archive
 plugins/
@@ -82,20 +84,20 @@ plugins/
 
 ```mermaid
 flowchart TD
-  A["file or stdin"] --> B["native::doc::parse: pulldown-cmark to a block tree"]
+  A["file or stdin"] --> B["doc::parse: pulldown-cmark to a block tree"]
   B --> C["highlight::prefetch: code on up to 4 threads"]
-  C --> D["native::layout: block tree to a Page"]
+  C --> D["layout: block tree to a Page"]
   D --> E["Engine::snapshot: raster tiles, RGBA"]
-  E --> F["kitty.rs: terminal"]
+  E --> F["viewer: terminal"]
   E --> G["headless.rs: PNG or WebP files and JSON"]
   H["images: local at once, remote late"] -.-> D
 ```
 
 1. The viewer or headless mode reads the file and calls `Engine::load(src, base, wrap, theme)`.
-2. `render::markdown::protect_math` escapes math so the parser keeps it. `native::doc::parse` then reads the Markdown with pulldown-cmark (GFM tables, footnotes, strike-through, task lists, front matter) and a small raw HTML reader. The result is a `Doc`: a block tree plus each top-level block's source lines.
-3. `native::highlight::prefetch` highlights the code blocks on a few threads.
-4. `native::layout::layout` turns the `Doc` into a `Page`: a display list of rects, text runs, images, and polylines in device pixels, plus links, anchors, headings, buttons, wide blocks, and the text of the page.
-5. The viewer asks for tiles. `Engine::snapshot` draws the items that touch a tile with CoreGraphics, straight into the buffer that is sent to the terminal. Headless mode writes the tiles as PNG or WebP files instead.
+2. `render::doc::dollars::protect_math` escapes math so the parser keeps it. `render::doc::parse` then reads the Markdown with pulldown-cmark (GFM tables, footnotes, strike-through, task lists, front matter) and a small raw HTML reader. The result is a `Doc`: a block tree plus each top-level block's source lines.
+3. `render::highlight::prefetch` highlights the code blocks on a few threads.
+4. `render::layout::layout` turns the `Doc` into a `Page`: a display list of rects, text runs, images, and polylines in device pixels, plus links, anchors, headings, buttons, wide blocks, and the text of the page.
+5. The viewer asks for tiles. `Engine::snapshot` draws the items that touch a tile with CoreGraphics, straight into the buffer that is sent to the terminal. Headless mode gives it a plain buffer and writes the tiles as PNG or WebP files instead.
 
 The config file is read once at startup, before any of this.
 
@@ -144,7 +146,8 @@ A SIGINT that arrives while the editor runs is ignored. The signal handler check
 - With `-`, or with no file and piped input, it copies standard input to a private temp file.
 - `--help` is short and points to the `?` screen for keys. It works even when the config file is broken, because `main` loads the config only after it parses the options.
 - `--headless COLS FILE` runs headless mode. Like the viewer, it stops on a broken config. `--webp` needs `--headless`.
-- The viewer refuses to start in a terminal that has no Kitty graphics, and in Warp and zellij, which garble a scrolled image.
+- The viewer refuses to start in a terminal that has no Kitty graphics, and in Warp and zellij, which garble a scrolled image. It also stops with an error when it can't put the terminal in raw mode, since keys would echo onto the page.
+- `mdd FILE` opens any text file. When the extension is not in `file_list.extensions`, the status row says `Not a .md file, shown as Markdown`.
 
 ### Config
 
@@ -157,12 +160,12 @@ A SIGINT that arrives while the editor runs is ignored. The signal handler check
 | `smooth_scroll` | `true` | Jump keys glide. `false` makes every jump instant. |
 | `glide_ms_per_page` | `200` | How long a glide over one screen takes. |
 | `copy_on_select` | `false` | Copy a selection when the mouse button is released. |
+| `font_smoothing` | the macOS setting | Draw text with font smoothing, which makes it a little heavier. Unset, mddog reads `defaults -g AppleFontSmoothing` once at startup (0 turns it off). |
 | `file_list.extensions` | `["md", "markdown"]` | Which files the file list shows, and which ones "Did you mean" suggests. The full list, without dots, in any case. `mdd FILE` opens any text file, whatever its extension. |
-| `mermaid.engine` | the theme's, else `pele` | `pele` draws diagrams in GitHub's look, `obsidian` in Obsidian's (see Mermaid). A theme names its engine with `--mddog-mermaid`, or takes its base's. |
 
 `main` loads the file once, before the viewer takes the terminal, into a `OnceLock`. Everything else calls `config::get()`, which returns the defaults when nothing was loaded (tests, the library).
 
-Unknown keys and bad values stop the run with one line that names the file, the line, and the dotted key. `parse` also reads the theme files, so a missing file or a bad theme stops the run the same way. A key that was removed from mddog is an unknown key like any other.
+Unknown keys and bad values stop the run with one line that names the file, the line, and the dotted key. `parse` also reads the theme files, so a missing file or a bad theme stops the run the same way. A key that was removed from mddog, such as `mermaid.engine`, is an unknown key like any other.
 
 ## Page look: themes
 
@@ -170,20 +173,20 @@ Unknown keys and bad values stop the run with one line that names the file, the 
 
 A theme (`src/theme.rs`) is one file of `:root` tokens. The file keeps the `.css` extension and CSS's syntax, but it is not a style sheet. [docs/themes.md](docs/themes.md) lists the tokens and says how to write one. The built-ins are `assets/themes/*.css`, embedded in the binary and listed in `BUILTIN`, one line each. A new built-in is that line and its file.
 
-| Theme | Changes | Mermaid engine |
-|---|---|---|
-| `github-light`, `github-dark` | Primer's colors | pele |
-| `obsidian-light`, `obsidian-dark` | Obsidian's reading view: fonts, heading sizes, colors, and line height | obsidian |
+| Theme | Changes |
+|---|---|
+| `github-light`, `github-dark` | Primer's colors |
+| `obsidian-light`, `obsidian-dark` | Obsidian's reading view: fonts, heading sizes, colors, line height, and the layout |
 
-`TOKENS` in `src/theme.rs` is the one list of tokens and their kinds: color, font list, heading scale, or number. A test checks that both GitHub files set all of them. The Obsidian files set only what differs and take the rest from the GitHub theme of their mode.
+`TOKENS` in `src/theme.rs` is the one list of tokens and their kinds: color, font list, heading scale and weight, number, or a choice of words (`--mddog-layout`, `github` or `obsidian`). A theme that ends up without a token is an error that names it. `COMPLETE` names the two built-ins that set every token, `github-light` and `github-dark`. The Obsidian files set only what differs and take the rest from the GitHub theme of their mode.
 
 **Reading a theme.** `theme::parse` (built-ins) and `theme::file` (theme files) read the top-level `:root` rules of the theme. Any other rule, an unknown token, or a bad value is an error that names the file and the token. Colors are literal hex, so no CSS parser is needed. `masks` blanks comments to spaces and string contents to `x` at the same byte offsets, so a quoted `{`, `}`, `;`, or `/*` can't move a rule's edges. Font names allow only letters, digits, space, and `-_.`.
 
 **Bases.** A theme with `--mddog-base` keeps its base (a built-in, or a file relative to its own folder). `theme::file` loads the chain and stops on a file it has already seen, by canonical path. A theme with no mode takes its base's mode, and a different `color-scheme` is an error. A token the theme leaves out comes from its base, else from `github-light` or `github-dark`, by mode. The built-ins load GitHub's two themes first, so the Obsidian ones fill in from them without recursion.
 
-**Two types.** `crate::theme::Theme` holds the `name`, `dark`, the terminal `Palette`, the Mermaid engine the theme names, and a private map of resolved tokens. Code reads it with `color(name)`, `fonts(name)`, `number(name)`, and `heading_scale()`, where names drop the `--mddog-` prefix. `native::theme::Theme::new` flattens those tokens into plain `u32` and `f32` fields for the renderer: page colors, match and selection colors, the five alert colors, diff colors, syntax colors, font lists, heading scale, line height, and code size. `Engine::load` builds it on each load and calls `Fonts::set_families`, which clears the font and line caches when the font lists change.
+**Two types.** `crate::theme::Theme` holds the `name`, `dark`, the terminal `Palette`, and a private map of resolved tokens. Code reads it with `color(name)`, `fonts(name)`, `number(name)`, `choice(name)`, `heading_scale()`, and `heading_weight()`, where names drop the `--mddog-` prefix. The `Palette` reads each token by name. `render::theme::Theme::new` flattens the tokens into plain `u32` and `f32` fields for the renderer: page colors, match and selection colors, the five alert colors, diff colors, syntax colors, font lists, heading scale, line height, and code size. It also turns `--mddog-layout` into a `Look` (`Github` or `Obsidian`) and sets the numbers, colors, and flags in which the two looks differ, such as heading spacing, list markers, table stripes, and the diagram colors. `Theme::tok_color` maps a highlight token to its syntax color. Layout reads those fields, and asks `Look` only where the two draw a part with a different shape. `Engine::load` builds it on each load and calls `Fonts::set_families`, which clears the font and line caches when the font lists change.
 
-**Light and dark.** `config::theme()` returns the theme to draw with: the one theme, or for a `light:...,dark:...` pair the one for the macOS `AppleInterfaceStyle` setting, read each time a page is built. The theme's `dark` flag picks Mermaid's dark colors. There is no appearance observer. A change shows on the next reload, resize, wrap toggle, return from the editor, or when help opens. Help draws in the theme's colors, so `?` reloads the page first when `config::theme()` changed.
+**Light and dark.** `config::theme()` returns the theme to draw with: the one theme, or for a `light:...,dark:...` pair the one for the macOS `AppleInterfaceStyle` setting, read each time a page is built. The theme's `dark` flag picks Mermaid's dark base colors. There is no appearance observer. A change shows on the next reload, resize, wrap toggle, return from the editor, or when help opens. Help draws in the theme's colors, so `?` reloads the page first when `config::theme()` changed.
 
 ### Terminal chrome colors
 
@@ -193,9 +196,9 @@ The terminal parts draw with the theme's `Palette`: the file list, the status ba
 
 ### Doc
 
-`native::doc::parse` turns the source into a `Doc`. It runs on the main thread inside `Engine::load`.
+`render::doc::parse` turns the source into a `Doc`. It runs on the main thread inside `Engine::load`.
 
-- `protect_math` (in `render/markdown.rs`) runs first. See Math.
+- `protect_math` (in `render/doc/dollars.rs`) runs first. See Math.
 - pulldown-cmark reads the Markdown, with offsets. The block tree (`Block`) has paragraphs, headings, code, quotes, GitHub alerts, lists with task boxes, tables, rules, math, Mermaid, `<details>`, aligned blocks, and footnotes. Inline content is flat runs with style flags (`Sty`): bold, italic, strike, code, kbd, sub, sup, underline, mark, and a link index.
 - A small tokenizer reads the raw HTML that Markdown files use: `<details>`, `<summary>`, `<p align>`, `<div align>`, `<br>`, `<img>`, `<kbd>`, `<sub>`, `<sup>`, `<mark>`, `<ins>`, and similar. The contents of `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, and `<template>` are dropped. Other tags have no effect of their own, and their text stays. Text that sits in a raw HTML block outside a `<p>` becomes `Block::Text`, which draws like a paragraph with no gap below it, as a browser draws it.
 - `lines` holds the 1-based source lines of each top-level block, from the parser's offsets. This is how the viewer keeps its position (see Position keeping).
@@ -204,56 +207,56 @@ The terminal parts draw with the theme's `Palette`: the file list, the status ba
 
 ### Layout
 
-`native::layout::layout` walks the `Doc` once and writes a `Page`. All numbers are device pixels: CSS pixels times the scale. The page is 24 CSS px padded (`page::PAD`).
+`render::layout::layout` walks the `Doc` once and writes a `Page`. All numbers are device pixels: CSS pixels times the scale. The page is 24 CSS px padded (`layout::PAD`).
 
 - **Display list.** `Page::items` is a list of `Item`s: a rect (fill, stroke, radius), a text run, an image bitmap, or a polyline. Each item has a clip number. 0 means fixed, and any other number points to a wide block.
-- **Text.** `native::text::Fonts` measures and draws through CoreText. It keeps a cache of fonts, and one of laid-out lines. The theme's font list gives the family, first choice first. Words wrap by their measured width, and CJK text breaks between characters.
+- **Text.** `render::text::Fonts` measures and draws through CoreText. It keeps a cache of fonts, and one of laid-out lines. The theme's font list gives the family, first choice first. Words wrap by their measured width, and CJK text breaks between characters.
 - **Data for the viewer.** `Page` also keeps the page's text as one `Vec<char>` (search and selection index into it), the link rects and URLs, heading anchors, the heading list for the contents sidebar, the source blocks with their tops and heights, the buttons, the toggles for `<details>`, and the images still wanted.
 - **Wide blocks.** A code block, a table that is wider than the page, or a diagram that is wider than the page gets an `HScroll` entry: its box, its largest offset, and its scroll bar. Its items have that entry's clip number, and the raster shifts them by the offset. With wrap on (`w`), code wraps and gets no entry.
 - **Buttons.** Each code block gets a copy button. Each diagram gets copy, expand, zoom-in, and zoom-reset buttons, sized and placed as GitHub does.
-- **Details.** A closed `<details>` lays out only its summary. A click on it toggles the block by id and lays out again.
+- **Details.** A closed `<details>` lays out only its summary. A click on it toggles the block by id and lays out again. `doc::walk_shown` holds that rule for the code and image prefetchers too.
 
 ### Raster
 
-`native::raster::render_into` draws the items that touch a tile with CoreGraphics into an RGBA buffer, then draws the overlay on top: search marks (the current match in another color), the selection, button hover and "Copied!" state, the scroll bars of wide blocks, and the expanded diagram. The overlay lives outside the display list, so a search or selection change never needs a new layout. Text is drawn with antialiasing and sub-pixel positions, and with font smoothing off. `Engine::snapshot` takes a CSS-pixel range and a scale, and draws at that scale even when it differs from the layout scale (headless uses this for its small WebP copies).
+`render::raster::render_into` draws the items that touch a tile with CoreGraphics into an RGBA buffer, then draws the overlay on top: search marks (the current match in another color), the selection, button hover and "Copied!" state, the scroll bars of wide blocks, and the expanded diagram. The overlay lives outside the display list, so a search or selection change never needs a new layout. Text is drawn with antialiasing and sub-pixel positions. Font smoothing is the engine's `smooth` flag, which comes from the config (see `font_smoothing`). `Engine::snapshot` takes a CSS-pixel range, a scale, and a function that allocates the buffer, and draws at that scale even when it differs from the layout scale (headless uses this for its small WebP copies).
 
 ### Engine
 
-`engine::Engine` (`src/engine/mod.rs` re-exports `native::Engine`) is the one object the viewer and headless mode call. It owns the fonts, the theme, the `Doc`, the images, the `Page`, and the overlay. Coordinates in and out are CSS pixels. A `Rect` is `[x, y, w, h]`. It is not `Send`, so only the main thread uses it, and every method takes its `RefCell` borrow inside the method.
+`render::engine::Engine` (`src/render/engine.rs`) is the one object the viewer and headless mode call, and the file also defines the types it takes and returns. It owns the fonts, the theme, the `Doc`, the images, the `Page`, and the overlay. Coordinates in and out are CSS pixels. A `Rect` is `[x, y, w, h]`. It is not `Send`, so only the main thread uses it, and every method takes its `RefCell` borrow inside the method.
 
 | Group | Calls |
 |---|---|
-| Page | `new(width, scale)`, `load(src, base, wrap, theme)`, `resize(width)`, `rescale(scale, width)`, `layout()`, `anchor_y(id)`, `set_wrap(bool)` |
-| Tiles | `snapshot(y, h, scale)` |
+| Page | `new(width, scale, smooth)`, `load(src, base, wrap, theme)`, `resize(width)`, `rescale(scale, width)`, `layout()`, `anchor_y(id)`, `set_wrap(bool)` |
+| Tiles | `snapshot(y, h, scale, alloc)` |
 | Search | `search(query, keep)` returns the rects of every match, `search_current(i)` returns the rects of the old and the new current match, `search_clear()` |
 | Mouse | `hover(x, y)` returns the pointer shape and the rects of buttons whose hover changed, `link(x, y)`, `press(x, y)`, `reset_copy()` |
 | Selection | `select(Select)` with `Range`, `Word`, or `Clear`, `selection_text()`, `has_selection()` |
 | Wide blocks | `code_grab`, `code_drag`, `code_release`, `code_scroll`, `code_scroll_view`, `code_positions`, `code_restore` |
 | Diagrams | `expand(i, top, height)`, `collapse()` |
-| Late images | `pending_images()`, `images_done()`, `wait_images(timeout)` |
+| Late images | `pending_images()`, `take_images()`, `wait_images(timeout)` |
 
-`layout()` returns a `Layout`: the source blocks with their top and height, the text of each block (for position keeping), the headings, and the page height. `press` returns a `Press`: `Nothing`, `Copy { text, rects, label }`, `Expand(i)`, or `Other`, which means the page changed and the viewer must measure again. `select` returns how many rects the old selection had, then the old rects followed by the new ones, so the herdr band path can split them. The calls that change what is drawn return the CSS rects to redraw, and the viewer sends only the tiles (or bands) they touch.
+`layout()` returns a `Layout`: the source blocks with their top and height, the text of each block (for position keeping), the headings, and the page height. `press` returns a `Press`: `Nothing`, `Copy { text, rects, label }`, `Expand(i)`, `Redraw(rects)` for a change in place such as a zoom, or `Other`, which means the page changed and the viewer must measure again. `select` returns how many rects the old selection had, then the old rects followed by the new ones, so the herdr band path can split them. The calls that change what is drawn return the CSS rects to redraw, and the viewer sends only the tiles (or bands) they touch.
 
 Each call is a direct method call. Nothing is parsed or sent between the viewer and the engine.
 
 ### Scale
 
-Layout needs the display's backing scale. `engine::display_scale()` reads it from CoreGraphics (`CGDisplay`), which needs a window-server connection (about 25 ms) but runs off the main thread and starts no AppKit. It is a `OnceLock`.
+Layout needs the display's backing scale. `term::screen::display_scale()` reads it from CoreGraphics (`CGDisplay`), which needs a window-server connection (about 25 ms) but runs off the main thread and starts no AppKit. It is a `OnceLock`.
 
-- The viewer starts it on a thread at launch. The first page lays out at `SCALE_GUESS` (2.0, which every Mac screen since 2016 has except an external 1x display) while that thread runs.
+- The viewer starts it on a thread at launch. The first page lays out at `SCALE_GUESS` (in `term/screen.rs`, 2.0, which every Mac screen since 2016 has except an external 1x display) while that thread runs.
 - `Preview::settle_scale()` runs in `render_doc` right after the load. When the real scale differs from the guess, it fixes the scale, the cell pixels, the page width, and the loader, and calls `Engine::rescale`. That lays out again before anything is drawn.
 - With several displays at one scale, that scale wins. With mixed scales, the scale of the display that holds the frontmost window wins, because that is where the terminal was typed into. If that lookup fails, the main display wins.
 - Headless mode starts with `display_scale()` directly.
 
 ### Highlighting
 
-Code is highlighted in two steps. `render::highlight` (tree-sitter) and `render::textmate` (irosashi, a Rust port of vscode-textmate) classify code the way GitHub does, with `pl-*` classes. `render::highlight::block` maps each class to a token (`Tok`: keyword, string, comment, number, function, type, punctuation, added, removed, meta) and returns per-line runs. Layout then colors each token with the theme's syntax colors.
+Code is highlighted in two steps. `render::highlight::classify` (tree-sitter) and `render::highlight::textmate` (irosashi, a Rust port of vscode-textmate) classify code the way GitHub does, with `pl-*` classes. `classify::block` maps each class to a token (`Tok`: keyword, string, comment, number, function, added, removed, meta, and a few GitHub-specific kinds) and returns per-line runs. Layout then colors each token with the theme's syntax colors.
 
-- tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, and PHP. TextMate covers the rest with 128 grammars from starry-night. `tests/textmate.golden` pins the TextMate output.
+- tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, and PHP. TextMate covers the rest with 128 grammars from starry-night. A TextMate grammar is a JSON file of regex rules that tag code with scope names such as `comment`. The format comes from the TextMate editor, and VS Code and GitHub now use it too. `tests/textmate.golden` pins the TextMate output.
 - Grammars are embedded deflated. `build.rs` compresses each one into `OUT_DIR` (2.9 MB to 0.54 MB) and lists them by scope. A page inflates only the grammars it needs, and the highlighter is built again when a new language's include chain adds grammars. It reads a grammar's header when it registers it, and parses the grammar when tokenizing first reaches it.
-- A code block that has no known language, or that fails, falls back to a small keyword, string, and comment highlighter in `native/highlight.rs`. `MDDOG_NATIVE_HL=b` forces it.
-- **Pool.** `prefetch(doc)` runs inside `Engine::load`. It sends each code block (language and text) to one of 4 threads (`WORKERS_MAX`). A language always goes to the same thread, in the order languages first showed up, so the first use of each language (a query compile or a grammar load, up to about 12 ms) runs beside the others. The threads live on, so a compiled language serves later pages. A made-up fence label can't start more than 4 threads, and the table of language slots is cleared at 256.
-- **`MEMO`.** The results go into a thread-local `MEMO`, keyed by language and text. `highlight()` reads `MEMO` first and computes on the calling thread only on a miss. `prefetch` keeps the old page's entries it can reuse, so a reload with unchanged code costs nothing.
+- A code block with no known language comes back plain. TextMate reads `\r` as a line end, so the highlighter gives it a space of the same length, and CRLF code keeps its offsets.
+- **Pool.** `highlight::prefetch(doc)` runs inside `Engine::load`. It sends each code block (language and text) to one of 4 threads (`WORKERS_MAX`). A language always goes to the same thread, in the order languages first showed up, so the first use of each language (a query compile or a grammar load, up to about 12 ms) runs beside the others. The threads live on, so a compiled language serves later pages. A made-up fence label can't start more than 4 threads, and the table of language slots is cleared at 256.
+- **`MEMO`.** The results go into a thread-local `MEMO`, keyed by language and text. `highlight()` reads `MEMO` first and computes on the calling thread only on a miss. `prefetch` keeps the old page's entries it can reuse, so a reload with unchanged code costs nothing. `highlight::code_text` (a tab as four spaces) is the one rule that layout and `prefetch` both use for the text, so they share one `MEMO` key.
 - A closed `<details>` lays out its body only when opened, so its code is highlighted then.
 - The threads and the file reader have a 64 MiB stack (`render::STACK`).
 
@@ -261,20 +264,20 @@ Code is highlighted in two steps. `render::highlight` (tree-sitter) and `render:
 
 Math is found by GitHub's rules, then laid out by mddog's own TeX layout.
 
-**Detection.** `render/markdown.rs` holds GitHub's rules. `protect_math` is a pre-pass on the source, line by line, that knows its containers. cmark-style parsers drop a backslash before punctuation and read `*` and `_` in math as emphasis. So `protect_math` escapes those inside each math span, and holds an escaped `\$` as `HELD_DOLLAR` until the doc is built. It finds spans with `inline_math(_, loose = true)`, which finds every span the later pass finds and more, so it never misses math that will be typeset. It skips raw HTML blocks, code spans, spans that hold a URL, and text outside the span's block quote or table. Then `doc.rs` splits each text run with `inline_math(_, false)`.
+**Detection.** `render/doc/dollars.rs` holds GitHub's rules. `protect_math` is a pre-pass on the source, line by line, that knows its containers. cmark-style parsers drop a backslash before punctuation and read `*` and `_` in math as emphasis. So `protect_math` escapes those inside each math span, and holds an escaped `\$` as `HELD_DOLLAR` until the doc is built. It finds spans with `inline_math(_, loose = true)`, which finds every span the later pass finds and more, so it never misses math that will be typeset. It skips raw HTML blocks, code spans, spans that hold a URL, and text outside the span's block quote or table. Then `doc/mod.rs` splits each text run with `inline_math(_, false)`.
 
 `inline_math` follows GitHub's rules. An opener follows whitespace, `(`, or the start of a text node. The first `$` after it closes the span unless it comes before a word character, sits between two of the same mark, or follows a space and comes before a space or the end. A span never crosses a line. Both passes take linear time.
 
 mddog differs from GitHub on purpose in a few places. Math inside italics and footnotes renders, `\$` stays a literal dollar, and five GitHub math bugs are not copied. `fixtures/math/SOURCES.md` lists the exact inputs, and `tests/math.golden` holds the expected lines. An inline HTML tag that follows text pushes a private-use marker (`HTML_BREAK`, U+E025), so `finish_inlines` can split math at the tag. It never reaches layout.
 
-**Layout.** `native/math.rs` parses TeX into a tree of nodes (`N`) and lays it out as boxes (`MBox`: width, ascent, descent, and a list of glyph runs, rules, and polylines).
+**Layout.** `render/math.rs` parses TeX into a tree of nodes (`N`) and lays it out as boxes (`MBox`: width, ascent, descent, and a list of glyph runs, rules, and polylines).
 
 - Glyphs come from the STIX fonts through CoreText. Fraction bars, roots, accents, wide arrows, and braces are rules and polylines, so they don't need a font glyph and stretch freely.
 - Spacing follows TeX's table (`class_space`) for atom classes such as ordinary, operator, binary, relation, open, close, and punctuation. A binary operator with no left operand is treated as ordinary.
 - `St` carries the style: display or text, script level, and the font code (roman, bold, double-struck, script, bold italic, italic, fraktur, sans, mono). It also carries a `script` flag for sub- and superscripts, limits, inline fraction parts, and roots.
 - It handles fractions, roots, sub- and superscripts, big operators with limits, delimiters, matrices and aligned environments, stacked symbols, extensible arrows, accents, and `\text`.
 - Placement of accents uses a letter-height guess from the node's characters, because the layout has no glyph bounds.
-- Unknown commands are noted in a thread-local list (`take_unknown`) for tests and debugging.
+- An unknown command draws as its own source text, such as `\foo`.
 
 Math is laid out in place, so the first paint includes it. There is nothing to wait for.
 
@@ -282,46 +285,39 @@ Known gaps are small and readable: script letter shapes differ from TeX's, `\mat
 
 ### Mermaid
 
-`native::mermaid::render` draws a diagram in two steps. mermaid-rs-renderer lays the diagram out and writes SVG, and resvg draws that SVG into a bitmap. Both run in process, with no browser and no script. Layout calls it for each Mermaid block, so diagrams are in the first paint. A diagram that fails to draw shows its source as a code block.
+`render::mermaid::tree` draws a diagram in two steps. mermaid-rs-renderer lays the diagram out and writes SVG, and resvg draws that SVG into a bitmap. Both run in process, with no browser and no script. Layout calls it for each Mermaid block, so diagrams are in the first paint. A diagram that fails to draw shows its source as a code block.
 
-**Engine key.** `config::mermaid(theme)` picks `pele` or `obsidian`: `mermaid.engine` if set, else the theme's `--mddog-mermaid` (inherited from its base), else `pele`. On this renderer the key only picks the diagram's look:
-
-| | pele | obsidian |
-|---|---|---|
-| Look | GitHub's: light or dark mermaid-rs-renderer palette, blue accent, muted lines | Obsidian's: the theme's accent colors the node borders |
-| Used by | GitHub themes | Obsidian themes |
-
-In both, the background, text, line, and cluster colors come from the theme's tokens (`pre-bg`, `text`, `fg-muted`, `code-bg`, `alt-bg`, `rule`). The font is Helvetica, from the system, because resvg has its own font database (`images::fontdb`).
+**Look.** The theme decides how a diagram looks. There is no config key for it. mermaid-rs-renderer's light or dark base palette is picked by the theme's `dark` flag, and the diagram colors are `Theme` fields: `diagram_fill`, `diagram_border`, `diagram_line`, and `diagram_label_bg`. With the `github` layout they come from the theme's tokens (`pre-bg`, `border`, `fg-muted`, `bg`). With the `obsidian` layout they are the colors of mermaid's default theme, inverted in dark mode, and the diagram sits at the left edge (`diagram_left`). In both, the background, text, and cluster colors also come from the tokens (`bg`, `text`, `code-bg`, `alt-bg`). The text uses the theme's body font. resvg has its own font database (`svg::fontdb`), so `svg::svg_families` turns CSS's names for the system font into SF's family name there (`SYSTEM_FONT`).
 
 **Buttons, expand, and zoom.** Each diagram sits in a box like GitHub's, with copy, expand, zoom-in, and zoom-reset buttons.
 
-- A diagram wider than the box scales down to fit. At a zoom above 1 it can be wider than the box, and then it scrolls sideways like a wide code block.
-- Zoom-in multiplies the zoom by 1.25, up to 4. Zoom-reset clears it. Both lay the page out again, which draws the diagram again at the new size, and return `Press::Other`. The zoom lives in `St::zoom`, by diagram index, and a load resets it.
+- A diagram wider than the box scales down to fit, and gets a zoom bar under it (`ZoomBar`, placed only by `layout::place_bar`).
+- Zoom-in and zoom-out multiply or divide the zoom by 1.5625 (`ZOOM_STEP`), up to 3 CSS px per diagram unit (`Diagram::max_zoom`). Zoom-reset goes back to the fit size. The diagram zooms inside its frame, so the block keeps its height. A press draws the diagram again at the new view and returns `Press::Redraw` with the frame's rect, so the page is not laid out again. The view lives in the engine by diagram index. A load clears it, and a layout that adds or drops a diagram does too. A drag in the frame pans it.
 - Copy puts the diagram's source on the clipboard.
 - Expand returns `Press::Expand(i)`. The viewer calls `Engine::expand(i, top, height)` with the visible rows. The engine draws the diagram again to fill the view, with 16 px padding, centered, as GitHub's expanded view does. That bitmap goes into `Overlay::expanded`, which is drawn last. `App::expanded` makes the next key or click call `collapse()`. A load clears it.
 - Diagram text can't be selected or searched.
 
 ### Images
 
-`native::images::Images` loads each image the layout asks for, by its `src`.
+`render::images::Images` loads each image the layout asks for, by its `src`.
 
-- **Local files** load at once, during layout. They are confined to a root folder (see Security) by `render::markdown::confined_media`. A path outside the root, a path that isn't a file, or bytes that don't decode make the image fail.
+- **Local files** load at once, during layout. They are confined to a root folder (see Security) by `render::media::confined_media`. A path outside the root, a path that isn't a file, or bytes that don't decode make the image fail.
 - **Decode.** SVG goes through resvg (`usvg`), so it stays sharp at any size. PNG, JPEG, GIF, and WebP go through the `image` crate and are premultiplied. An image wider than its line is scaled down to the line's width.
-- **Remote images** (`http` and `https`) are not fetched during layout. The layout draws each as its alt text and records the URL in `Page::wanted`. After the layout, `Engine::load` passes them to `Images::fetch`, which queues each on `page::remote`. Each `Images` has a stop flag per fetch, and its `Drop` sets them, so a reload ends the fetches of the page it replaces.
-- **Late.** When a fetch ends, the image is decoded on the main thread by `images_done()` (which the viewer polls) or `wait_images()` (which headless calls), and the page is laid out again. A failed fetch leaves the box as it was, with no layout change. `pending_images()` says how many are still loading.
+- **Remote images** (`http` and `https`) are not fetched during layout. The layout draws each as its alt text and records the URL in `Page::wanted`. After the layout, `Engine::load` passes them to `Images::fetch`, which queues each on `render::remote`. `media::is_remote` decides what counts as a web URL, with a browser's rules: tabs and line breaks dropped, the ends trimmed, `http` or `https` in any case. Each `Images` has a stop flag per fetch, and its `Drop` sets them, so a reload ends the fetches of the page it replaces.
+- **Late.** When a fetch ends, the image is decoded on the main thread by `take_images()` (which the viewer polls) or `wait_images()` (which headless calls), and the page is laid out again. A failed fetch leaves the box as it was, with no layout change. `pending_images()` says how many are still loading.
 - An image with a `width` attribute keeps it. An image that is still loading, or failed, shows its alt text in muted italics, or `[image]` when it has none.
 - The viewer gives remote images 60 s (`LATE_LIMIT`), and keeps its position when the page grows. Headless mode gives them 4 s (`REMOTE_LIMIT`) and draws what it has.
 
 ### Remote images
 
-`page::remote` fetches them. It is the only code that touches the network.
+`render::remote` fetches them. It is the only code that touches the network.
 
 - `spawn` queues each fetch for a pool of up to 16 worker threads, started as needed and then kept. A worker takes the oldest job whose host has fewer than 6 running (`PER_HOST`), so one busy host doesn't hold up the others. A job whose stop flag is set while it waits is dropped without a fetch. A job that panics is caught, so the worker keeps going.
 - `fetch` uses ureq with native TLS. It follows up to 5 redirects (`HOPS`), takes up to 30 s, and connects within 5 s. It sends a `mddog/<version>` user agent with a contact URL, because Wikimedia answers 429 to one without. A proxy from the environment is ignored, since ureq would resolve the proxy instead of the host.
 - **Private addresses.** ureq resolves through `Checked`. It refuses a reserved name (`.local`, `.localhost`, `.internal`, `.lan`, `.home`, `.home.arpa`, `.intranet`, `.corp`, or a name with no dot) and returns a host's addresses only when every one is public (`private_ip`). ureq connects only to the addresses it returns, so the address checked is the address used. Each redirect hop resolves through `Checked` again. That also closes DNS rebinding.
 - Only `image/*` and octet-stream bodies are passed on, up to 32 MiB (`MAX_BODY`). Every fetch is a plain GET of the whole body.
 - **Memory cache.** Whole responses stay in memory, up to 64 MiB, oldest out first, for their `max-age`, between 1 minute and 1 hour, else 5 minutes. A live reload asks for every image again on each save, so even `max-age=0` is kept a minute. `no-store` is not kept.
-- **Disk cache.** A whole response is also written to `~/Library/Caches/mddog/remote/<hash>`: a JSON line with its URL, type, and expiry, then the body. It goes through a temp file and a rename, so a reader never sees half a file. A reopen in a new process skips the network. The sweep removes it (see Sweep).
+- **Disk cache.** A whole response is also written to `~/Library/Caches/mddog/remote/<hash>`: a JSON line with its URL, type, and expiry, then the body. It goes through a temp file and a rename, so a reader never sees half a file. A reopen in a new process skips the network. `remote::prune_disk` removes old files, and the sweep calls it (see Sweep).
 
 ## Drawing in the terminal
 
@@ -344,7 +340,7 @@ Each tile is sent with one extra cell row below it, a copy of the next tile's fi
 
 Past the limit, the tiles farthest from the view are freed and re-sent when needed. Visible tiles are never freed. So a view larger than the limit on its own (a full-screen pane on a 5K display under herdr) goes over it, and herdr then drops the oldest images.
 
-**Pixels.** `Engine::snapshot` makes a zeroed shm buffer (its size rounds up to whole pages) and CoreGraphics draws straight into it, so a tile needs no pixel conversion and no copy. A tile is drawn at the display's scale. The page is laid out at that scale too, so nothing is resampled. The engine keeps no image of the whole page: it draws each tile from the display list when asked. So memory does not grow with the page, and a tile that was freed is drawn again from the list.
+**Pixels.** `Engine::snapshot` draws into a buffer the caller allocates. The viewer allocates a zeroed shm object (its size rounds up to whole pages), so CoreGraphics draws straight into it and a tile needs no pixel conversion and no copy. A tile is drawn at the display's scale. The page is laid out at that scale too, so nothing is resampled. The engine keeps no image of the whole page: it draws each tile from the display list when asked. So memory does not grow with the page, and a tile that was freed is drawn again from the list.
 
 ### Bands under herdr
 
@@ -354,7 +350,7 @@ herdr copies every image, and its client sends it on to Ghostty as base64, so re
 - A tile keeps its bands in `Tile::bands`. A new change that touches a band replaces it with one band over both (`join_bands`). The tile's byte count includes its bands.
 - Bands are placed with the tile on every frame, cropped to the view, so they move with it on scroll. `Tile::release` frees a tile and its bands together.
 - A tile goes out whole again, which removes its bands, when it would hold more than 4 bands or bands over half its rows, when it changes while out of view, 1 s after the last input, or when it is re-sent anyway (reload, resize, eviction, help).
-- For a drag, `Preview::selection_js` counts only the rects that differ between the old and the new selection, so a long drag sends only the rows at its moving end.
+- For a drag, `changed_rects` in `preview.rs` counts only the rects that differ between the old and the new selection, so a long drag sends only the rows at its moving end.
 
 ### Glides
 
@@ -368,7 +364,7 @@ A glide (see Keys and scrolling) draws the view at any pixel offset, not only on
 
 ### First paint
 
-The main thread probes the terminal while the worker reads the file. The probe sends CSI 16 t, XTVERSION, DECRQM for modes 2026 and 1016, a Kitty `a=q` query, then DA1, and waits up to 1 s.
+The main thread probes the terminal while the worker reads the file. `Tty::probe` sends CSI 16 t, XTVERSION, DECRQM for modes 2026 and 1016, a Kitty `a=q` query for each route, then DA1, and waits up to 1 s. It makes the shm object and temp file the queries name, and removes them when it is done.
 
 - `Engine::new` makes no window and starts no framework, so it takes almost no time. The load, which is parse, highlight, and layout, is the first real cost. A trace of a cold start, with the stand-in terminal, shows layout at about 15 ms, highlighting at about 14 ms (bounded by the slowest language's query compile), and raster and send at about 10 ms. The page reaches the terminal in about 40 ms of mddog's own time.
 - The page lays out at `SCALE_GUESS` while a thread reads the real scale. `settle_scale` fixes a wrong guess before anything is drawn (see Scale).
@@ -396,6 +392,9 @@ While a file loads, `Loader` (`loading.rs`) draws a page-shaped skeleton in term
 ### Keys and scrolling
 
 `app.rs` is pure. It turns a key or mouse event into actions and holds no terminal or engine state, so it is unit tested row by row against [docs/behavior.md](docs/behavior.md). `chrome.rs` draws the status row, the sidebar, and the `?` screen from `App`, so they are tested without a terminal too. `preview.rs` carries out the actions.
+
+One `scroll_step` table maps the scroll keys to a step: a row, a wheel step (3 rows), half a screen, or a screen. The page, the `?` screen, and `App::instant` all read it, so the help screen scrolls with the page's keys: `d` and `u` go half a screen, Space, `f`, `b`, and the page keys a screen, `j` and `k` a row, and the wheel 3 rows. Ctrl-b scrolls up a page there too. `q` and Ctrl-c quit, and any other key closes help.
+
 **Resize.** Resizes are debounced by 120 ms. A resize or contents toggle reuses the file's bytes when they still match. A resize lays the live page out again instead of loading it (`Preview::resize_in_place`): it calls `Engine::resize`, which lays the same `Doc` out at the new width, measures, and scrolls to the same content anchor a reload uses. A resize takes a few milliseconds, because it re-parses nothing. It falls back to a full reload when the result could differ from a fresh load:
 
 - The file changed (with live reload on), or the macOS appearance changed under a theme pair.
@@ -423,16 +422,16 @@ While a file loads, `Loader` (`loading.rs`) draws a page-shaped skeleton in term
 `picker.rs` holds the list. `Picker` keeps the items, the filter, and the selection, and `draw` paints the list over the whole screen as terminal text, as the `?` screen does. `preview::browse(root)` starts with the list and no document. It draws the list right after raw mode, before the engine starts and before the terminal probe, and waits up to 50 ms for the first batch. Ctrl-p (`Action::Browse`) opens the same list over a file and keeps the last filter.
 
 - **Root.** `scope` picks the nearest folder with `.git` above the start, else the current folder. `mdd` starts from the current folder, and Ctrl-p from the open file's folder (the current folder for standard input). A folder argument is the root itself. Each Ctrl-p calls `Picker::follow`: when the open file is outside the current root, the root becomes `scope` of the file's folder, and the filter is cleared. A file under the root keeps it, so a list of a plain folder, or of a folder that holds several repos, stays put.
-- **Walk.** A walker thread uses `ignore::WalkBuilder` with `require_git(false)`, so it skips hidden and gitignored files with or without git. It keeps files whose extension is in `file_list.extensions` (`.md` and `.markdown` by default) and stops at 10,000 (`CAP`), in walk order. It sends a batch every 30 ms with `term::Event::Listed`, which wakes the event loop. An `AtomicBool` stops the walk when the list closes or restarts.
+- **Walk.** A walker thread uses `ignore::WalkBuilder` with `require_git(false)`, so it skips hidden and gitignored files with or without git. It keeps files whose extension is in `file_list.extensions` (`.md` and `.markdown` by default) and stops at 10,000 (`CAP`), in walk order. It sends a batch every 30 ms with `viewer::Event::Listed`, which wakes the event loop. An `AtomicBool` stops the walk when the list closes or restarts.
 - **Titles.** `title` reads the first ATX heading from each file's first 4 KiB. Setext headings and headings after long front matter don't give a title.
 - **Filter.** `nucleo-matcher` scores `path + " " + title` as one string. `Picker` splits the match positions back into the path and the title for highlighting. The filter takes fzf's syntax (`!`, `^`, `'`, `$`).
-- **Switching files.** `open`, `switch`, and `back_file` change files inside one `Preview`. `open` pushes a `Visit`: the file, the stdin flag, the name, the whole `App`, a position anchor, and the source. The history holds 50 (`HISTORY`). `switch` resets the document state, restarts the watcher, and calls `render_doc`, which maps `restore_at` through a line diff as a reload does. The new `App` keeps `wrap` and `toc_visible`.
+- **Switching files.** `open`, `switch`, and `back_file` change files inside one `Preview`. `open` pushes a `Visit`: the file, the stdin flag, the name, the whole `App`, a position anchor, and the source. The history holds 50 (`HISTORY`). `switch` resets the document state, restarts the watcher, and calls `render_doc`, which maps `restore_at` through a line diff as a reload does. `replace_app` is the one place that gives the new `App` the old one's `wrap` and contents panel.
 - **Back.** Backspace and Ctrl-o first go back through jumps in the current file. With none left, `App` emits `Action::BackFile`, and `back_file` returns to the file before at its old position. A file that can't be read is dropped from the history, so older files stay reachable.
 - When the list is up, `show()` frees the tiles and draws it, and `draw_chrome` and `prefetch_target` skip. Opening a file renders it on the main thread, as a reload does.
 
 ### Position keeping
 
-Every top-level block carries its source lines (`Layout::blocks`, from pulldown-cmark's offsets), and the layout gives each block its top and height. Before a re-render, mddog records the source line at the top of the view and the offset into its block. Afterwards it maps that line through a line diff of the two sources (`similar`) and scrolls back to the same spot.
+Every top-level block carries its source lines (`Layout::blocks`, from pulldown-cmark's offsets), and the layout gives each block its top and height. Before a re-render, mddog records the source line at the top of the view and the offset into its block. Afterwards it maps that line through a line diff of the two sources (`similar`) and scrolls back to the same spot. `Preview::settle_at` does the scroll for a reload, a resize, and a relayout alike, turning the anchor into device pixels (`px_of`) in one place.
 
 ### Search
 
@@ -454,13 +453,13 @@ Code blocks, wide tables, and zoomed diagrams scroll sideways on their own. The 
 
 ### Mouse, links, and selection
 
-Clicks map from cells to page CSS pixels. On release, mddog tries a link (`link()`), then a button or toggle (`press()`). Links open with `open`, or jump to a heading. Drag and double-click select text and draw the selection. Releasing copies nothing unless `copy_on_select` is on.
+Clicks map from cells to page CSS pixels. On release, mddog tries a link (`link()`), then a button or toggle (`press()`). `viewer::link::Link::of` sorts a link: web and mail links go to `open` (`link::open`), a `#` link jumps to a heading, and any other link, such as a local file, only shows a notice. Drag and double-click select text and draw the selection. Releasing copies nothing unless `copy_on_select` is on.
 
 **Selection.** `Select::Range` takes the anchor and focus points, finds the characters under them in the page's text (`hit_char`), and selects between. `Select::Word` selects the word at a point. The selection is an overlay too. A relayout clears it, so a click that lays out again drops it.
 
 **Copy buttons.** Layout puts a copy button at the top right of every code block. A click copies the block's text. The button draws a hover state and a "Copied!" tooltip, and `reset_copy` clears the tooltip. Mermaid diagrams have their own copy button, which copies the source.
 
-**Copying.** Every copy goes through `Preview::copy_text`.
+**Copying.** Every copy goes through `Preview::copy_text`, which calls `viewer::clipboard::copy`.
 
 1. It strips control characters (`pasteable`).
 2. It writes OSC 52 to the tty, so the copy reaches the clipboard of the terminal the user sits at (also over SSH, and through herdr, which shows its own notice). The write runs on the main thread between frames, so it never splits a tile write. It has no size cap: Ghostty under herdr drops one over about 220 KB, and `pbcopy` still covers the local clipboard.
@@ -491,22 +490,22 @@ On Ctrl-z the viewer also leaves the alternate screen. It sends SIGTSTP to its o
 
 ## Headless mode
 
-`mdd --headless COLS FILE` (`src/headless.rs`) is for hosts that own the screen and input. `COLS` is 1 to 255. It renders the whole document `COLS` cells wide, with the config's theme and Mermaid engine.
+`mdd --headless COLS FILE` (`src/headless.rs`) is for hosts that own the screen and input. `COLS` is 1 to 255. It renders the whole document `COLS` cells wide, with the config's theme.
 
 It cuts the page into PNG tiles of at most 100 rows (a Claude Code image can't exceed 255 rows) and 8 MiB decoded, writes them to a private temp folder, and prints one JSON line:
 
 ```json
-{"columns": 100, "keep": 37, "tiles": [{"file": "/path/to/tile.png", "rows": 100}]}
+{"keep": 37, "tiles": [{"file": "/path/to/tile.png", "rows": 100}]}
 ```
 
 `keep` is how many tiles the host may mount at once: the storage limit over 8 MiB, so 7 under herdr and 37 elsewhere. It renders again on every file change, even with `live_reload = false`, because live refresh is why the plugin exists.
 
 - Tiles are written with fast PNG compression. A PNG takes about as long to encode as a snapshot, so up to 4 threads encode while the main thread takes the next snapshot.
 - It starts no helper process. It creates an `Engine` at the display's scale, loads the file, and waits up to 4 s for remote images (`REMOTE_LIMIT`), so a slow image is drawn as its alt text rather than as a late arrival. It waits rather than rendering again when images arrive, because each render writes every tile again and the plugin redraws them all.
-- The cell size comes from `/dev/tty`, which a plugin's child still has as its controlling terminal. The fallback is 8 x 16 times the backing scale.
+- The cell size comes from `/dev/tty`, which a plugin's child still has as its controlling terminal. The fallback is 8 x 16 CSS px times the backing scale (`term::fallback_cell`). With `--webp` it never reads `/dev/tty`: the desktop pane can't see one, and its plugin assumes the 8 x 16 cell, so the page is laid out at that cell.
 - The folder keeps the current and the previous round of tiles, because the host may still be drawing the previous one. A round counts only once all its tiles are written, so a failed render deletes only its own files.
 - A render that fails prints one line to stderr, drops its own partial tiles, and waits for the next file change. Exit code 1 means `mdd` could not make its folder or watch the file, so the host can say the preview stopped. A signal removes the folder and exits at once.
-- It shares the viewer's engine and image limits (`kitty::TILE_BYTES`, `kitty::storage_limit`), and does not import `preview.rs`.
+- It shares the viewer's engine and image limits (`kitty::TILE_BYTES`, `kitty::storage_limit`), and does not import `preview.rs`. It takes its snapshots into a plain `Vec`, since nothing shares the pixels with a terminal, and it picks the herdr limit from the environment alone (`term::herdr_by_env`).
 
 With `--webp` it writes WebP tiles for the plugin's desktop path instead (`webp_tiles`). A tile is 10 rows (160 CSS px), halved until its file fits 96,000 bytes. Each tile has two copies:
 
@@ -573,19 +572,19 @@ There is no database. The binary reads `config.toml` from its config folder, and
 
 | Path | What it holds, and when it goes |
 |---|---|
-| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>-<n>`, a name of its own per write, and a rename. The sweep removes it. |
+| `~/Library/Caches/mddog/remote/<hash>` | One whole remote response: a JSON line with its URL, type, and expiry, then the body. Written through `<hash>.tmp<pid>-<n>`, a name of its own per write, and a rename. `remote::prune_disk` removes it, called by the sweep. |
 | `$TMPDIR/mddog-<pid>-<hex>-stdin.md` | A copy of standard input. Removed when the viewer exits. |
 | `$TMPDIR/tty-graphics-protocol-mddog-<pid>-<hex>-<tag>` | A tile sent by temp file. The terminal deletes it. |
 | `$TMPDIR/mddog-tiles-<pid>-<hex>/` | Headless PNG or WebP tiles, mode 0700. Removed on a normal exit and on SIGTERM, SIGINT, or SIGHUP. |
 
-Each temp name has the pid and a per-run hex nonce, and the files are private.
+Each temp name has the pid and a per-run hex nonce, and the files are private. `src/tmp.rs` makes these names and writes the files (`write_private`, mode 0600), and `tmp::owner` reads a name's pid back.
 
 ### Sweep
 
-A SIGKILL or a crash skips all of that cleanup, and Claude Code SIGKILLs the plugin's `mdd --headless` on every width change. So after the first paint (headless: after the first render), `sweep.rs` runs once on a side thread. It matches only the names above, and only entries the user owns. It removes:
+A SIGKILL or a crash skips all of that cleanup, and Claude Code SIGKILLs the plugin's `mdd --headless` on every width change. So after the first paint (headless: after the first render), `sweep.rs` runs once on a side thread. It matches only the names `tmp::owner` knows, and only entries the user owns (`tmp::mine`). It removes:
 
 - Temp files and folders whose pid is gone. Only `kill(pid, 0)` failing with ESRCH counts as gone. A pid that a new process reused keeps its entry until that process ends too, so the sweep never removes anything a live process might use.
-- Remote cache files more than 1 hour old, which is the longest any is kept (this covers half-written files too), then the oldest until the folder is under 64 MiB.
+- Remote cache files, through `remote::prune_disk`, which keeps its own limits private: it removes files more than 1 hour old, which is the longest any is kept (this covers half-written files too), then the oldest until the folder is under 64 MiB.
 
 `MDDOG_TRACE` logs `sweep started` and `swept`.
 
@@ -603,7 +602,7 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 ## Security
 
 - The engine runs no script. The raw HTML reader drops the contents of `<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, and `<template>`, and only the tags it knows change the page.
-- Local images load only from inside a root folder: the nearest folder above the file that has `.git`, else `$HOME` when the file is under it, else the file's own folder (`/tmp`, `/Volumes`). So `../sibling/img.png` works for notes outside git. `/x` means `<root>/x`. `render::markdown::confined_media` drops the query and fragment, then compares canonical paths, so a symlink or `..` can't leave the root. It refuses an encoded `/`, which is one URL segment but two folders on disk, and a path whose bytes aren't UTF-8 after decoding.
+- Local images load only from inside a root folder: the nearest folder above the file that has `.git`, else `$HOME` when the file is under it, else the file's own folder (`/tmp`, `/Volumes`). So `../sibling/img.png` works for notes outside git. `/x` means `<root>/x`. `render::media::confined_media` drops the query and fragment, then compares canonical paths, so a symlink or `..` can't leave the root. It refuses an encoded `/`, which is one URL segment but two folders on disk, and a path whose bytes aren't UTF-8 after decoding.
 - Remote images never reach a private or reserved address, even through a redirect to a name that resolves to one, or a DNS answer that changes between check and connect (rebinding). mddog fetches them itself (see Remote images):
   - ureq resolves through `remote::Checked`, which refuses a local name (`.local`, `.internal`, no dot, and so on) and returns a host's addresses only when every one is public (`private_ip`). ureq connects only to the addresses it returns, so the address checked is the address used.
   - ureq follows up to 5 redirects, and each hop resolves through `Checked` again. A proxy from the environment is ignored, since ureq would resolve the proxy instead of the host.
@@ -616,8 +615,8 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 
 ### Checks
 
-- `./check.sh` is the gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. `[lints.clippy]` in `Cargo.toml` turns on some pedantic and nursery lints, `unwrap_used` among them. `clippy.toml` exempts unit tests, and each `tests/*.rs` file that needs `unwrap` has its own `#![expect]` or `#![allow]`. Outside tests, an `expect` names the invariant that holds, such as a built-in asset or a constant regex. `src/native/` is the exception: it is spike code kept close to its source, and `native/mod.rs` turns the lints off for it.
-- Each `unsafe` block or impl has a `// SAFETY:` comment on the line above that names the invariant it relies on, and each `unsafe fn` has a `# Safety` doc section. Clippy's `undocumented_unsafe_blocks` enforces the comment, and `unnecessary_safety_comment` flags one left on safe code. Before you add a block, check whether the binding or std already has a safe call. When the same call repeats, wrap it once in a small safe function next to its callers, as `sweep::uid` does.
+- `./check.sh` is the gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. `[lints.clippy]` in `Cargo.toml` turns on some pedantic and nursery lints, `unwrap_used` among them. `clippy.toml` exempts unit tests, and each `tests/*.rs` file that needs `unwrap` has its own `#![expect]` or `#![allow]`. Outside tests, an `expect` names the invariant that holds, such as a built-in asset or a constant regex.
+- Each `unsafe` block or impl has a `// SAFETY:` comment on the line above that names the invariant it relies on, and each `unsafe fn` has a `# Safety` doc section. Clippy's `undocumented_unsafe_blocks` enforces the comment, and `unnecessary_safety_comment` flags one left on safe code. Before you add a block, check whether the binding or std already has a safe call. When the same call repeats, wrap it once in a small safe function next to its callers, as `tmp::mine` does for `getuid`.
 - CI (`.github/workflows/check.yml`) runs `./check.sh` on every push and pull request. It runs on a macOS runner because the renderer and the pty tests need macOS.
 - `python3 reference/keymap-check.py` checks that every test named in docs/behavior.md ran and passed.
 - `claude plugin test plugins/claude-code` runs the plugin's tests in `plugins/claude-code/tests/`.
@@ -634,18 +633,18 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 | File | Covers |
 |---|---|
 | `tests/help.rs` | mdd in a pty: help, keys, copy, Ctrl-z |
-| `tests/native_engine.rs` | the engine's typed answers: wide-block scroll and restore, button indices after a relayout, an empty file, search, select and hover, diagram expand and collapse |
+| `tests/engine.rs` | the engine's typed answers: wide-block scroll and restore, button indices after a relayout, an empty file, search, select and hover, diagram expand and collapse |
 | `tests/search.rs` | search, links, anchors, selection, hover, presses, copy buttons, Mermaid buttons, and wide blocks, through the engine calls the viewer makes |
-| `tests/native_math.rs` | the parser's math against `tests/math.golden`, and the TeX layout's commands over the `fixtures/math/` files |
+| `tests/math.rs` | the parser's math against `tests/math.golden`, and the TeX layout's commands over the `fixtures/math/` files |
 | `tests/headless.rs` | `--headless` end to end |
 | `tests/watch.rs` | the file watcher, including saves done as write-then-rename |
 
 - `tests/help.rs` runs mdd in a pty as its own session leader, so Ctrl-z can't stop it there. `ctrl_z_suspends_and_resumes` passes `job: true` to `launch`, which forks a small job-control parent as a shell does: mdd runs in its own foreground group, and the parent passes its stops and exit status up to the test.
 - `tests/search.rs` is an ordinary test file. Each test makes an `Engine`, loads a Markdown string, and calls the same methods the viewer does. Points on the page come from search rects and the layout, not from fixed pixels. `docs/behavior.md` names these tests.
-- `tests/native_math.rs` renders each `fixtures/math/` file's `Doc` into one line per block that holds math or a `$`: inline math as `⟨...⟩`, display math as `⟦...⟧`, and code spans in backticks. It must match `tests/math.golden` exactly. `UPDATE_GOLDEN=1 cargo test --test native_math` rewrites it. `fixtures/math/SOURCES.md` lists where each fixture came from.
-- Every test that launches mdd sets `MDDOG_CACHE_DIR` to `$TMPDIR/mddog-test-cache`, so `./check.sh` leaves `~/Library/Caches/mddog/` alone. Unit tests skip the remote disk cache.
+- `tests/math.rs` renders each `fixtures/math/` file's `Doc` into one line per block that holds math or a `$`: inline math as `⟨...⟩`, display math as `⟦...⟧`, and code spans in backticks. It must match `tests/math.golden` exactly. `UPDATE_GOLDEN=1 cargo test --test math` rewrites it. `fixtures/math/SOURCES.md` lists where each fixture came from.
+- Every test that launches mdd sets `MDDOG_CACHE_DIR` to `$TMPDIR/mddog-test-cache`, so `./check.sh` leaves `~/Library/Caches/mddog/` alone. Unit tests of `remote` pass no disk folder to `fetch_in`, so they skip the disk cache.
 - The pty tests in `tests/help.rs` that click at a cell and expect a given word or button set `MDDOG_SCALE=2`, since GitHub's macOS runners have a 1x screen. The others run at the screen's own scale, since a forced 2x on a 1x screen changes how tiles line up.
-- A unit test in `src/render/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
+- A unit test in `src/render/highlight/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
 
 ### Reference tools
 
@@ -669,12 +668,11 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 | Variable | Read by | Effect |
 |---|---|---|
 | `MDDOG_TRACE=FILE` | mdd | Log keys, renders, scroll (with each drawn pixel offset and frame time), placed images, cell geometry, and the page height after each measure |
-| `MDDOG_SCALE` | mdd | Pixels per CSS pixel in place of the screen's, so pty tests click the same page points on a 1x CI runner. For tests |
+| `MDDOG_SCALE` | mdd | Pixels per CSS pixel in place of the screen's (read by `term::screen::display_scale`), so pty tests click the same page points on a 1x CI runner. For tests |
 | `MDDOG_DUMP_VIEW=FILE` | mdd | With `MDDOG_TRACE`, write a PNG of the viewport after each frame |
 | `MDDOG_DUMP_TILES=DIR` | mdd | Write each tile as it is sent |
 | `MDDOG_DEBUG` | mdd | Print timing marks to stderr |
-| `MDDOG_NATIVE_HL=b` | mdd | Highlight code with the small built-in highlighter, not tree-sitter and TextMate |
-| `MDDOG_CACHE_DIR=DIR` | mdd, the sweep | Use `DIR` as the cache root in place of `~/Library/Caches/mddog`. The integration tests set it to `$TMPDIR/mddog-test-cache`, so a test run never writes to the real cache |
+| `MDDOG_CACHE_DIR=DIR` | mdd | Use `DIR` as the cache root in place of `~/Library/Caches/mddog`. The integration tests set it to `$TMPDIR/mddog-test-cache`, so a test run never writes to the real cache |
 | `TERM_PROGRAM=herdr` | mdd | Use the 56 MiB storage limit, and send selection and search changes as bands (XTVERSION `libghostty` does the same) |
 | `EDITOR` | mdd | The editor for `e` |
 | `XDG_CONFIG_HOME` | mdd | Where to look for `mddog/config.toml` |
@@ -687,8 +685,8 @@ Opening a file fetches only what the document names: remote images. mddog fetche
 | Term | Meaning |
 |---|---|
 | Theme | One file of tokens that gives the page and the terminal chrome their colors, fonts, and sizes. |
-| Doc | The block tree `native::doc::parse` makes from the Markdown. |
-| Page | What `native::layout` makes from a Doc: a display list in device pixels, plus links, anchors, buttons, wide blocks, and the page's text. |
+| Doc | The block tree `render::doc::parse` makes from the Markdown. |
+| Page | What `render::layout` makes from a Doc: a display list in device pixels, plus links, anchors, buttons, wide blocks, and the page's text. |
 | Overlay | What the raster draws over the display list: search marks, the selection, hover, wide-block offsets, and an expanded diagram. A change to it needs no layout. |
 | Tile | A pane-wide strip of the page sent to the terminal as one image. In headless mode, a PNG file of at most 100 rows and 8 MiB decoded, or with `--webp` a 10-row WebP file and its small copy. |
 | Band | Under herdr, a pane-wide image of a tile's changed rows, placed over the tile at `z=1` until the tile is sent whole again. |

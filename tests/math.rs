@@ -1,10 +1,10 @@
 #![allow(clippy::unwrap_used, reason = "a failed step should fail the test")]
 
-//! Checks the native parser's `Doc` for `fixtures/math` against `tests/math.golden`: one line per block that
+//! Checks the parser's `Doc` for `fixtures/math` against `tests/math.golden`: one line per block that
 //! holds math or a `$`, inline math as `⟨…⟩`, display math as `⟦…⟧`, code spans in backticks. Run with
 //! `UPDATE_GOLDEN=1` to write the golden after a parser change, then read its diff.
 
-use mddog::native::doc::{self, Block, Inl};
+use mddog::render::doc::{self, Block, Inl};
 
 fn inl(v: &[Inl], out: &mut String, dollar: &mut bool, math: &mut bool) {
     for i in v {
@@ -96,24 +96,23 @@ fn inline_html_splits_math() {
     assert_eq!(text, "Inline:  and $xz$ end.");
 }
 
-fn items(tex: &str) -> Vec<mddog::native::math::MItem> {
-    use mddog::native::{math, text::Fonts};
-    let _ = math::take_unknown();
+fn items(tex: &str) -> Vec<mddog::render::math::MItem> {
+    use mddog::render::{math, text::Fonts};
     let b = math::layout(&mut Fonts::new(), tex, 32.0, false);
-    assert_eq!(math::take_unknown(), Vec::<String>::new(), "unknown commands in {tex}");
+    // An unknown command shows as its own source text.
+    assert!(!texts(&b.items).iter().any(|t| t.starts_with('\\')), "unknown commands in {tex}");
     b.items
 }
 
-fn texts(v: &[mddog::native::math::MItem]) -> Vec<String> {
-    v.iter().filter_map(|i| if let mddog::native::math::MItem::Text { s, .. } = i { Some(s.clone()) } else { None }).collect()
+fn texts(v: &[mddog::render::math::MItem]) -> Vec<String> {
+    v.iter().filter_map(|i| if let mddog::render::math::MItem::Text { s, .. } = i { Some(s.clone()) } else { None }).collect()
 }
 
 #[test]
 fn tex_commands_from_the_fixtures_draw() {
-    use mddog::native::math::MItem;
+    use mddog::render::math::MItem;
     for tex in [r"\underbrace{a+b}_{n}", r"\overrightarrow{AB}", r"\overleftarrow{AB}", r"\underset{x}{\min}", r"\xrightarrow{d}", r"\KaTeX"] {
-        let v = items(tex);
-        assert!(!texts(&v).iter().any(|t| t.contains('\\')), "{tex} drew its own name");
+        items(tex);
     }
     // \binom has no bar; \tfrac13 is 1 over 3
     assert!(!items(r"\binom{n}{k}").iter().any(|i| matches!(i, MItem::Rule { .. })));
@@ -125,78 +124,4 @@ fn tex_commands_from_the_fixtures_draw() {
     assert_eq!(texts(&items(r"\textbf{\{}+x")), ["{", "+", "x"]);
     // the column spec sets alignment and is not drawn
     assert_eq!(texts(&items(r"\begin{array}{rl} a & b \end{array}")), ["a", "b"]);
-}
-
-fn exprs(bs: &[Block], out: &mut Vec<(String, bool)>) {
-    let inl = |v: &[Inl], out: &mut Vec<(String, bool)>| {
-        for i in v {
-            if let Inl::Math(t, _) = i {
-                match t.strip_prefix("$$").and_then(|t| t.strip_suffix("$$")) {
-                    Some(t) => out.push((t.to_string(), true)),
-                    None => out.push((t.strip_prefix('$').and_then(|t| t.strip_suffix('$')).unwrap_or(t).to_string(), false)),
-                }
-            }
-        }
-    };
-    for b in bs {
-        match b {
-            Block::Para(v) | Block::Text(v) | Block::Heading(_, v, _) => inl(v, out),
-            Block::Math(t) => out.push((t.clone(), true)),
-            Block::Quote(c) | Block::Alert(_, c) | Block::Align(_, c) => exprs(c, out),
-            Block::Details { summary, body, .. } => {
-                inl(summary, out);
-                exprs(body, out);
-            }
-            Block::List { items, .. } => items.iter().for_each(|i| exprs(&i.blocks, out)),
-            Block::Table { head, rows, .. } => head.iter().chain(rows.iter().flatten()).for_each(|c| inl(c, out)),
-            Block::Footnotes(f) => f.iter().for_each(|f| exprs(&f.2, out)),
-            _ => {}
-        }
-    }
-}
-
-/// Counts the expressions per fixture that hold a command the native TeX parser doesn't know.
-#[test]
-#[ignore = "report, writes tmp/native-math-unknown.txt"]
-fn unknown_commands() {
-    use mddog::native::{math, text::Fonts};
-    let mut fonts = Fonts::new();
-    let mut fx: Vec<_> = std::fs::read_dir("fixtures/math").unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "md") && !p.ends_with("SOURCES.md")).collect();
-    fx.sort();
-    let mut report = String::new();
-    let (mut all, mut bad_all) = (0, 0);
-    let mut cmds: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    for f in fx {
-        let mut v = vec![];
-        exprs(&doc::parse(&std::fs::read_to_string(&f).unwrap()).blocks, &mut v);
-        let mut bad = 0;
-        for (tex, display) in &v {
-            let _ = math::take_unknown();
-            let _ = math::layout(&mut fonts, tex, 32.0, *display);
-            let u = math::take_unknown();
-            if !u.is_empty() {
-                bad += 1;
-                for c in u {
-                    *cmds.entry(c).or_default() += 1;
-                }
-            }
-        }
-        all += v.len();
-        bad_all += bad;
-        report.push_str(&format!(
-            "{:<28} {:>4} expressions, {:>4} with unknown commands ({:.0}%)\n",
-            f.file_stem().unwrap().to_string_lossy(),
-            v.len(),
-            bad,
-            100.0 * bad as f64 / v.len().max(1) as f64
-        ));
-    }
-    report.push_str(&format!("TOTAL {all} expressions, {bad_all} with unknown commands ({:.1}%)\n\nCommands by count:\n", 100.0 * bad_all as f64 / all as f64));
-    let mut by: Vec<_> = cmds.into_iter().collect();
-    by.sort_by_key(|b| std::cmp::Reverse(b.1));
-    for (c, n) in by {
-        report.push_str(&format!("{n:>4} \\{c}\n"));
-    }
-    std::fs::write("tmp/native-math-unknown.txt", &report).unwrap();
-    eprintln!("{report}");
 }

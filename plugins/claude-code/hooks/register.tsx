@@ -59,7 +59,6 @@ function stop() {
   for (const v of views.values()) {
     void v.child?.return(undefined)
     v.child = undefined
-    // A render at the same width starts a new child.
     v.columns = 0
     v.moving?.cancel()
     v.moving = undefined

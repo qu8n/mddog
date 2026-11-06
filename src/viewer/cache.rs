@@ -1,6 +1,8 @@
-use std::path::Path;
+use crate::render::engine::Snapshot;
+use crate::term::kitty::Shm;
 
-use crate::engine::Bitmap;
+/// A tile drawn into shared memory, ready to send.
+pub type Pixels = Snapshot<Shm>;
 use crate::term::kitty::{self, Medium, Place};
 
 const MAX_BANDS: usize = 4;
@@ -54,7 +56,7 @@ pub struct View {
 pub struct Batch<'a> {
     pub keep: &'a [usize],
     pub scroll_px: u32,
-    pub snap: &'a mut dyn FnMut(u32, u32) -> Option<Bitmap>,
+    pub snap: &'a mut dyn FnMut(u32, u32) -> Option<Pixels>,
     pub bytes: Vec<u8>,
     pub cmds: String,
 }
@@ -71,11 +73,26 @@ pub struct Cache {
     storage_limit: usize,
     bands: bool,
     medium: Medium,
+    /// `MDDOG_DUMP_TILES`: a folder each sent tile is also written to, as PNG.
+    dump: Option<std::path::PathBuf>,
 }
 
 impl Cache {
     pub fn new(storage_limit: usize, bands: bool, medium: Medium, first_id: u32) -> Cache {
-        Cache { tiles: vec![], placed: vec![], doomed: vec![], next_id: first_id, seq: 0, cell_h: 1, total: 0, resident: 0, storage_limit, bands, medium }
+        Cache {
+            tiles: vec![],
+            placed: vec![],
+            doomed: vec![],
+            next_id: first_id,
+            seq: 0,
+            cell_h: 1,
+            total: 0,
+            resident: 0,
+            storage_limit,
+            bands,
+            medium,
+            dump: std::env::var_os("MDDOG_DUMP_TILES").map(Into::into),
+        }
     }
 
     pub fn bands(&self) -> bool {
@@ -248,8 +265,10 @@ impl Cache {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
         self.seq += 1;
-        if let Some(dir) = std::env::var_os("MDDOG_DUMP_TILES") {
-            let _ = bmp.write_png(&Path::new(&dir).join(format!("{tag}{id}-{top}.png")));
+        if let Some(dir) = &self.dump
+            && let Some(png) = kitty::png(bmp.width, bmp.height, &bmp.rgba)
+        {
+            let _ = std::fs::write(dir.join(format!("{tag}{id}-{top}.png")), png);
         }
         self.medium = kitty::transmit(&mut b.bytes, self.medium, id, bmp.width, bmp.height, bmp.rgba, self.seq);
         Some((id, need))
@@ -350,8 +369,8 @@ mod tests {
     use super::*;
     use crate::term::kitty::Shm;
 
-    fn snap(_: u32, height: u32) -> Option<Bitmap> {
-        Some(Bitmap { width: 1, height: height as usize, rgba: Shm::create(kitty::shm_name(), height as usize * 4)? })
+    fn snap(_: u32, height: u32) -> Option<Pixels> {
+        Some(Pixels { width: 1, height: height as usize, rgba: Shm::create(kitty::shm_name(), height as usize * 4)? })
     }
 
     fn cache(bands: bool) -> Cache {

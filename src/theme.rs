@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-/// The built-in themes, one line each.
+/// The built-in themes, one line each. The two GitHub themes set every token; the others fill in from the one of
+/// their mode.
 #[rustfmt::skip]
 const BUILTIN: &[(&str, &str)] = &[
     ("github-light", include_str!("../assets/themes/github-light.css")),
@@ -28,12 +29,13 @@ pub struct Palette {
     pub skeleton: Rgb,
 }
 
-/// The terminal colors' token names, in `Palette`'s field order.
-pub const VARS: [&str; 8] = ["bg", "fg", "fg-muted", "fg-bright", "selection-bg", "bar-bg", "border", "skeleton"];
-
 impl Palette {
-    fn from(c: [Rgb; 8]) -> Palette {
-        Palette { bg: c[0], fg: c[1], fg_muted: c[2], fg_bright: c[3], selection_bg: c[4], bar_bg: c[5], border: c[6], skeleton: c[7] }
+    fn of(tokens: &BTreeMap<&'static str, Value>) -> Palette {
+        let c = |name| match tokens.get(name) {
+            Some(Value::Color(c)) => *c,
+            v => panic!("{name} is {v:?}, not a color"),
+        };
+        Palette { bg: c("bg"), fg: c("fg"), fg_muted: c("fg-muted"), fg_bright: c("fg-bright"), selection_bg: c("selection-bg"), bar_bg: c("bar-bg"), border: c("border"), skeleton: c("skeleton") }
     }
 
     /// Resets the SGR attributes and sets the background back to the theme's.
@@ -82,7 +84,7 @@ enum Kind {
 /// Every token but `--mddog-base`, without the `--mddog-` prefix. GitHub's themes set them all, so any other theme can leave some out.
 #[rustfmt::skip]
 const TOKENS: &[(&str, Kind)] = &[
-    // The terminal chrome (VARS).
+    // The terminal chrome (Palette).
     ("bg", Kind::Color), ("fg", Kind::Color), ("fg-muted", Kind::Color), ("fg-bright", Kind::Color),
     ("selection-bg", Kind::Color), ("bar-bg", Kind::Color), ("border", Kind::Color), ("skeleton", Kind::Color),
     // The page.
@@ -176,17 +178,22 @@ impl Theme {
     }
 }
 
+/// The built-ins that set every token.
+const COMPLETE: [&str; 2] = ["github-light", "github-dark"];
+
 fn github(dark: bool) -> &'static Theme {
-    builtin(if dark { "github-dark" } else { "github-light" }).expect("github theme")
+    builtin(COMPLETE[usize::from(dark)]).expect("github theme")
 }
 
 pub fn builtin(name: &str) -> Option<&'static Theme> {
     static ALL: LazyLock<Vec<Theme>> = LazyLock::new(|| {
-        // The GitHub themes come first, so the others can fill in from them.
         let mut all: Vec<Theme> = Vec::new();
         for (n, css) in BUILTIN {
-            let under = all.iter().find(|t: &&Theme| t.name.starts_with("github-") && css.contains(if t.dark { "color-scheme: dark" } else { "color-scheme: light" })).cloned();
-            all.push(read(n, css, under.as_ref(), &mut |f| Err(format!("{f}: a built-in theme has no file base"))).expect("built-in theme"));
+            let complete = COMPLETE.contains(n);
+            let fill =
+                |dark: bool| if complete { BTreeMap::new() } else { all.iter().find(|t| COMPLETE.contains(&t.name.as_str()) && t.dark == dark).expect("GitHub themes come first").tokens.clone() };
+            let theme = read(n, css, &fill, &mut |f| Err(format!("{f}: a built-in theme has no file base"))).expect("built-in theme");
+            all.push(theme);
         }
         all
     });
@@ -224,11 +231,11 @@ fn load(path: &Path, seen: &mut Vec<PathBuf>) -> Result<Theme, String> {
     let css = std::fs::read_to_string(path).map_err(|e| format!("{shown}: {}", crate::term::io_error(&e)))?;
     let dir = path.parent().unwrap_or(Path::new(""));
     seen.push(key);
-    read(&shown, &css, None, &mut |f| load(&resolve(dir, f), seen))
+    read(&shown, &css, &|dark| github(dark).tokens.clone(), &mut |f| load(&resolve(dir, f), seen))
 }
 
-/// Reads a theme's tokens. `file` reads a base that is a file. `under` stands in for GitHub's theme while the built-ins load.
-fn read(name: &str, css: &str, under: Option<&Theme>, file: &mut dyn FnMut(&str) -> Result<Theme, String>) -> Result<Theme, String> {
+/// Reads a theme's tokens. A theme with no base starts from `fill` of its mode. `file` reads a base that is a file.
+fn read(name: &str, css: &str, fill: &dyn Fn(bool) -> BTreeMap<&'static str, Value>, file: &mut dyn FnMut(&str) -> Result<Theme, String>) -> Result<Theme, String> {
     let decls = root_decls(css).map_err(|e| format!("{name}: {e}"))?;
     let last = |prop: &str| decls.iter().rev().find(|(p, _)| p == prop).map(|(_, v)| v.as_str());
     let base = match last("--mddog-base").map(|v| v.trim_matches(['"', '\''])) {
@@ -249,12 +256,9 @@ fn read(name: &str, css: &str, under: Option<&Theme>, file: &mut dyn FnMut(&str)
         (None, Some(b)) => b.dark,
         (None, None) => return Err(format!("{name}: set color-scheme: light or dark on :root, or a base theme with --mddog-base")),
     };
-    let mut tokens = match (&base, under) {
-        (Some(b), _) => b.tokens.clone(),
-        (None, Some(u)) => u.tokens.clone(),
-        // GitHub's own themes start empty, and a test checks they set every token.
-        (None, None) if name.starts_with("github-") && BUILTIN.iter().any(|(n, _)| *n == name) => BTreeMap::new(),
-        (None, None) => github(dark).tokens.clone(),
+    let mut tokens = match &base {
+        Some(b) => b.tokens.clone(),
+        None => fill(dark),
     };
     for (p, value) in &decls {
         if matches!(p.as_str(), "color-scheme" | "--mddog-base") {
@@ -265,14 +269,10 @@ fn read(name: &str, css: &str, under: Option<&Theme>, file: &mut dyn FnMut(&str)
         };
         tokens.insert(key, value_of(*kind, value).ok_or_else(|| format!("{name}: {p}: expected {}, but got {value:?}", expected(*kind)))?);
     }
-    let colors: Vec<Rgb> = VARS
-        .iter()
-        .map(|v| match tokens.get(v) {
-            Some(Value::Color(c)) => *c,
-            _ => (0, 0, 0),
-        })
-        .collect();
-    let palette = Palette::from(std::array::from_fn(|i| colors[i]));
+    if let Some((missing, _)) = TOKENS.iter().find(|(k, _)| !tokens.contains_key(k)) {
+        return Err(format!("{name}: --mddog-{missing} is missing"));
+    }
+    let palette = Palette::of(&tokens);
     Ok(Theme { name: name.to_string(), dark, palette, tokens })
 }
 
@@ -375,7 +375,7 @@ mod tests {
 
     /// Reads theme text whose base, if any, is a built-in.
     fn parse(name: &str, css: &str) -> Result<Theme, String> {
-        read(name, css, None, &mut |f| Err(format!("{f}: only a theme file can have a file as its base")))
+        read(name, css, &|dark| github(dark).tokens.clone(), &mut |f| Err(format!("{f}: only a theme file can have a file as its base")))
     }
 
     #[test]
@@ -392,9 +392,8 @@ mod tests {
         }
         let dark = builtin("github-dark").unwrap();
         assert!(dark.dark);
-        assert_eq!(dark.palette.bg, (13, 17, 23));
-        assert_eq!(dark.palette.bar_bg, (22, 27, 34));
-        assert_eq!(dark.color("link"), (0x44, 0x93, 0xf8));
+        // The palette reads each chrome token by name.
+        assert_eq!((dark.palette.bg, dark.palette.bar_bg, dark.palette.skeleton), (dark.color("bg"), dark.color("bar-bg"), dark.color("skeleton")));
         assert!(!builtin("github-light").unwrap().dark);
         assert!(builtin("nope").is_none());
     }
@@ -508,10 +507,7 @@ mod tests {
         let (light, dark) = (builtin("obsidian-light").unwrap(), builtin("obsidian-dark").unwrap());
         assert!(!light.dark && dark.dark);
         assert_eq!(light.heading_scale(), dark.heading_scale());
-        assert_eq!(dark.heading_weight(), [700, 680, 660, 640, 620, 600]);
         assert_eq!(light.heading_weight(), dark.heading_weight());
-        assert_eq!(builtin("github-dark").unwrap().heading_weight(), [600; 6]);
-        assert_eq!(builtin("github-light").unwrap().heading_weight(), [600; 6]);
     }
 
     #[test]

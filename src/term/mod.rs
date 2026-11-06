@@ -1,4 +1,5 @@
 pub mod kitty;
+pub mod screen;
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -38,6 +39,27 @@ impl Size {
     }
 }
 
+/// The cell to assume when the terminal reports no pixel size: 8 by 16 CSS px.
+pub fn fallback_cell(scale: f64) -> (u32, u32) {
+    ((8.0 * scale) as u32, (16.0 * scale) as u32)
+}
+
+/// herdr, by the environment alone, for a run that can't ask the terminal.
+pub fn herdr_by_env() -> bool {
+    std::env::var("TERM_PROGRAM").as_deref() == Ok("herdr")
+}
+
+/// A terminal that shows Kitty images but garbles a scrolled page, with the reason.
+pub fn garbles_scrolling() -> Option<&'static str> {
+    if std::env::var_os("ZELLIJ").is_some() {
+        Some("zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648)")
+    } else if std::env::var("TERM_PROGRAM").as_deref() == Ok("WarpTerminal") {
+        Some("Warp can't crop images, and mddog crops images to scroll them")
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Probe {
     pub cell: Option<(u16, u16)>,
@@ -58,7 +80,7 @@ impl Probe {
     pub fn cell_px(&self, size: Size, scale: f64) -> (u32, u32) {
         match self.cell {
             Some((w, h)) if w > 0 && h > 0 => (u32::from(w), u32::from(h)),
-            _ => size.cell_px(scale).unwrap_or(((8.0 * scale) as u32, (16.0 * scale) as u32)),
+            _ => size.cell_px(scale).unwrap_or_else(|| fallback_cell(scale)),
         }
     }
 
@@ -73,7 +95,12 @@ impl Probe {
     }
 
     pub fn herdr(&self) -> bool {
-        self.version.starts_with("libghostty") || std::env::var("TERM_PROGRAM").as_deref() == Ok("herdr")
+        self.version.starts_with("libghostty") || herdr_by_env()
+    }
+
+    /// How many bytes of images the terminal keeps.
+    pub fn storage_limit(&self) -> usize {
+        kitty::storage_limit(self.herdr())
     }
 
     /// The hand pointer's name. iTerm2 knows only X11 names, and Ghostty has no `hand2`.
@@ -153,18 +180,25 @@ impl Tty {
         }
     }
 
-    pub fn probe(&mut self, shm_name: &str, temp_path: &str, timeout: Duration) -> (Probe, Vec<u8>) {
+    /// Asks the terminal what it can do, and waits up to `timeout` for the answer. Returns the bytes that came
+    /// after it, which are keys. The shared memory and temp file the graphics queries name live only for the probe.
+    pub fn probe(&mut self, timeout: Duration) -> (Probe, Vec<u8>) {
+        let (shm_name, temp_path) = (kitty::shm_name(), kitty::temp_path("q"));
+        let _ = kitty::shm_write(&shm_name, &[0, 0, 0]);
+        let _ = crate::tmp::write_private(std::path::Path::new(&temp_path), &[0, 0, 0]);
         let b64 = |s: &str| kitty::base64(s.as_bytes());
         let q = format!(
             "\x1b[16t\x1b[>0q\x1b[?2026$p\x1b[?1016$p\x1b_Gi=4001,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_Gi=4002,s=1,v=1,a=q,t=s,f=24;{}\x1b\\\x1b_Gi=4003,s=1,v=1,a=q,t=t,f=24;{}\x1b\\\x1b[c",
-            b64(shm_name),
-            b64(temp_path)
+            b64(&shm_name),
+            b64(&temp_path)
         );
         self.write(q.as_bytes());
         self.flush();
         let mut buf = Vec::new();
         self.read_timeout(&mut buf, Instant::now() + timeout, |b| find_da1(b).is_some());
-        crate::trace::log_probe(&buf);
+        kitty::shm_unlink(&shm_name);
+        let _ = std::fs::remove_file(&temp_path);
+        crate::trace::log(format_args!("probe {}", buf.escape_ascii()));
         parse_probe(&buf)
     }
 }
@@ -214,6 +248,16 @@ pub fn size_of(fd: i32) -> Size {
     Size { cols: ws.ws_col, rows: ws.ws_row, xpix: ws.ws_xpixel, ypix: ws.ws_ypixel }
 }
 
+/// Starts a synchronized update (mode 2026): the terminal shows nothing it gets until `SYNC_END`.
+pub const SYNC_BEGIN: &str = "\x1b[?2026h";
+pub const SYNC_END: &str = "\x1b[?2026l";
+
+/// The alternate screen, cleared, with no line wrap and no cursor, and mouse and key reports on.
+pub fn enter(pixel_mouse: bool) -> String {
+    format!("\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[2J\x1b[H{MOUSE_ON}{KEYS_ON}{}", if pixel_mouse { PIXEL_MOUSE_ON } else { "" })
+}
+
+/// Undoes `enter`.
 pub fn leave() -> String {
     format!("{MOUSE_OFF}{KEYS_OFF}\x1b[0m\x1b[2J\x1b[?25h\x1b[?7h\x1b[?1049l")
 }
@@ -328,15 +372,6 @@ pub fn find_da1(b: &[u8]) -> Option<usize> {
         i += 1;
     }
     None
-}
-
-pub enum Event {
-    Key(Key),
-    Resize,
-    FileChanged,
-    /// The file list has new entries.
-    Listed,
-    Quit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

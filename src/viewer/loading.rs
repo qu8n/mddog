@@ -37,7 +37,7 @@ impl Look {
         let bg = t.palette.bg;
         let d = |a: u8, b: u8| f64::from(a) - f64::from(b);
         let s = t.palette.skeleton;
-        let pad = |px: u32| (crate::page::PAD * scale / f64::from(px.max(1))).round() as u16;
+        let pad = |px: u32| (f64::from(crate::render::layout::PAD) * scale / f64::from(px.max(1))).round() as u16;
         Look { dark: t.dark, bg, lift: (d(s.0, bg.0), d(s.1, bg.1), d(s.2, bg.2)), bar_bg: t.palette.bar_bg, muted: t.palette.fg_muted, pad_cols: pad(cell.0), pad_rows: pad(cell.1) }
     }
 
@@ -131,8 +131,8 @@ impl Loader {
                 }
                 let look = {
                     let t = *lock(&s.tune);
-                    let scale = t.scale.unwrap_or(2.0);
-                    let cell = t.cell.or_else(|| size.cell_px(scale)).unwrap_or(((8.0 * scale) as u32, (16.0 * scale) as u32));
+                    let scale = t.scale.unwrap_or(crate::term::screen::SCALE_GUESS);
+                    let cell = t.cell.or_else(|| size.cell_px(scale)).unwrap_or_else(|| term::fallback_cell(scale));
                     Look::new(theme, scale, cell)
                 };
                 let bytes = frame(i, &name, size, &look, last != Some((size, look)));
@@ -220,7 +220,7 @@ pub fn frame(i: usize, name: &str, size: Size, look: &Look, full: bool) -> Strin
         return String::new();
     }
     let sgr = |kind: u8, c: Rgb| if kind == 4 { theme::bg(c) } else { theme::fg(c) };
-    let mut out = String::from("\x1b[?2026h");
+    let mut out = String::from(term::SYNC_BEGIN);
     if full {
         let (line, w) = term::fit(&format!(" {name} "), cols);
         out.push_str(&format!("\x1b[0m{}\x1b[2J\x1b[{};1H{}{}{line}{}\x1b[0m", sgr(4, look.bg), size.rows, sgr(4, look.bar_bg), sgr(3, look.muted), " ".repeat(cols - w)));
@@ -260,12 +260,13 @@ pub fn frame(i: usize, name: &str, size: Size, look: &Look, full: bool) -> Strin
             out.push_str(&" ".repeat(width - inset - len));
         }
     }
-    out.push_str("\x1b[0m\x1b[?2026l");
+    out.push_str("\x1b[0m");
+    out.push_str(term::SYNC_END);
     out
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
 
     const SIZE: Size = Size { cols: 40, rows: 11, xpix: 0, ypix: 0 };
@@ -279,14 +280,13 @@ pub(crate) mod tests {
     fn look_follows_the_theme_and_the_page_padding() {
         let dark = look("github-dark");
         assert_eq!((dark.pad_cols, dark.pad_rows), (3, 2));
-        assert_eq!(dark.bar(), (37, 41, 46));
         let light = look("github-light");
         assert_eq!(light.bg, (255, 255, 255));
         assert_eq!(light.bar(), theme::builtin("github-light").unwrap().palette.skeleton);
         assert!(light.bar() < light.bg && light.shine() > light.bar());
         // A darker page keeps the bars as far above it.
         let lower = Look { bg: (3, 7, 13), ..dark };
-        assert_eq!(lower.bar(), (27, 31, 36));
+        assert_eq!(lower.bar(), (dark.bar().0 - 10, dark.bar().1 - 10, dark.bar().2 - 10));
     }
 
     #[test]
@@ -294,21 +294,15 @@ pub(crate) mod tests {
         let light = theme::builtin("github-light").unwrap().palette;
         let f = frame(3, "a.md", Size { rows: 30, ..SIZE }, &look("github-light"), true);
         assert!(f.contains(&theme::bg(light.bar_bg)) && f.contains(&theme::fg(light.fg_muted)));
-        for c in sgr_colors(&f) {
+        for c in crate::viewer::sgr_colors(&f) {
             assert!(c.0 > 80 && c.1 > 80 && c.2 > 80 || c == light.fg_muted, "dark color {c:?} in {f:?}");
         }
-    }
-
-    /// Every truecolor in `s`.
-    pub fn sgr_colors(s: &str) -> Vec<Rgb> {
-        let re = regex::Regex::new(r"\x1b\[[34]8;2;(\d+);(\d+);(\d+)m").unwrap();
-        re.captures_iter(s).map(|c| (c[1].parse().unwrap(), c[2].parse().unwrap(), c[3].parse().unwrap())).collect()
     }
 
     #[test]
     fn full_frame_paints_the_page_and_the_status_row() {
         let f = frame(0, "a.md", SIZE, &DARK, true);
-        assert!(f.starts_with("\x1b[?2026h\x1b[0m\x1b[48;2;13;17;23m\x1b[2J\x1b[11;1H"));
+        assert!(f.starts_with(&format!("\x1b[?2026h\x1b[0m{}\x1b[2J\x1b[11;1H", theme::bg(DARK.bg))));
         assert!(f.contains(&format!(" a.md {}", " ".repeat(34))));
         assert!(f.ends_with("\x1b[0m\x1b[?2026l"));
         assert!(!frame(0, "a.md", SIZE, &DARK, false).contains("a.md"));
@@ -318,11 +312,12 @@ pub(crate) mod tests {
     fn lays_out_a_heading_text_and_a_code_block_inside_the_padding() {
         let f = frame(SWEEP - 1, "a.md", Size { rows: 30, ..SIZE }, &DARK, false);
         // The heading sits below the top padding, 42% of the 34 columns between the margins.
-        assert!(f.contains(&format!("\x1b[2;4H\x1b[48;2;13;17;23m\x1b[38;2;37;41;46m{}", "█".repeat(14))));
-        assert!(f.contains(&format!("\x1b[4;4H\x1b[48;2;13;17;23m\x1b[38;2;37;41;46m{}", "▀".repeat(34))));
+        let bar = format!("{}{}", theme::bg(DARK.bg), theme::fg(DARK.bar()));
+        assert!(f.contains(&format!("\x1b[2;4H{bar}{}", "█".repeat(14))));
+        assert!(f.contains(&format!("\x1b[4;4H{bar}{}", "▀".repeat(34))));
         // Row 3 is a gap, and the code block starts on row 12 with a padding row.
         assert!(!f.contains("\x1b[3;4H"));
-        let code = format!("\x1b[12;4H\x1b[48;2;21;25;31m  {}", " ".repeat(32));
+        let code = format!("\x1b[12;4H{}  {}", theme::bg(DARK.code()), " ".repeat(32));
         assert!(f.contains(&code), "{f:?}");
         assert!(!f.contains("\x1b[30;"));
     }
@@ -333,7 +328,7 @@ pub(crate) mod tests {
         let b = frame(3, "a.md", SIZE, &DARK, false);
         assert_ne!(a, b);
         assert_eq!(a, frame(SWEEP, "a.md", SIZE, &DARK, false));
-        assert!(b.contains("\x1b[38;2;61;65;69m"));
+        assert!(b.contains(&theme::fg(DARK.shine())));
     }
 
     #[test]

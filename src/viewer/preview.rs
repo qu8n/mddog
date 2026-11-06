@@ -1,21 +1,22 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use super::app::{self, Action, App, Heading};
-use super::cache::{Batch, Cache, View};
+use super::Event;
+use super::app::{self, Action, App, Heading, Notice, OnClick};
+use super::cache::{Batch, Cache, Pixels, View};
 use super::chrome::{self, Chrome};
+use super::clipboard;
+use super::link::{self, Link};
 use super::loading::Loader;
 use super::picker::{self, Pick, Picker};
 use super::position;
-use crate::engine::{self, Bitmap, Engine, Layout, Pointer, Press, Rect, Select};
-use crate::page;
-use crate::term::kitty;
-use crate::term::{self, Click, Event, Key, Probe, Size, Tty};
+use crate::render::engine::{Engine, Layout, Pointer, Press, Rect, Select};
+use crate::term::kitty::{self, Shm};
+use crate::term::screen;
+use crate::term::{self, Click, Key, Probe, Size, Tty};
 use crate::theme::Theme;
 use crate::{config, editor, trace, watch};
 
@@ -25,28 +26,15 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const COPY_FEEDBACK: Duration = Duration::from_secs(2);
 const NOTICE: Duration = Duration::from_secs(3);
 const PROBE_WAIT: Duration = Duration::from_secs(1);
-const CLICK_QUIT: &str = "Click again to quit";
 const CLICK_AGAIN: Duration = Duration::from_millis(300);
 /// The time between a glide's frames.
 const GLIDE_FRAME: Duration = Duration::from_millis(8);
-const GO_BACK: &str = "Backspace or a click here goes back";
 const FOLD_IDLE: Duration = Duration::from_secs(1);
 /// The X11 name for the arrow, sent with OSC 22 off text, links and buttons.
 const DEFAULT_POINTER: &str = "left_ptr";
-/// How many files Backspace can go back through.
-const HISTORY: usize = 50;
-const UNSUPPORTED: &str = "mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use Ghostty, Kitty, WezTerm, or iTerm2. Terminal.app, tmux, and screen don't support it.";
-
-/// A terminal that shows kitty images but garbles a scrolled page, with the reason.
-fn garbles_scrolling() -> Option<&'static str> {
-    if std::env::var_os("ZELLIJ").is_some() {
-        Some("zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648)")
-    } else if std::env::var("TERM_PROGRAM").as_deref() == Ok("WarpTerminal") {
-        Some("Warp can't crop images, and mddog crops images to scroll them")
-    } else {
-        None
-    }
-}
+const SUPPORTED: &str = "Ghostty, Kitty, WezTerm, or iTerm2";
+/// The longest the input thread waits before it checks `paused` again.
+const INPUT_POLL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Copy)]
 struct Drag {
@@ -61,10 +49,12 @@ struct Spot {
     sub: Option<(f64, f64)>,
 }
 
-#[derive(Debug, PartialEq)]
-enum Link {
-    Open(String),
-    Anchor(String),
+/// The parts of the screen: the contents sidebar on the left, the page, and the status row under both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Region {
+    Sidebar,
+    Page,
+    Status,
 }
 
 struct Grid {
@@ -94,42 +84,9 @@ fn pixel_spot((x, y): (u16, u16), (cell_w, cell_h): (u32, u32), (cols, rows): (u
     Spot { cell, sub: Some((cx.fract(), cy.fract())) }
 }
 
-fn classify_link(raw: &str, resolved: &str) -> Option<Link> {
-    if let Some(id) = raw.strip_prefix('#') {
-        return Some(Link::Anchor(id.to_string()));
-    }
-    let scheme = resolved.split(':').next()?.to_ascii_lowercase();
-    matches!(scheme.as_str(), "http" | "https" | "mailto").then(|| Link::Open(resolved.to_string()))
-}
-
-fn open_url(url: String) {
-    std::thread::spawn(move || {
-        let _ = Command::new("open").arg(url).stdout(Stdio::null()).stderr(Stdio::null()).status();
-    });
-}
-
 /// Snapshots `height` device pixels from `top`.
-fn snapper(engine: &Engine, scale: f64) -> impl FnMut(u32, u32) -> Option<Bitmap> + '_ {
-    move |top, height| engine.snapshot(f64::from(top) / scale, f64::from(height) / scale, scale)
-}
-
-fn pasteable(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t' | '\r')).collect()
-}
-
-/// OSC 52 puts `text` on the clipboard of the terminal the user sits at, also over SSH.
-fn osc52(text: &str) -> String {
-    format!("\x1b]52;c;{}\x1b\\", kitty::base64(text.as_bytes()))
-}
-
-fn pbcopy(text: String) {
-    std::thread::spawn(move || {
-        let Ok(mut child) = Command::new("pbcopy").env("LC_CTYPE", "UTF-8").stdin(Stdio::piped()).spawn() else { return };
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        let _ = child.wait();
-    });
+fn snapper(engine: &Engine, scale: f64) -> impl FnMut(u32, u32) -> Option<Pixels> + '_ {
+    move |top, height| engine.snapshot(f64::from(top) / scale, f64::from(height) / scale, scale, |n| Shm::create(kitty::shm_name(), n))
 }
 
 /// A file the viewer left for another one, to go back to.
@@ -227,7 +184,6 @@ pub fn browse(root: PathBuf) -> i32 {
 }
 
 fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
-    trace::start();
     let (tx, rx) = mpsc::channel();
     let paused = Arc::new(AtomicBool::new(false));
     // Whether a Ctrl-C came while the screen was ours. Checked at delivery, not when the thread
@@ -275,7 +231,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     });
     // The first read of the macOS appearance takes about 2 ms, so make it while the file renders.
     std::thread::spawn(config::theme);
-    std::thread::spawn(engine::display_scale);
+    std::thread::spawn(screen::display_scale);
     let mut tty = match Tty::open() {
         Ok(t) => t,
         Err(e) => {
@@ -283,9 +239,13 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
             return 1;
         }
     };
-    let _ = tty.raw();
+    if let Err(e) = tty.raw() {
+        eprintln!("mdd: can't take keys from the terminal: {}", term::io_error(&e));
+        return 1;
+    }
     term::on_panic_restore(tty.saved());
-    tty.write(format!("\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[2J\x1b[H{}{}", term::MOUSE_ON, term::KEYS_ON).as_bytes());
+    // Pixel mouse reports wait for the probe to say the terminal has them.
+    tty.write(term::enter(false).as_bytes());
     let name = if stdin { "standard input".to_string() } else { file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned()) };
     let loader = match picker.as_mut() {
         Some(p) => {
@@ -299,24 +259,18 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         }
         None => Some(Loader::start(tty.fd, &name)),
     };
-    let shm_name = kitty::shm_name();
-    let temp = kitty::temp_path("q");
-    let _ = kitty::shm_write(&shm_name, &[0, 0, 0]);
-    let _ = crate::sweep::write_private(Path::new(&temp), &[0, 0, 0]);
     trace::mark("tty ready");
-    let engine = Engine::new(800.0, engine::SCALE_GUESS);
+    let engine = Engine::new(800.0, screen::SCALE_GUESS, config::font_smoothing());
     trace::mark("engine created");
-    let (probe, leftover) = tty.probe(&shm_name, &temp, PROBE_WAIT);
+    let (probe, leftover) = tty.probe(PROBE_WAIT);
     if probe.pixel_mouse {
         tty.write(term::PIXEL_MOUSE_ON.as_bytes());
     }
-    kitty::shm_unlink(&shm_name);
-    let _ = std::fs::remove_file(&temp);
     trace::mark("terminal probed");
     let refusal = if probe.no_graphics() {
-        Some(UNSUPPORTED.to_string())
+        Some(format!("mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use {SUPPORTED}. Terminal.app, tmux, and screen don't support it."))
     } else {
-        garbles_scrolling().map(|why| format!("mdd: {why}. So mddog can't show the preview here. Use Ghostty, Kitty, WezTerm, or iTerm2."))
+        term::garbles_scrolling().map(|why| format!("mdd: {why}. So mddog can't show the preview here. Use {SUPPORTED}."))
     };
     if let Some(refusal) = refusal {
         drop(loader);
@@ -333,9 +287,8 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     if let Some(l) = &loader {
         l.tune(scale, (cell_w, cell_h));
     }
-    let herdr = probe.herdr();
-    let cache = Cache::new(kitty::storage_limit(herdr), herdr, probe.medium(), 1 + (std::process::id() % 1000) * 1000);
-    let base = page::base_dir(&file, stdin);
+    let cache = Cache::new(probe.storage_limit(), probe.herdr(), probe.medium(), 1 + (std::process::id() % 1000) * 1000);
+    let base = crate::render::images::base_dir(&file, stdin);
     let mut p = Preview {
         watcher: None,
         loader,
@@ -427,11 +380,10 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     trace::mark("first paint sent");
     crate::sweep::spawn();
     if !p.probe.answered {
-        p.notify("The terminal did not answer. A blank page means it can't show images");
-        p.notice_until = Some(Instant::now() + Duration::from_secs(15));
+        p.notify_with("The terminal did not answer. A blank page means it can't show images", OnClick::Hints, Duration::from_secs(15));
     } else if std::str::from_utf8(&p.stamp).is_err() {
         p.notify("Some bytes are not UTF-8 and show as �");
-    } else if !p.stdin && !crate::config::FileListConfig::default().shows(&p.file) {
+    } else if !p.stdin && !picker::listed(&p.file) {
         p.notify("Not a .md file, shown as Markdown");
     }
     p.start_threads(leftover);
@@ -454,7 +406,10 @@ impl Preview {
     fn watch(&mut self) {
         self.watcher = None;
         if self.opened && self.live() {
-            self.watcher = watch::spawn(&self.file, self.tx.clone());
+            let tx = self.tx.clone();
+            self.watcher = watch::spawn(&self.file, move || {
+                let _ = tx.send(Event::FileChanged);
+            });
             if self.watcher.is_some() {
                 let _ = self.tx.send(Event::FileChanged);
             }
@@ -548,7 +503,7 @@ impl Preview {
                 false
             }
             Event::Key(k) if self.listing => {
-                trace::log_key(k);
+                trace::log(format_args!("key {k:?}"));
                 let k = match k {
                     Key::Mouse(click, x, y) => {
                         let spot = self.spot(x, y);
@@ -584,7 +539,7 @@ impl Preview {
                 }
             }
             Event::Key(k) => {
-                trace::log_key(k);
+                trace::log(format_args!("key {k:?}"));
                 // A wheel scroll can be the first thing the pointer does, so it records the spot too.
                 if let Key::WheelUp(x, y) | Key::WheelDown(x, y) | Key::WheelLeft(x, y) | Key::WheelRight(x, y) = k {
                     self.hover_at = Some((self.spot(x, y), u32::MAX));
@@ -600,8 +555,7 @@ impl Preview {
                     }
                     Key::WheelUp(x, y) | Key::WheelDown(x, y) => {
                         let (col, row) = self.spot(x, y).cell;
-                        if col <= self.img_col
-                            && row <= self.viewport_rows() as u16
+                        if self.region((col, row)) == Region::Sidebar
                             && !self.app.help
                             && !self.app.expanded
                             && let Some(actions) = self.app.toc_wheel(matches!(k, Key::WheelDown(..)))
@@ -621,7 +575,7 @@ impl Preview {
                     if click != Click::Move {
                         self.hover_at = Some((spot, u32::MAX));
                     }
-                    let on_hint = spot.cell.1 > self.viewport_rows() as u16 && self.chrome().hint_at(spot.cell.0).is_some();
+                    let on_hint = self.region(spot.cell) == Region::Status && self.chrome().hint_at(spot.cell.0).is_some();
                     // A move is not a click, so it never closes help or the expanded diagram.
                     if click != Click::Move
                         && let Some(actions) = self.app.modal_click(click == Click::Press, on_hint)
@@ -677,7 +631,7 @@ impl Preview {
                 let rects = self.engine.search_current(i);
                 self.invalidate(&rects);
                 if let Some(r) = self.matches.get(i).and_then(|m| m.first()) {
-                    trace::log_match(i, self.matches.len(), *r);
+                    trace::log(format_args!("match {i}/{} rect={:.1},{:.1},{:.1},{:.1}", self.matches.len(), r[0], r[1], r[2], r[3]));
                 }
                 true
             }
@@ -735,7 +689,7 @@ impl Preview {
                 false
             }
             Action::ScrollCode(col, row, cells) => {
-                if col <= self.img_col || u32::from(row) > self.viewport_rows() {
+                if self.region((col, row)) != Region::Page {
                     return false;
                 }
                 let (x, y) = self.grid().point(Spot { cell: (col, row), sub: None }, 0.5);
@@ -808,8 +762,10 @@ impl Preview {
                 self.drag = None;
                 self.bar_held = false;
                 self.app.toc_bar_release();
-                if row > rows {
-                    let back = self.app.notice.as_deref() == Some(GO_BACK);
+                let region = self.region(spot.cell);
+                if region == Region::Status {
+                    let on_click = self.app.notice.as_ref().map(|n| n.click);
+                    let back = on_click == Some(OnClick::GoBack);
                     let Some(key) = self.chrome().hint_at(col).or(back.then_some(Key::Backspace)) else {
                         if self.app.notice.is_some() {
                             self.app.notice = None;
@@ -818,30 +774,30 @@ impl Preview {
                         }
                         return false;
                     };
-                    if key == Key::Char('q') {
-                        let armed = self.app.notice.as_deref() == Some(CLICK_QUIT);
+                    if key == app::QUIT.2 {
+                        let armed = on_click == Some(OnClick::Quit);
                         match self.quit_armed.filter(|_| armed).map(|t| t.elapsed()) {
                             Some(e) if e < CLICK_AGAIN => return false,
                             Some(_) => {}
                             None => {
                                 self.quit_armed = Some(Instant::now());
-                                self.notify(CLICK_QUIT);
+                                self.notify_with("Click again to quit", OnClick::Quit, NOTICE);
                                 return false;
                             }
                         }
                     }
-                    if self.app.notice.as_deref() == Some(CLICK_QUIT) {
+                    if on_click == Some(OnClick::Quit) {
                         self.app.notice = None;
                     }
                     let actions = self.app.handle(key);
                     return self.act_all(actions);
                 }
-                if col <= self.img_col
+                if region == Region::Sidebar
                     && let Some(actions) = self.app.toc_bar_press(self.img_col - col, u32::from(row) - 1)
                 {
                     return self.act_all(actions);
                 }
-                if col <= self.img_col {
+                if region == Region::Sidebar {
                     let actions = self.app.toc_click(u32::from(row) - 1);
                     return self.act_all(actions);
                 }
@@ -910,7 +866,7 @@ impl Preview {
                 let cleared = self.select(Select::Clear);
                 let (x, y) = grid.point(d.from, 0.5);
                 let target = self.engine.link(x, y);
-                let link = target.as_ref().and_then(|(raw, resolved)| classify_link(raw, resolved));
+                let link = target.as_deref().and_then(Link::of);
                 if target.is_some() && link.is_none() {
                     self.notify("Links to local files don't open in the preview");
                     return cleared;
@@ -926,10 +882,8 @@ impl Preview {
     /// Sends `text` to the clipboard through pbcopy and through the terminal.
     /// The OSC 52 write sits between frames, so it never splits a tile.
     fn copy_text(&mut self, text: &str) {
-        let text = pasteable(text);
-        self.tty.write(osc52(&text).as_bytes());
+        self.tty.write(clipboard::copy(text).as_bytes());
         self.tty.flush();
-        pbcopy(text);
     }
 
     /// Copies the page's selection, if there is one.
@@ -947,8 +901,7 @@ impl Preview {
             return false;
         }
         self.hover_at = Some((spot, self.shown_px()));
-        let (col, row) = spot.cell;
-        let page = !(self.app.help || self.app.expanded) && col > self.img_col && u32::from(row) <= self.viewport_rows();
+        let page = !(self.app.help || self.app.expanded) && self.region(spot.cell) == Region::Page;
         if !page && !self.hover_page {
             self.set_pointer(DEFAULT_POINTER);
             return false;
@@ -1025,7 +978,7 @@ impl Preview {
         match link {
             Link::Open(url) => {
                 self.notify(&format!("Opened {url}"));
-                open_url(url);
+                link::open(url);
                 false
             }
             Link::Anchor(id) => {
@@ -1036,7 +989,7 @@ impl Preview {
                 let moved = self.app.scroll != from;
                 let show = self.act_all(actions);
                 if moved {
-                    self.notify(GO_BACK);
+                    self.notify_with("Backspace or a click here goes back", OnClick::GoBack, NOTICE);
                 }
                 show
             }
@@ -1077,7 +1030,7 @@ impl Preview {
     }
 
     fn viewport_rows(&self) -> u32 {
-        u32::from(self.size.rows.saturating_sub(1).max(1))
+        chrome::view_rows(self.size.rows) as u32
     }
 
     fn scroll_px(&self) -> u32 {
@@ -1095,6 +1048,28 @@ impl Preview {
         self.app.back_rows().iter().map(|&r| if r > 0 { position::capture(&self.layout.blocks, f64::from(self.phase + r * self.cell_h) / self.scale) } else { None }).collect()
     }
 
+    /// Which part of the screen a cell is in.
+    fn region(&self, (col, row): (u16, u16)) -> Region {
+        if u32::from(row) > self.viewport_rows() {
+            Region::Status
+        } else if col <= self.img_col {
+            Region::Sidebar
+        } else {
+            Region::Page
+        }
+    }
+
+    /// Device px from the page's CSS px.
+    fn px_of(&self, css: f64) -> u32 {
+        (css * self.scale).round() as u32
+    }
+
+    /// Scrolls the page just measured to `anchor`, else to `fallback` device px.
+    fn settle_at(&mut self, anchor: Option<position::Anchor>, fallback: u32) {
+        let px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(fallback, |y| self.px_of(y));
+        self.settle(px);
+    }
+
     /// Puts the Backspace rows back on the same content after a new layout, with `line`
     /// mapping an old source line to the new source.
     fn restore_back(&mut self, anchors: &[Option<position::Anchor>], line: impl Fn(u32) -> u32) {
@@ -1104,8 +1079,7 @@ impl Preview {
             .iter()
             .zip(anchors)
             .map(|(&r, a)| {
-                a.and_then(|a| position::restore(&self.layout.blocks, position::Anchor { line: line(a.line), offset: a.offset }))
-                    .map_or(r, |y| ((y * self.scale).round() as u32).saturating_sub(self.phase) / self.cell_h)
+                a.and_then(|a| position::restore(&self.layout.blocks, position::Anchor { line: line(a.line), offset: a.offset })).map_or(r, |y| self.px_of(y).saturating_sub(self.phase) / self.cell_h)
             })
             .collect();
         self.app.set_back_rows(rows);
@@ -1169,8 +1143,12 @@ impl Preview {
     }
 
     fn notify(&mut self, msg: &str) {
-        self.app.notice = Some(msg.to_string());
-        self.notice_until = Some(Instant::now() + NOTICE);
+        self.notify_with(msg, OnClick::Hints, NOTICE);
+    }
+
+    fn notify_with(&mut self, msg: &str, click: OnClick, shown: Duration) {
+        self.app.notice = Some(Notice { text: msg.to_string(), click });
+        self.notice_until = Some(Instant::now() + shown);
         self.draw_chrome();
     }
 
@@ -1201,16 +1179,10 @@ impl Preview {
         self.stamp = bytes;
         self.loaded = true;
         self.src = src;
-        let mut scroll_px = 0u32;
-        if let Some(a) = anchor {
-            let line = position::map_line(&old_src, &self.src, a.line);
-            if let Some(y) = position::restore(&self.layout.blocks, position::Anchor { line, offset: a.offset }) {
-                scroll_px = (y * self.scale).round() as u32;
-            }
-        }
-        self.settle(scroll_px);
+        let line = position::line_map(&old_src, &self.src);
+        self.settle_at(anchor.map(|a| position::Anchor { line: line(a.line), offset: a.offset }), 0);
         if keep {
-            self.restore_back(&back, position::line_map(&old_src, &self.src));
+            self.restore_back(&back, line);
         }
         if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
@@ -1221,10 +1193,10 @@ impl Preview {
         self.show();
     }
 
-    /// The first native page lays out at a guessed scale while a thread reads the real one. A wrong
+    /// The first page lays out at a guessed scale while a thread reads the real one. A wrong
     /// guess lays the page out again here, before anything of it is drawn.
     fn settle_scale(&mut self) {
-        let real = engine::display_scale();
+        let real = screen::display_scale();
         if real == self.scale {
             return;
         }
@@ -1275,8 +1247,7 @@ impl Preview {
         self.engine.resize(css_width);
         self.measure();
         self.stale_hover();
-        let scroll_px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(0, |y| (y * self.scale).round() as u32);
-        self.settle(scroll_px);
+        self.settle_at(anchor, 0);
         self.restore_back(&back, |l| l);
         if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
@@ -1321,7 +1292,7 @@ impl Preview {
     fn tile_height(&self) -> u32 {
         let width = u32::from(self.img_cols) * self.cell_w;
         // One row less than fits, for the row each tile is sent with below it.
-        let rows = (kitty::TILE_BYTES as u32 / (width.max(1) * 4) / self.cell_h).min(kitty::MAX_IMAGE_SIDE / self.cell_h);
+        let rows = kitty::tile_rows(width, self.cell_h);
         rows.saturating_sub(1).max(1) * self.cell_h
     }
 
@@ -1355,7 +1326,7 @@ impl Preview {
         let vis = self.cache.visible(&v);
         let mut frees = String::new();
         if self.probe.sync {
-            frees.push_str("\x1b[?2026h");
+            frees.push_str(term::SYNC_BEGIN);
         }
         let loader = self.loader.take();
         if loader.is_some() {
@@ -1371,7 +1342,7 @@ impl Preview {
             self.help_drawn = true;
             self.chrome().draw(&mut out);
             if self.probe.sync {
-                out.push_str("\x1b[?2026l");
+                out.push_str(term::SYNC_END);
             }
             self.tty.write(out.as_bytes());
             self.tty.flush();
@@ -1385,7 +1356,7 @@ impl Preview {
             p.draw(&mut out, self.size.cols, self.size.rows, std::time::SystemTime::now(), &config::theme().palette);
             self.help_drawn = true;
             if self.probe.sync {
-                out.push_str("\x1b[?2026l");
+                out.push_str(term::SYNC_END);
             }
             self.tty.write(out.as_bytes());
             self.tty.flush();
@@ -1419,7 +1390,7 @@ impl Preview {
         self.cache.place(&vis, &v, &mut out);
         self.chrome().draw(&mut out);
         if self.probe.sync {
-            out.push_str("\x1b[?2026l");
+            out.push_str(term::SYNC_END);
         }
         self.tty.write(out.as_bytes());
         self.tty.flush();
@@ -1431,8 +1402,8 @@ impl Preview {
             let y = self.view_css().0;
             let held = self.cache.held();
             let top = position::top_text(&self.layout.blocks, &self.layout.texts, y);
-            trace::log_view(&format!(
-                "px={} took={:.2} scroll={} phase={} placed={:?} resident={} held={held} scale={} cell={}x{} rows={} doc={} top={top}",
+            trace::log(format_args!(
+                "view px={} took={:.2} scroll={} phase={} placed={:?} resident={} held={held} scale={} cell={}x{} rows={} doc={} top={top}",
                 v.scroll_px,
                 t0.elapsed().as_secs_f64() * 1000.0,
                 self.app.scroll,
@@ -1453,8 +1424,8 @@ impl Preview {
 
     fn dump_view(&self, path: &Path) {
         let (y, h) = self.view_css();
-        if let Some(bmp) = self.engine.snapshot(y, h, self.scale) {
-            let _ = bmp.write_png(path);
+        if let Some(png) = self.engine.snapshot(y, h, self.scale, |n| Some(vec![0; n])).and_then(|b| kitty::png(b.width, b.height, &b.rgba)) {
+            let _ = std::fs::write(path, png);
         }
     }
 
@@ -1572,8 +1543,7 @@ impl Preview {
         }
         self.measure();
         self.stale_hover();
-        let scroll_px = anchor.and_then(|a| position::restore(&self.layout.blocks, a)).map_or(scroll_px, |y| (y * self.scale).round() as u32);
-        self.settle(scroll_px);
+        self.settle_at(anchor, scroll_px);
         self.restore_back(&back, |l| l);
         self.show();
         trace::mark("late content settled");
@@ -1581,11 +1551,12 @@ impl Preview {
 
     fn leave_screen(&mut self) {
         self.paused.store(true, Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(60));
+        // Past one input poll, the input thread has seen `paused` and leaves the editor's keys alone.
+        std::thread::sleep(INPUT_POLL + Duration::from_millis(10));
         let mut out = String::new();
         self.cache.free_all(&mut out);
         self.tty.write(out.as_bytes());
-        self.tty.write(format!("{}{}\x1b[?25h\x1b[?7h\x1b[?1049l", term::MOUSE_OFF, term::KEYS_OFF).as_bytes());
+        self.tty.write(term::leave().as_bytes());
         self.tty.flush();
         self.tty.restore();
         self.pointer = DEFAULT_POINTER;
@@ -1594,8 +1565,7 @@ impl Preview {
 
     fn enter_screen(&mut self, read: bool) {
         let _ = self.tty.raw();
-        let pixels = if self.probe.pixel_mouse { term::PIXEL_MOUSE_ON } else { "" };
-        self.tty.write(format!("\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[2J{}{}{pixels}", term::MOUSE_ON, term::KEYS_ON).as_bytes());
+        self.tty.write(term::enter(self.probe.pixel_mouse).as_bytes());
         self.tty.flush();
         let pending: Vec<Event> = std::iter::from_fn(|| self.rx.try_recv().ok()).filter(|e| !matches!(e, Event::FileChanged)).collect();
         for e in pending {
@@ -1645,17 +1615,16 @@ impl Preview {
                 return;
             }
         };
-        let (wrap, toc_visible) = (self.app.wrap, self.app.toc_visible);
+        let anchor = self.anchor();
+        let old = self.replace_app(App::default());
         if self.opened {
-            let anchor = self.anchor();
-            let visit = Visit { file: std::mem::take(&mut self.file), stdin: self.stdin, name: std::mem::take(&mut self.name), app: std::mem::take(&mut self.app), anchor, src: self.src.clone() };
+            let visit = Visit { file: std::mem::take(&mut self.file), stdin: self.stdin, name: std::mem::take(&mut self.name), app: old, anchor, src: self.src.clone() };
             self.history.push(visit);
-            if self.history.len() > HISTORY {
+            if self.history.len() > app::HISTORY {
                 self.history.remove(0);
             }
         }
-        self.app = App::default();
-        (self.app.wrap, self.app.toc_visible, self.app.back_file) = (wrap, toc_visible, !self.history.is_empty());
+        self.app.back_file = !self.history.is_empty();
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
         self.start_loader(&name);
         self.switch(path, false, name, bytes, None);
@@ -1669,11 +1638,16 @@ impl Preview {
             self.notify(&format!("Can't read {}, so it was removed from the Back list", v.name));
             return;
         };
-        let (wrap, toc_visible) = (self.app.wrap, self.app.toc_visible);
-        self.app = v.app;
-        (self.app.wrap, self.app.toc_visible, self.app.back_file) = (wrap, toc_visible, !self.history.is_empty());
+        self.replace_app(v.app);
+        self.app.back_file = !self.history.is_empty();
         self.start_loader(&v.name);
         self.switch(v.file, v.stdin, v.name, bytes, v.anchor.map(|a| (a, v.src)));
+    }
+
+    /// Puts `next` in place of the page's state, keeping the settings that hold across files. Returns the old state.
+    fn replace_app(&mut self, mut next: App) -> App {
+        (next.wrap, next.toc_visible) = (self.app.wrap, self.app.toc_visible);
+        std::mem::replace(&mut self.app, next)
     }
 
     /// Draws a skeleton over the screen if the next page is slow to show. `show` takes it down.
@@ -1684,7 +1658,7 @@ impl Preview {
     }
 
     fn switch(&mut self, file: PathBuf, stdin: bool, name: String, bytes: Vec<u8>, at: Option<(position::Anchor, String)>) {
-        self.base = page::base_dir(&file, stdin);
+        self.base = crate::render::images::base_dir(&file, stdin);
         (self.file, self.stdin, self.name) = (file, stdin, name);
         self.matches.clear();
         self.late = None;
@@ -1738,7 +1712,8 @@ fn input_loop(fd: i32, tx: Sender<Event>, paused: Arc<AtomicBool>, first: Vec<u8
             std::thread::sleep(Duration::from_millis(20));
             continue;
         }
-        let wait = Duration::from_millis(if buf.last() == Some(&0x1b) { 30 } else { 50 });
+        // A lone Esc is a key once no sequence follows it for 30 ms.
+        let wait = if buf.last() == Some(&0x1b) { Duration::from_millis(30) } else { INPUT_POLL };
         let ready = term::readable(fd, wait);
         if ready && !paused.load(Ordering::SeqCst) {
             // SAFETY: chunk is writable for chunk.len() bytes, and read writes no more than that.
@@ -1760,20 +1735,6 @@ fn input_loop(fd: i32, tx: Sender<Event>, paused: Arc<AtomicBool>, first: Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn copied_text_drops_control_characters() {
-        assert_eq!(pasteable("ls\x1b[201~echo\u{9b}hi\x07\n\tok\r\n"), "ls[201~echohi\n\tok\r\n");
-    }
-
-    #[test]
-    fn osc52_encodes_base64() {
-        // The RFC 4648 test vectors.
-        for (text, b64) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
-            assert_eq!(osc52(text), format!("\x1b]52;c;{b64}\x1b\\"));
-        }
-        assert_eq!(osc52("é✓"), "\x1b]52;c;w6ninJM=\x1b\\");
-    }
 
     #[test]
     fn maps_cells_to_page_points() {
@@ -1798,19 +1759,6 @@ mod tests {
         let spot = Spot { cell: (33, 3), sub: Some((0.25, 0.75)) };
         assert_eq!(g.point(spot, 0.5), (22.5, 105.0));
         assert_eq!(g.point(spot, 1.0), (22.5, 105.0));
-    }
-
-    #[test]
-    fn only_web_and_mail_links_open() {
-        let open = |u: &str| Some(Link::Open(u.to_string()));
-        assert_eq!(classify_link("https://a.dev/x", "https://a.dev/x"), open("https://a.dev/x"));
-        assert_eq!(classify_link("HTTP://a.dev", "http://a.dev/"), open("http://a.dev/"));
-        assert_eq!(classify_link("mailto:a@b.dev", "mailto:a@b.dev"), open("mailto:a@b.dev"));
-        assert_eq!(classify_link("#intro", "file:///d/#intro"), Some(Link::Anchor("intro".into())));
-        assert_eq!(classify_link("docs/a.md", "file:///d/docs/a.md"), None);
-        assert_eq!(classify_link("javascript:alert(1)", "javascript:alert(1)"), None);
-        assert_eq!(classify_link("x.html", "file:///d/x.html"), None);
-        assert_eq!(classify_link("data:text/html,hi", "data:text/html,hi"), None);
     }
 
     #[test]

@@ -8,7 +8,8 @@ use std::time::{Duration, Instant, SystemTime};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
-use crate::term::{self, Click, Event, Key};
+use super::Event;
+use crate::term::{self, Click, Key};
 use crate::theme::{Palette, bg, fg};
 
 pub const CAP: usize = 10_000;
@@ -276,7 +277,7 @@ impl Picker {
             self.done |= done;
         }
         self.receive();
-        self.add(Vec::new());
+        self.resort();
     }
 
     /// Takes the batches the walker sent. Returns whether the list changed.
@@ -289,14 +290,14 @@ impl Picker {
             got = true;
         }
         if got {
-            self.add(Vec::new());
+            self.resort();
         }
         got
     }
 
-    fn add(&mut self, items: Vec<Item>) {
+    /// Sorts the items, newest first, and filters them again, keeping the selected file selected.
+    fn resort(&mut self) {
         let keep = self.selected().map(Path::to_path_buf);
-        self.items.extend(items);
         self.items.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.rel.cmp(&b.rel)));
         self.filter();
         if let Some(i) = keep.and_then(|k| self.rows.iter().position(|r| self.items[r.item].path == k)) {
@@ -514,7 +515,7 @@ mod tests {
         p.done = true;
         let mut out = String::new();
         p.draw(&mut out, 60, 10, SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000), &light);
-        let drawn = crate::viewer::loading::tests::sgr_colors(&out);
+        let drawn = crate::viewer::sgr_colors(&out);
         for c in [light.bg, light.fg, light.fg_muted, light.fg_bright, light.selection_bg, light.bar_bg, light.border] {
             assert!(drawn.contains(&c), "{c:?} not drawn");
         }
@@ -529,7 +530,8 @@ mod tests {
     fn picker(items: Vec<Item>) -> Picker {
         let mut p = Picker::new(PathBuf::from("/r"));
         p.done = true;
-        p.add(items);
+        p.items.extend(items);
+        p.resort();
         p
     }
 
@@ -620,6 +622,7 @@ mod tests {
         p.root = std::env::temp_dir().join("mddog-no-such-dir");
         p.list(wake);
         p.draw(&mut String::new(), 80, 10, SystemTime::UNIX_EPOCH, &dark());
+        assert_eq!(p.top, 0, "the emptied list scrolls back to its top");
     }
 
     #[test]
@@ -643,7 +646,8 @@ mod tests {
     fn a_new_batch_keeps_the_selection() {
         let mut p = picker(vec![item("a.md", "", 5), item("b.md", "", 6)]);
         p.handle(Key::Down, 24);
-        p.add(vec![item("new.md", "", 1)]);
+        p.items.extend(vec![item("new.md", "", 1)]);
+        p.resort();
         assert_eq!(p.selected(), Some(Path::new("/r/b.md")));
     }
 

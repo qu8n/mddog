@@ -6,8 +6,8 @@ use irosashi::{CodeToTokensOptions, Highlighter, HighlighterBuilder};
 
 // `GRAMMARS`: each grammar's JSON, deflated by build.rs, sorted by scope.
 include!(concat!(env!("OUT_DIR"), "/textmate/textmate.rs"));
-const ALIASES: &[u8] = include_bytes!("../../assets/textmate/aliases.json");
-const SCOPES: &[u8] = include_bytes!("../../assets/textmate/scopes.json");
+const ALIASES: &[u8] = include_bytes!("../../../assets/textmate/aliases.json");
+const SCOPES: &[u8] = include_bytes!("../../../assets/textmate/scopes.json");
 const THEME: &[u8] = br##"{"name":"none","type":"dark","colors":{"editor.foreground":"#000000","editor.background":"#000000"},"tokenColors":[]}"##;
 
 /// A page pays only for its own languages: a fence's grammar and the grammars it can include are inflated on

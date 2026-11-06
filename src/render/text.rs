@@ -45,6 +45,12 @@ impl FKey {
     pub fn tracked(self, em: f32) -> FKey {
         FKey { track: (em * 1000.0).round() as i16, ..self }
     }
+    /// The underline's and the strike line's offsets from the baseline, and their thickness, in px.
+    pub fn lines(&self) -> (f32, f32, f32) {
+        let px = self.px();
+        (0.12 * px, -0.3 * px, (px / 16.0).max(1.0))
+    }
+
     pub fn px(&self) -> f32 {
         self.size as f32 / 16.0
     }
@@ -149,11 +155,16 @@ impl Default for Fonts {
     }
 }
 
+/// CSS's names for the system font, in lower case.
+pub fn system_ui(name: &str) -> bool {
+    matches!(name, "system-ui" | "-apple-system" | "blinkmacsystemfont" | "ui-sans-serif" | "sans-serif")
+}
+
 /// The first font of `names` that is installed, as CSS's `font-family` picks. `system-ui` and its kin are the system font, and `ui-monospace` and `monospace` its monospaced cut.
 fn family(names: &[String], size: f64, mono: bool) -> CTFont {
     for n in names {
         match n.to_ascii_lowercase().as_str() {
-            "system-ui" | "-apple-system" | "blinkmacsystemfont" | "ui-sans-serif" | "sans-serif" => return new_ui_font_for_language(2, size, None),
+            n if system_ui(n) => return new_ui_font_for_language(2, size, None),
             "ui-monospace" | "monospace" => {
                 if let Some(f) = system_mono(size) {
                     return f;
@@ -194,7 +205,7 @@ unsafe extern "C" {
 
 /// `f` drawn `scale` times larger. CoreText picks the system font's optical size and tracking from the point
 /// size, so a 16 px body font made at 32 pt for a Retina screen gets the display cut, about 6% narrower than
-/// WebKit's text. Scaling a 16 pt font keeps the text cut, as WebKit does.
+/// a browser's text. Scaling a 16 pt font keeps the text cut, as a browser does.
 fn at_scale(f: CTFont, scale: f32) -> CTFont {
     if scale == 1.0 {
         return f;
@@ -341,7 +352,7 @@ mod weight_tests {
         // The in-between weights Obsidian's headings use land between the named cuts.
         let (six, sixty_eight, seven) = (w(SEMIBOLD, &["system-ui"]), w(weight(680), &["system-ui"]), w(weight(700), &["system-ui"]));
         assert!(six < sixty_eight && sixty_eight < seven, "{six} {sixty_eight} {seven}");
-        // A whole hundred takes SF's named cut, as WebKit does.
+        // A whole hundred takes SF's named cut.
         assert_eq!(font(SEMIBOLD, &["system-ui"]).postscript_name(), ".SFNS-Semibold");
         assert!(font(SEMIBOLD | ITALIC, &["system-ui"]).all_traits().normalized_weight() > 0.25, "italic keeps the weight");
     }
@@ -362,10 +373,9 @@ mod weight_tests {
     }
 
     #[test]
-    fn weights_map_through_the_table() {
-        assert_eq!(through_weights(600.0, false), 0.3);
-        assert!((through_weights(650.0, false) - 0.35).abs() < 1e-9);
-        assert!((through_weights(through_weights(680.0, false), true) - 680.0).abs() < 1e-9);
-        assert_eq!(through_weights(1000.0, false), 0.62);
+    fn a_weight_maps_there_and_back() {
+        for w in [100.0, 450.0, 680.0, 900.0] {
+            assert!((through_weights(through_weights(w, false), true) - w).abs() < 1e-9, "{w}");
+        }
     }
 }

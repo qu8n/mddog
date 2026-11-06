@@ -1,9 +1,9 @@
-//! Regressions in the native engine's answers to the viewer's calls.
+//! Regressions in the engine's answers to the viewer's calls.
 
-use mddog::engine::{Engine, Pointer, Press, Select};
+use mddog::render::engine::{Engine, Pointer, Press, Select};
 
 fn engine(src: &str) -> Engine {
-    let e = Engine::new(640.0, 2.0);
+    let e = Engine::new(640.0, 2.0, false);
     e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
     e
 }
@@ -36,14 +36,11 @@ fn a_relayout_forgets_button_indices() {
         }
     }
     assert!(copied, "no copy button found");
-    for y in (0..40).step_by(2) {
-        if e.press(40.0, f64::from(y)) == Press::Other {
-            break;
-        }
-    }
-    // Neither may index the old page's buttons.
-    let _ = e.reset_copy();
-    let _ = e.hover(600.0, 30.0);
+    let closed = (0..40).step_by(2).any(|y| e.press(40.0, f64::from(y)) == Press::Other);
+    assert!(closed, "the summary didn't toggle");
+    // The copied button went with the old page, so there is nothing to reset, and a hover there finds no button.
+    assert_eq!(e.reset_copy(), Vec::<[f64; 4]>::new());
+    assert_eq!(e.hover(600.0, 30.0).1, Vec::<[f64; 4]>::new());
 }
 
 #[test]
@@ -79,7 +76,7 @@ fn search_select_and_hover_answer_typed() {
 #[test]
 fn a_diagram_expands_over_the_view_and_collapses() {
     let e = engine("# Top\n\n```mermaid\ngraph LR\n  A --> B\n```\n\nafter\n");
-    let shot = |e: &Engine| e.snapshot(0.0, 200.0, 2.0).unwrap().rgba.to_vec();
+    let shot = |e: &Engine| e.snapshot(0.0, 200.0, 2.0, |n| Some(vec![0; n])).unwrap().rgba;
     let before = shot(&e);
     // The box stops at the page's end.
     assert_eq!(e.expand(0, 100.0, 900.0)[0][3].round(), (e.layout().height - 100.0).round());
@@ -127,7 +124,7 @@ fn tagfilter_tags_show_as_text() {
     assert!(all.contains("<script>alert(\"hi\")</script>"), "{all}");
     assert!(all.contains("<iframe src=\"https://example.com\"></iframe>"), "{all}");
     for src in ["\"https://example.com\"", "'https://example.com'", "https://example.com"] {
-        let links = mddog::native::doc::parse(&format!("<iframe src={src}></iframe>\n")).links;
+        let links = mddog::render::doc::parse(&format!("<iframe src={src}></iframe>\n")).links;
         assert_eq!(links, ["https://example.com"], "the link stops at the attribute's end: {src}");
     }
     for t in ["<title>T</title>", "<textarea>A</textarea>", "<style>s</style>", "<xmp>x</xmp>", "<noembed>n</noembed>", "<noframes>f</noframes>", "<plaintext>p"] {
@@ -148,7 +145,7 @@ fn a_selection_spans_inline_code_and_bold() {
 /// Text loose in a raw HTML block draws with no margin, as HTML has it. A `<p>` in the same block keeps its own.
 #[test]
 fn loose_html_text_has_no_margin() {
-    use mddog::native::doc::{Block, parse};
+    use mddog::render::doc::{Block, parse};
     let d = parse("<script>x</script>\n<p>Para.</p>\n<iframe></iframe>\n\nAfter.\n");
     let kinds: Vec<_> = d.blocks.iter().map(|b| matches!(b, Block::Text(_))).collect();
     assert_eq!(kinds, [true, false, true, false], "Text, Para, Text, Para");
@@ -169,7 +166,7 @@ fn a_table_image_measures_at_the_table_width() {
 #[test]
 fn an_unclosed_summary_keeps_its_text() {
     // The summary ran to the end of the file and was never shown.
-    let blocks = mddog::native::doc::parse("<details><summary>Title\n\nbody one\n").blocks;
+    let blocks = mddog::render::doc::parse("<details><summary>Title\n\nbody one\n").blocks;
     let text = format!("{blocks:?}");
     assert!(text.contains("Title") && text.contains("body one"), "{text}");
 }
@@ -188,6 +185,6 @@ fn opening_details_fetches_its_remote_images() {
 #[test]
 fn a_stray_link_ends_with_its_paragraph() {
     // GitHub closes an <a> left open in a paragraph; a stray <b> it carries on, so that stays.
-    let text = format!("{:?}", mddog::native::doc::parse("intro <a href=\"https://a.b\">stray\n\nlater text\n").blocks);
+    let text = format!("{:?}", mddog::render::doc::parse("intro <a href=\"https://a.b\">stray\n\nlater text\n").blocks);
     assert!(text.contains("\"later text\"") && text.ends_with("link: 0 })])]"), "{text}");
 }

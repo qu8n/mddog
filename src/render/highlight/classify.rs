@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
-use crate::native::highlight::{Runs, Tok};
+use super::{Runs, Tok};
 
 const CAPTURES: &[(&str, &str)] = &[
     ("comment", "pl-c"),
@@ -79,9 +79,8 @@ thread_local! {
 }
 
 /// Highlights a fenced block: per line of `code`, its `(start, end, token)` spans, plain text left out.
-/// Tree-sitter grammars first, then TextMate ones; a language with neither comes back plain. None when the
-/// TextMate grammar's offsets can't line up with `code` (it reads `\r` as a line end).
-pub fn block(info: &str, code: &str) -> Option<Runs> {
+/// Tree-sitter grammars first, then TextMate ones; a language with neither comes back plain.
+pub fn block(info: &str, code: &str) -> Runs {
     let lang = info.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
     let body = code.strip_suffix('\n').unwrap_or(code);
     let ts = CACHE.with(|c| {
@@ -94,6 +93,8 @@ pub fn block(info: &str, code: &str) -> Option<Runs> {
             let mut spans = vec![];
             let mut line_start = 0;
             let mut line = 0;
+            // TextMate reads `\r` as a line end, so a space of the same length keeps the offsets in line.
+            let body = &body.replace('\r', " ");
             let found = super::textmate::tokens(&lang, body, |i, s, e, path| {
                 while line < i {
                     line_start += body[line_start..].find('\n').map_or(body.len() - line_start, |n| n + 1);
@@ -102,14 +103,10 @@ pub fn block(info: &str, code: &str) -> Option<Runs> {
                 let class = path.last().map_or("", |p| p.1);
                 spans.push((line_start + s, line_start + e, tok_of(class)));
             });
-            match found {
-                Some(_) if body.contains('\r') => return None,
-                Some(_) => spans,
-                None => vec![],
-            }
+            if found.is_some() { spans } else { vec![] }
         }
     };
-    Some(by_line(code, spans))
+    by_line(code, spans)
 }
 
 /// The token for a GitHub `pl-*` class.
@@ -217,14 +214,16 @@ mod tests {
 
     #[test]
     fn runs_are_per_line() {
-        let runs = block("rust", "let s = \"<a>\"; // hi").unwrap();
+        let runs = block("rust", "let s = \"<a>\"; // hi");
         assert_eq!(runs.len(), 1);
         assert!(runs[0].iter().any(|r| r.2 == Tok::Comment) && runs[0].iter().any(|r| r.2 == Tok::Str), "{runs:?}");
         // TextMate-only languages too, and a trailing newline gives an empty last line.
-        let yaml = block("yaml", "a: 1\n# c\n").unwrap();
+        let yaml = block("yaml", "a: 1\n# c\n");
         assert_eq!(yaml.len(), 3);
         assert_eq!(yaml[1], [(0, 3, Tok::Comment)]);
-        assert!(block("yaml", "a: 1\r\n").is_none());
-        assert_eq!(block("nosuchlang", "x\ny").unwrap(), [vec![], vec![]]);
+        // CRLF lines keep their offsets.
+        let crlf = block("yaml", "a: 1\r\n# c\r\n");
+        assert_eq!((crlf[1][0].0, crlf[1][0].2), (0, Tok::Comment), "{crlf:?}");
+        assert_eq!(block("nosuchlang", "x\ny"), [vec![], vec![]]);
     }
 }

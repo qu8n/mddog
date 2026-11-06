@@ -1,11 +1,13 @@
 //! Block and inline layout into a display list. All sizes are device pixels.
-use crate::native::doc::*;
-use crate::native::highlight::{Tok, highlight};
-use crate::native::images::{Images, Img, Status, render_svg, render_view};
-use crate::native::math::{self, MItem};
-use crate::native::page::*;
-use crate::native::text::{BOLD, FKey, Fonts, ITALIC, MONO, SEMIBOLD, TABULAR, WEIGHT_MASK, weight};
-use crate::native::theme::{Rgb, Theme, mix};
+use crate::render::doc::*;
+use crate::render::highlight::{Tok, highlight};
+use crate::render::icons::{self, Icon};
+use crate::render::images::{Images, Img, Status};
+use crate::render::math::{self, MItem};
+use crate::render::page::*;
+use crate::render::svg::{render_svg, render_view};
+use crate::render::text::{BOLD, FKey, Fonts, ITALIC, MONO, SEMIBOLD, TABULAR, WEIGHT_MASK, weight};
+use crate::render::theme::{Look, Rgb, Theme, mix};
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -25,7 +27,7 @@ struct Tc {
     color: Rgb,
     bits: u16,
     lh: f32,
-    align: u8,
+    align: Align,
     /// Letter spacing in em.
     track: f32,
 }
@@ -50,7 +52,7 @@ struct Atom {
     under: bool,
     strike: bool,
     link: u32,
-    bg: u8,
+    bg: Bg,
     ox: f32,
     shift: f32,
     cjk: bool,
@@ -68,7 +70,7 @@ pub struct Layouter<'a> {
     s: f32,
     clip: u16,
     pend_space: bool,
-    align: u8,
+    align: Align,
     list_depth: usize,
     cur_w: f32,
     /// The text color of the quote, footnote or done task around this point.
@@ -77,8 +79,29 @@ pub struct Layouter<'a> {
     struck: bool,
     /// The last block was a heading or a rule, which a heading after it sits closer to.
     after_head: bool,
-    /// The body text size in CSS px: 16, or 12 in the footnotes.
+    /// The body text size in CSS px: 16, or smaller in the footnotes.
     fsize: f32,
+    in_footnotes: bool,
+}
+
+/// The box behind a run of inline text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bg {
+    None,
+    Code,
+    Kbd,
+    Mark,
+}
+
+impl Bg {
+    /// The padding at each end of the box, in em, for the kinds that pad their text.
+    fn side_pad(self, th: &Theme) -> Option<f32> {
+        match self {
+            Bg::Code => Some(th.code_padding),
+            Bg::Kbd => Some(0.35),
+            Bg::Mark | Bg::None => None,
+        }
+    }
 }
 
 fn is_cjk(c: char) -> bool {
@@ -86,22 +109,22 @@ fn is_cjk(c: char) -> bool {
 }
 
 /// Lays out diagram `di`'s zoom bar for its zoom, `None` at the fit size. Zoom out sits at the right end and zoom in
-/// left of it, so neither moves when reset shows at the left end once zoomed (pele put reset last). Zoom out is
+/// left of it, so neither moves when reset shows at the left end once zoomed. Zoom out is
 /// dimmed at the fit size, and zoom in at `max`.
 pub fn place_bar(page: &mut Page, di: usize, zoom: Option<(f32, f32)>) {
     let Some(z) = &page.diagrams[di].zoom else { return };
-    let (s, right, item, buttons) = (page.buttons[z.buttons[0]].w.max(page.buttons[z.buttons[1]].w) / 24.0, z.right, z.item, z.buttons);
+    let (s, right, item, buttons) = (z.scale, z.right, z.item, z.buttons);
     let n = if zoom.is_some() { 3.0 } else { 2.0 };
     let bw = (n * 26.0 + 4.0) * s;
     let bar = &mut page.items[item];
     bar.x = right - bw;
     bar.w = bw;
     let y0 = bar.y;
-    // Slots from the right: zoom in, zoom out, reset.
     for (b, slot) in buttons.into_iter().zip([1.0, 0.0, 2.0]) {
         let b = &mut page.buttons[b];
         b.x = right - (27.0 + 26.0 * slot) * s;
         b.y = y0 + 3.0 * s;
+        b.h = 24.0 * s;
         b.w = if slot < n { 24.0 * s } else { 0.0 };
         b.off = match b.kind {
             BtnKind::ZoomIn => zoom.is_some_and(|(z, max)| z >= max * 0.999),
@@ -111,14 +134,37 @@ pub fn place_bar(page: &mut Page, di: usize, zoom: Option<(f32, f32)>) {
     }
 }
 
+/// The page's margin, in CSS pixels. The loading skeleton draws its lines inside it too.
+pub const PAD: f32 = 24.0;
+
+/// The anchor id prefixes of a footnote and of the place that cites it, as GitHub writes them.
+const NOTE: &str = "fn-";
+const BACK: &str = "fnref-";
+
 pub fn layout(fonts: &mut Fonts, th: &Theme, o: &Opts, doc: &Doc, images: &mut Images) -> Page {
-    let mut l =
-        Layouter { fonts, th, o, images, page: Page::default(), s: o.scale, clip: 0, pend_space: false, align: 0, list_depth: 0, cur_w: 0.0, ink: None, struck: false, after_head: false, fsize: 16.0 };
+    let mut l = Layouter {
+        fonts,
+        th,
+        o,
+        images,
+        page: Page::default(),
+        s: o.scale,
+        clip: 0,
+        pend_space: false,
+        align: Align::Left,
+        list_depth: 0,
+        cur_w: 0.0,
+        ink: None,
+        struck: false,
+        after_head: false,
+        fsize: 16.0,
+        in_footnotes: false,
+    };
     l.page.urls = doc.links.clone();
     l.page.w = o.width;
     let s = l.s;
-    let mx = 24.0 * s;
-    let mut y = 24.0 * s;
+    let mx = PAD * s;
+    let mut y = PAD * s;
     let w = (o.width - 2.0 * mx).max(40.0 * s);
     for (i, b) in doc.blocks.iter().enumerate() {
         if i > 0 {
@@ -131,8 +177,7 @@ pub fn layout(fonts: &mut Fonts, th: &Theme, o: &Opts, doc: &Doc, images: &mut I
             l.page.blocks.push(SrcBlock { start: *a, end: *e, top, h: y - top, tx: (tx, l.page.text.len()) });
         }
     }
-    // WebKit's Obsidian page kept its last block's bottom margin.
-    l.page.h = y + (if th.obsidian { 32.0 } else { 16.0 }) * s;
+    l.page.h = y + th.page_bottom * s;
     l.page
 }
 
@@ -183,7 +228,7 @@ impl<'a> Layouter<'a> {
         }
         // Obsidian sets no margin on a list item's paragraphs, loose or not.
         // A heading or rule counts the 16 on its own margin, so it keeps it.
-        if tight && self.th.obsidian && matches!(prev, Block::Para(_)) && !matches!(next, Block::Heading(..) | Block::Rule) {
+        if tight && self.th.tight_items && matches!(prev, Block::Para(_)) && !matches!(next, Block::Heading(..) | Block::Rule) {
             return 0.0;
         }
         // Headings and rules add their own margin above, which the 16 counts toward.
@@ -222,7 +267,7 @@ impl<'a> Layouter<'a> {
                 self.inlines(v, x, w, y, &tc);
             }
             Block::Heading(l, v, id) => {
-                let first = *y <= 24.0 * s + 0.5;
+                let first = *y <= PAD * s + 0.5;
                 if !first {
                     // The gap before it gives 16 of its margin.
                     *y += (self.th.heading_space[usize::from(self.after_head)] - 16.0) * s;
@@ -270,20 +315,19 @@ impl<'a> Layouter<'a> {
                 let pad = 8.0 * s;
                 let bx = x + ((w - mb.w) / 2.0).max(0.0);
                 let by = *y + pad;
-                self.emit_math(&mb, bx, by + mb.asc, self.th.text, true);
+                self.emit_math(&mb, bx, by + mb.asc, self.th.text);
                 *y += h + 2.0 * pad;
             }
             Block::Mermaid(src) => self.mermaid(src, x, w, y),
             Block::Details { summary, open, body, id } => {
                 let is_open = *open != self.o.toggled.contains(id);
-                let obs = self.th.obsidian;
-                // Obsidian's summary is regular text after WebKit's 10.5 px disclosure triangle.
-                let tc = Tc { size: 16.0 * s, color: self.th.text, bits: if obs { 0 } else { BOLD }, lh: 1.5, align: 0, track: 0.0 };
+                let obs = self.th.look == Look::Obsidian;
+                let tc = Tc { size: 16.0 * s, color: self.th.text, bits: if self.th.summary_bold { BOLD } else { 0 }, lh: 1.5, align: Align::Left, track: 0.0 };
                 let y0 = *y;
                 let ind = (if obs { 17.0 } else { 20.0 }) * s;
-                // triangle
                 let c = (0xff000000u32) | self.th.text;
                 if obs {
+                    // Obsidian's 10.5 px disclosure triangle.
                     let t = 10.5 * s;
                     let pts = if is_open { vec![(0.0, 0.0), (t, 0.0), (t / 2.0, 0.87 * t)] } else { vec![(0.0, 0.0), (0.87 * t, t / 2.0), (0.0, t)] };
                     let top = y0 + 12.0 * s - if is_open { 0.43 * t } else { t / 2.0 };
@@ -312,18 +356,16 @@ impl<'a> Layouter<'a> {
                 self.align = old;
             }
             Block::Footnotes(v) => {
-                // GitHub: a 1 px rule 24 px below the text and 16 px above the notes. Obsidian: 2 px, 32 and 32.
-                let (above, rule, below) = if self.th.obsidian { (16.0, 2.0 * s, 32.0) } else { (8.0, 1.0f32.max(s), 16.0) };
+                let [above, rule, below] = self.th.footnote_rule;
                 *y += above * s;
-                self.rect(x, *y, w, rule, self.th.rule, 0.0);
+                self.rect(x, *y, w, rule * s, self.th.rule, 0.0);
                 *y += below * s;
                 // GitHub's footnotes are 12 px muted text.
                 let (old_size, old_ink) = (self.fsize, self.ink);
-                (self.fsize, self.ink) = (16.0 * self.th.footnote_size, Some(self.th.footnote_text));
+                (self.fsize, self.ink, self.in_footnotes) = (16.0 * self.th.footnote_size, Some(self.th.footnote_text), true);
                 for (n, label, bl) in v {
                     let mut bl = bl.clone();
-                    // back link on the last paragraph
-                    let back = format!("#fnref-{label}");
+                    let back = format!("#{BACK}{label}");
                     let id = {
                         self.page.urls.push(back);
                         self.page.urls.len() as u32
@@ -331,14 +373,12 @@ impl<'a> Layouter<'a> {
                     if let Some(Block::Para(p) | Block::Text(p)) = bl.last_mut() {
                         p.push(Inl::Text(" ↩".into(), Sty { link: id, ..Sty::default() }));
                     }
-                    self.page.anchors.entry(format!("fn-{label}")).or_insert(*y);
+                    self.page.anchors.entry(format!("{NOTE}{label}")).or_insert(*y);
                     let item = LItem { task: None, blocks: bl };
                     self.list(Some(*n as u64), &[item], true, x, w, y);
-                    if !self.th.obsidian {
-                        *y += 4.0 * s;
-                    }
+                    *y += self.th.footnote_gap * s;
                 }
-                (self.fsize, self.ink) = (old_size, old_ink);
+                (self.fsize, self.ink, self.in_footnotes) = (old_size, old_ink, false);
             }
         }
     }
@@ -352,14 +392,16 @@ impl<'a> Layouter<'a> {
 
     fn alert(&mut self, k: Alert, bs: &[Block], x: f32, w: f32, y: &mut f32) {
         let s = self.s;
-        let (i, title, glyph) = match k {
-            Alert::Note => (0, "Note", "i"),
-            Alert::Tip => (1, "Tip", "✦"),
-            Alert::Important => (2, "Important", "!"),
-            Alert::Warning => (3, "Warning", "!"),
-            Alert::Caution => (4, "Caution", "×"),
-        };
-        let col = self.th.alerts[i];
+        let (title, glyph) = (
+            k.title(),
+            match k {
+                Alert::Note => "i",
+                Alert::Tip => "✦",
+                Alert::Important | Alert::Warning => "!",
+                Alert::Caution => "×",
+            },
+        );
+        let col = self.th.alerts[k as usize];
         // GitHub's alert: a bar, 8 px padding above and below, a title line 16 px high, then 16 px to the body.
         // Obsidian's callout has no bar but a box tinted with its color.
         let [top, bottom, side] = self.th.alert_padding.map(|v| v * s);
@@ -371,24 +413,23 @@ impl<'a> Layouter<'a> {
         *y += top;
         let ind = bw + side;
         let r = 8.0 * s;
-        if self.th.obsidian {
+        if self.th.look == Look::Obsidian {
             // Obsidian's title: the octicon, 4 px, then 600-weight text on a 1.3 line, icon centered on it.
-            let tc = Tc { size: 16.0 * s, color: col, bits: SEMIBOLD, lh: 1.3, align: 0, track: 0.0 };
+            let tc = Tc { size: 16.0 * s, color: col, bits: SEMIBOLD, lh: 1.3, align: Align::Left, track: 0.0 };
             let cy = *y + 0.65 * tc.size;
-            if let Some(bmp) = octicon(crate::native::octicons::ALERTS[i], col, 2.0 * r) {
-                self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Img(Rc::new(bmp)));
+            if let Some(bmp) = icons::bitmap(Icon::Alert(k), col, (2.0 * r).round() as u32) {
+                self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Img(bmp));
             }
             let tx = x + ind + 2.0 * r + 4.0 * s;
             self.inlines(&[Inl::Text(title.into(), Sty::default())], tx, w - ind - 2.0 * r - 4.0 * s, y, &tc);
         } else {
-            // icon
             let cy = *y + 8.0 * s;
             self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Rect { fill: 0, stroke: Some((1.5 * s, 0xff000000 | col)), radius: r });
             let gf = FKey::new(11.0 * s, BOLD);
             let gw = self.fonts.measure(gf, glyph);
             let (ga, gd) = self.fonts.ascent_descent(gf);
-            self.push(x + ind + r - gw / 2.0, cy - f32::midpoint(ga, gd), gw, ga + gd, Kind::Text { s: glyph.into(), f: gf, color: col, under: false, strike: false, asc: ga, tx: usize::MAX });
-            let tc = Tc { size: 16.0 * s, color: col, bits: BOLD, lh: 1.0, align: 0, track: 0.0 };
+            self.push(x + ind + r - gw / 2.0, cy - f32::midpoint(ga, gd), gw, ga + gd, Kind::Text { s: glyph.into(), f: gf, color: col, under: false, strike: false, asc: ga, tx: NO_TEXT });
+            let tc = Tc { size: 16.0 * s, color: col, bits: BOLD, lh: 1.0, align: Align::Left, track: 0.0 };
             let tx = x + ind + 2.0 * r + 8.0 * s;
             self.inlines(&[Inl::Text(title.into(), Sty::default())], tx, w - ind - 2.0 * r - 8.0 * s, y, &tc);
         }
@@ -404,8 +445,10 @@ impl<'a> Layouter<'a> {
     fn list(&mut self, start: Option<u64>, items: &[LItem], tight: bool, x: f32, w: f32, y: &mut f32) {
         let s = self.s;
         let th = self.th;
-        // Obsidian indents footnotes 1.8 em of their own size.
-        let ind = (if th.obsidian && self.fsize < 16.0 { 1.8 * self.fsize } else { 16.0 * th.list_indent }) * s;
+        let ind = match th.footnote_indent {
+            Some(em) if self.in_footnotes => em * self.fsize,
+            _ => 16.0 * th.list_indent,
+        } * s;
         self.list_depth += 1;
         let depth = self.list_depth;
         let n0 = start.unwrap_or(1);
@@ -439,12 +482,7 @@ impl<'a> Layouter<'a> {
                         let bs = 13.0 * s;
                         let bx = x + 9.6 * s;
                         let by = y0 + (lh - bs) / 2.0 + s;
-                        let (border, fill, tick) = match (th.dark, c) {
-                            (false, false) => (0xd1d1d1, 0xf8f8f8, 0),
-                            (false, true) => (0xd1d1d1, 0xd1d1d1, 0xededed),
-                            (true, false) => (0x626262, 0x3b3b3b, 0),
-                            (true, true) => (0x757575, 0x757575, 0x3b3b3b),
-                        };
+                        let [border, fill, tick] = th.task_box[usize::from(c)];
                         self.push(bx, by, bs, bs, Kind::Rect { fill: 0xff000000 | fill, stroke: Some((s, 0xff000000 | border)), radius: 2.0 * s });
                         if c {
                             self.push(bx, by, bs, bs, Kind::Poly { pts: vec![(3.0 * s, 6.6 * s), (5.4 * s, 9.0 * s), (10.0 * s, 4.2 * s)], color: 0xff000000 | tick, width: 1.9 * s, fill: false });
@@ -459,11 +497,10 @@ impl<'a> Layouter<'a> {
                         2 => format!("{}.", roman(n)),
                         _ => format!("{}.", alpha(n)),
                     };
-                    let f = FKey::new(tc.size, if th.obsidian { TABULAR } else { 0 });
+                    let f = FKey::new(tc.size, if th.tabular_numbers { TABULAR } else { 0 });
                     let lw = self.fonts.measure(f, &label);
-                    // The marker is the label and a space, outside the item.
                     let gap = self.fonts.measure(f, " ");
-                    self.push(cx - gap - lw, base - asc, lw, asc + desc, Kind::Text { s: label, f, color: th.list_marker, under: false, strike: false, asc, tx: usize::MAX });
+                    self.push(cx - gap - lw, base - asc, lw, asc + desc, Kind::Text { s: label, f, color: th.list_marker, under: false, strike: false, asc, tx: NO_TEXT });
                 }
                 (None, None) if th.flat_lists => {
                     // Obsidian's bullet: a 0.3 em dot at every depth, 0.95 em left of the text, on the line's middle.
@@ -498,7 +535,7 @@ impl<'a> Layouter<'a> {
             if it.blocks.is_empty() {
                 *y += lh;
             } else {
-                self.blocks(&it.blocks, cx, w - ind, y, tight || th.obsidian);
+                self.blocks(&it.blocks, cx, w - ind, y, tight || th.tight_items);
             }
             *y += self.fsize * th.item_pad * s;
             (self.ink, self.struck) = old;
@@ -519,7 +556,7 @@ impl<'a> Layouter<'a> {
         let adv = self.fonts.measure(f, "MMMMMMMMMM") / 10.0;
         let lh = size * self.th.code_line_height;
         let orig = text;
-        let text = text.replace('\t', "    ");
+        let text = crate::render::highlight::code_text(text);
         let lines: Vec<&str> = text.split('\n').collect();
         let hl = highlight(lang, &text);
         let inner_w = w - 2.0 * pad;
@@ -554,7 +591,6 @@ impl<'a> Layouter<'a> {
             self.page.hscroll.push(HScroll { x, y: y0, w, h: box_h, max: content_w + 2.0 * pad - w, bar_y: y0 + box_h - 10.0 * s });
             self.clip = self.page.hscroll.len() as u16;
         }
-        // diff line backgrounds first
         let is_diff = matches!(lang.to_ascii_lowercase().as_str(), "diff" | "patch");
         for (ri, (li, _, _)) in rows.iter().enumerate() {
             if is_diff {
@@ -574,7 +610,6 @@ impl<'a> Layouter<'a> {
             let line = lines[*li];
             let top = ty0 + ri as f32 * lh;
             let base = top + (lh - (asc + desc)) / 2.0;
-            // tokens clipped to [bs, be)
             let mut col = 0usize;
             let mut cursor = *bs;
             let mut spans: Vec<(usize, usize, Tok)> = vec![];
@@ -591,24 +626,20 @@ impl<'a> Layouter<'a> {
             if cursor < *be {
                 spans.push((cursor, *be, Tok::Plain));
             }
-            let tx0 = self.page.text.len();
-            let _ = tx0;
             for (a, b, t) in spans {
                 let seg = &line[a..b];
                 let n = seg.chars().count();
                 let tx = self.note_text(seg);
-                let color = self.tok_color(t);
+                let color = self.th.tok_color(t);
                 self.push(x + pad + col as f32 * adv, base, n as f32 * adv, asc + desc, Kind::Text { s: seg.to_string(), f, color, under: false, strike: false, asc, tx });
                 col += n;
             }
+            // A wrapped line's rows join with no break.
             if ri + 1 < rows.len() && rows[ri + 1].0 != *li {
                 self.page.text.push('\n');
-            } else if ri + 1 < rows.len() {
-                // wrapped line: no separator
             }
         }
         self.clip = old_clip;
-        // copy button
         let bw = 28.0 * s;
         self.page.copies.push(orig.to_string());
         let ci = self.page.copies.len() - 1;
@@ -616,34 +647,12 @@ impl<'a> Layouter<'a> {
         *y = y0 + box_h;
     }
 
-    fn tok_color(&self, t: Tok) -> Rgb {
-        let pl = &self.th.pl;
-        match t {
-            Tok::Plain => self.th.text,
-            // Obsidian's theme colored GitHub's classes its own way: plain names, types and operators in the
-            // text color, variables and tags in their own colors, escapes as the string around them.
-            Tok::Ident | Tok::Import | Tok::Punct if self.th.obsidian => self.th.text,
-            Tok::Var if self.th.obsidian => pl.variable,
-            Tok::Tag if self.th.obsidian => pl.tag,
-            Tok::Escape if self.th.obsidian => pl.string,
-            Tok::Keyword | Tok::Punct | Tok::Tag => pl.keyword,
-            Tok::Str | Tok::Ident => pl.string,
-            Tok::Escape | Tok::Var | Tok::Import => pl.constant,
-            Tok::Comment => pl.comment,
-            Tok::Number | Tok::Type | Tok::Meta => pl.constant,
-            Tok::Func => pl.entity,
-            Tok::Added => pl.inserted,
-            Tok::Removed => pl.deleted,
-        }
-    }
-
-    /// A Mermaid diagram as pele drew it on GitHub's page: no frame, 16 px above and below, centered at its own
+    /// A Mermaid diagram as GitHub's page shows it: no frame, 16 px above and below, centered at its own
     /// size, or shrunk to the width less 48 px with a zoom bar under it. Copy and expand buttons sit at its top
     /// right.
     fn mermaid(&mut self, src: &str, x: f32, w: f32, y: &mut f32) {
         let s = self.s;
-        let Some(tree) = crate::native::mermaid::tree(src, self.th) else {
-            // show the source as a code block
+        let Some(tree) = crate::render::mermaid::tree(src, self.th) else {
             self.code("", src, x, w, y);
             return;
         };
@@ -651,7 +660,6 @@ impl<'a> Layouter<'a> {
         let y0 = *y;
         let pad = 16.0 * s;
         let shrunk = w0 * s > w;
-        // The zoom bar needs the 48 px beside the diagram and its own 82, so a page narrower than that only shrinks it.
         let zooms = shrunk && w >= 140.0 * s;
         let fit = if zooms { (w - 48.0 * s) / w0 } else { s.min(w / w0) };
         let (dw, dh) = ((w0 * fit).round().max(1.0), (h0 * fit).round().max(1.0));
@@ -671,23 +679,24 @@ impl<'a> Layouter<'a> {
         self.page.buttons.push(Button::new(bx - bw - gap, y0 + gap, bw, bh, BtnKind::Expand, di));
         self.page.buttons.push(Button::new(bx, y0 + gap, bw, bh, BtnKind::CopyDiagram, ci));
         let zoom = zooms.then(|| {
-            // Pele's bar: 24 px buttons 2 px apart inside a 2 px padding and a 1 px border, at the bottom right
+            // The bar: 24 px buttons 2 px apart inside a 2 px padding and a 1 px border, at the bottom right
             // of a frame 32 px taller than the diagram.
             let frame = (x, top, w - 48.0 * s, dh + 32.0 * s);
             let bar = self.push(0.0, frame.1 + frame.3 - 30.0 * s, 0.0, 30.0 * s, Kind::Rect { fill: 0xff000000 | self.th.pre_bg, stroke: Some((s, 0xff000000 | self.th.border)), radius: 6.0 * s });
             let mut buttons = [0; 3];
             for (i, kind) in [BtnKind::ZoomIn, BtnKind::ZoomOut, BtnKind::ZoomReset].into_iter().enumerate() {
                 buttons[i] = self.page.buttons.len();
-                self.page.buttons.push(Button::new(0.0, frame.1 + frame.3 - 27.0 * s, 24.0 * s, 24.0 * s, kind, di));
+                // `place_bar` sets where it goes.
+                self.page.buttons.push(Button::new(0.0, 0.0, 0.0, 0.0, kind, di));
             }
-            ZoomBar { frame, item: bar, right: frame.0 + frame.2, buttons }
+            ZoomBar { frame, item: bar, right: frame.0 + frame.2, buttons, scale: s }
         });
         self.page.diagrams.push(Diagram { tree: Rc::new(tree), item, rect: (dx, top, dw, dh), bmp, fit, zoom });
         place_bar(&mut self.page, di, None);
         *y = top + dh + if zooms { 32.0 * s } else { 0.0 } + pad;
     }
 
-    fn emit_math(&mut self, mb: &math::MBox, x: f32, base: f32, color: Rgb, _display: bool) {
+    fn emit_math(&mut self, mb: &math::MBox, x: f32, base: f32, color: Rgb) {
         for it in &mb.items {
             match it {
                 MItem::Text { s, f, x: ix, y: iy } => {
@@ -716,7 +725,7 @@ impl<'a> Layouter<'a> {
 
     // ---------- tables ----------
 
-    fn table(&mut self, aligns: &[u8], head: &[Vec<Inl>], rows: &[Vec<Vec<Inl>>], x: f32, w: f32, y: &mut f32) {
+    fn table(&mut self, aligns: &[Align], head: &[Vec<Inl>], rows: &[Vec<Vec<Inl>>], x: f32, w: f32, y: &mut f32) {
         let s = self.s;
         let ncol = head.len().max(rows.iter().map(std::vec::Vec::len).max().unwrap_or(0));
         if ncol == 0 {
@@ -724,7 +733,7 @@ impl<'a> Layouter<'a> {
         }
         let [pady, padx] = self.th.table_padding.map(|v| v * s);
         let mut tcn = self.base_tc();
-        tcn.align = 0;
+        tcn.align = Align::Left;
         tcn.lh = self.th.table_line_height;
         let mut tch = tcn.clone();
         tch.bits = SEMIBOLD;
@@ -767,20 +776,18 @@ impl<'a> Layouter<'a> {
         let line = s.max(1.0);
         let mut cy = y0;
         let nrows = rows.len() + 1;
-        let mut row_idx_for_bg: Vec<usize> = vec![];
         // Front matter's table has no head row.
         for ri in usize::from(head.is_empty())..nrows {
             let (cells, tc, hdr) = if ri == 0 { (head, &tch, true) } else { (&rows[ri - 1][..], &tcn, false) };
             // bg placeholder
             let bgi = if self.th.table_stripes && !hdr && ri % 2 == 0 { Some(self.rect(x, cy, tw, 0.0, self.th.alt_bg, 0.0)) } else { None };
-            // lay out cells to find the row height
             let mut rh = 0f32;
             let mut cx = x;
             for (c, &cw) in colw.iter().enumerate() {
                 let cell: &[Inl] = cells.get(c).map(|v| &v[..]).unwrap_or(&[]);
                 let mut ty = cy + pady;
                 let mut t2 = tc.clone();
-                t2.align = aligns.get(c).copied().unwrap_or(0);
+                t2.align = aligns.get(c).copied().unwrap_or_default();
                 self.pend_space = false;
                 self.inlines(cell, cx + padx, cw - 2.0 * padx, &mut ty, &t2);
                 self.page.text.push(if c + 1 < ncol { '\t' } else { '\n' });
@@ -789,15 +796,12 @@ impl<'a> Layouter<'a> {
             }
             if let Some(i) = bgi {
                 self.page.items[i].h = rh;
-                row_idx_for_bg.push(i);
             }
             cy += rh;
-            // horizontal line below row (and above first)
-            self.rect(x, cy - line * 0.0, tw, line, bc, 0.0);
+            self.rect(x, cy, tw, line, bc, 0.0);
             cy += line;
         }
-        // top line and verticals
-        self.rect(x, y0 - 0.0, tw, line, bc, 0.0);
+        self.rect(x, y0, tw, line, bc, 0.0);
         let mut vx = x;
         for &cw in &colw {
             self.rect(vx, y0, line, cy - y0, bc, 0.0);
@@ -858,37 +862,36 @@ impl<'a> Layouter<'a> {
                 Inl::Soft => {
                     let f = FKey::new(tc.size, tc.bits).tracked(tc.track);
                     let w = self.fonts.measure(f, " ");
-                    out.push(Atom { k: AK::Space, w, f, color: tc.color, under: false, strike: false, link: 0, bg: 0, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
+                    out.push(Atom { k: AK::Space, w, f, color: tc.color, under: false, strike: false, link: 0, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
                 }
                 Inl::Hard => {
                     let f = FKey::new(tc.size, tc.bits);
-                    out.push(Atom { k: AK::Hard, w: 0.0, f, color: tc.color, under: false, strike: false, link: 0, bg: 0, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
+                    out.push(Atom { k: AK::Hard, w: 0.0, f, color: tc.color, under: false, strike: false, link: 0, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
                 }
                 Inl::FootRef(n, label) => {
-                    self.page.urls.push(format!("#fn-{label}"));
+                    self.page.urls.push(format!("#{NOTE}{label}"));
                     let link = self.page.urls.len() as u32;
                     let sty = Sty { sup: true, link, ..Sty::default() };
                     // GitHub brackets the number.
                     self.text_atoms(&format!("[{n}]"), &sty, tc, &mut out);
                 }
                 Inl::Math(tex, st) => {
-                    let size = tc.size * 1.0;
                     let (tex, display) = match tex.strip_prefix("$$").and_then(|t| t.strip_suffix("$$")) {
                         Some(t) => (t, true),
                         None => (tex.strip_prefix('$').and_then(|t| t.strip_suffix('$')).unwrap_or(tex), false),
                     };
-                    let mb = math::layout(self.fonts, tex, size, display);
+                    let mb = math::layout(self.fonts, tex, tc.size, display);
                     let f = FKey::new(tc.size, tc.bits);
                     let (w, up, down) = (mb.w, mb.asc, mb.desc);
                     out.push(Atom {
-                        k: AK::Math(Rc::new(math::MBox { w: mb.w, asc: mb.asc, desc: mb.desc, items: mb.items })),
+                        k: AK::Math(Rc::new(mb)),
                         w,
                         f,
                         color: if st.link > 0 { th.link } else { tc.color },
                         under: false,
                         strike: false,
                         link: st.link,
-                        bg: 0,
+                        bg: Bg::None,
                         ox: 0.0,
                         shift: 0.0,
                         cjk: false,
@@ -917,7 +920,7 @@ impl<'a> Layouter<'a> {
                                 },
                             };
                             let f = FKey::new(tc.size, tc.bits);
-                            out.push(Atom { k: AK::Img(bmp), w: dw, f, color: tc.color, under: false, strike: false, link: *link, bg: 0, ox: 0.0, shift: 0.0, cjk: false, up: dh, down: 0.0 });
+                            out.push(Atom { k: AK::Img(bmp), w: dw, f, color: tc.color, under: false, strike: false, link: *link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: dh, down: 0.0 });
                         }
                         Status::Pending | Status::Failed => {
                             let t = if alt.is_empty() { "[image]".to_string() } else { alt.clone() };
@@ -948,7 +951,7 @@ impl<'a> Layouter<'a> {
         }
         let f = out.get(at.wrapping_sub(1)).map_or(FKey::new(tc.size, tc.bits), |a| a.f);
         let w = 0.9 * f.px();
-        out.insert(at, Atom { k: AK::Ext, w, f, color, under: false, strike: false, link, bg: 0, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
+        out.insert(at, Atom { k: AK::Ext, w, f, color, under: false, strike: false, link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
     }
 
     fn text_atoms(&mut self, t: &str, st: &Sty, tc: &Tc, out: &mut Vec<Atom>) {
@@ -981,23 +984,23 @@ impl<'a> Layouter<'a> {
         let mut color = if st.link > 0 { th.link } else { tc.color };
         // Links are underlined, as GitHub does for readers who ask for it and mddog always does.
         let mut under = st.under || st.link > 0;
-        // Obsidian draws footnote numbers without a line, and the way back faint.
         let url = if st.link > 0 { self.page.urls.get(st.link as usize - 1).map_or("", String::as_str) } else { "" };
-        if th.obsidian && (url.starts_with("#fn-") || url.starts_with("#fnref-")) {
+        let (note, back) = (url.strip_prefix('#').is_some_and(|u| u.starts_with(NOTE)), url.strip_prefix('#').is_some_and(|u| u.starts_with(BACK)));
+        if th.plain_footnote_links && (note || back) {
             under = st.under;
-            if url.starts_with("#fnref-") {
+            if back {
                 color = th.list_marker;
             }
         }
         let strike = st.strike || self.struck;
         let bg = if st.code {
-            1
+            Bg::Code
         } else if st.kbd {
-            2
+            Bg::Kbd
         } else if st.mark {
-            3
+            Bg::Mark
         } else {
-            0
+            Bg::None
         };
         let first_idx = out.len();
         let mut word = String::new();
@@ -1024,8 +1027,8 @@ impl<'a> Layouter<'a> {
             }
         }
         push_word(self, &mut word, out, false);
-        if bg == 1 || bg == 2 {
-            let pad_l = if bg == 1 { self.th.code_padding * size } else { 0.35 * size };
+        if let Some(em) = bg.side_pad(self.th) {
+            let pad_l = em * size;
             let pad_r = pad_l;
             if let Some(a) = out[first_idx..].iter_mut().find(|a| matches!(a.k, AK::Word(_))) {
                 a.ox = pad_l;
@@ -1047,13 +1050,12 @@ impl<'a> Layouter<'a> {
         let mut line: Vec<Atom> = vec![];
         let mut lw = 0f32;
         let mut brk: Option<usize> = None; // break after this index
-        let mut wrapped = false;
         let mut any_line = false;
         let mut queue: std::collections::VecDeque<Atom> = atoms.into();
         while let Some(a) = queue.pop_front() {
             match a.k {
                 AK::Hard => {
-                    self.emit_line(&mut line, x, w, y, tc, true, &mut wrapped);
+                    self.emit_line(&mut line, x, w, y, tc, true);
                     any_line = true;
                     lw = 0.0;
                     brk = None;
@@ -1075,17 +1077,16 @@ impl<'a> Layouter<'a> {
             }
             if lw + a.w > w + 0.01 && !line.is_empty() {
                 if let Some(b) = brk {
-                    // carry the tail
                     let tail: Vec<Atom> = line.split_off(b);
-                    self.emit_line(&mut line, x, w, y, tc, false, &mut wrapped);
+                    self.emit_line(&mut line, x, w, y, tc, false);
                     any_line = true;
                     line = tail;
                     lw = line.iter().map(|a| a.w).sum();
                     brk = None;
                     queue.push_front(a);
                     continue;
-                } else if lw + a.w > w * 1.0 && matches!(a.k, AK::Img(_)) {
-                    self.emit_line(&mut line, x, w, y, tc, false, &mut wrapped);
+                } else if lw + a.w > w && matches!(a.k, AK::Img(_)) {
+                    self.emit_line(&mut line, x, w, y, tc, false);
                     any_line = true;
                     line = vec![];
                     lw = 0.0;
@@ -1093,14 +1094,12 @@ impl<'a> Layouter<'a> {
                     continue;
                 }
             }
-            // a single word longer than the line: split it by chars
             if a.w > w + 0.01
                 && line.is_empty()
                 && let AK::Word(ref s) = a.k
             {
                 let chars: Vec<char> = s.chars().collect();
                 if chars.len() > 1 {
-                    // largest prefix that fits, by binary search (few measures)
                     let (mut lo, mut hi) = (1usize, chars.len());
                     while lo < hi {
                         let mid = (lo + hi).div_ceil(2);
@@ -1127,7 +1126,7 @@ impl<'a> Layouter<'a> {
                     r.w = rw;
                     r.ox = 0.0;
                     line.push(h);
-                    self.emit_line(&mut line, x, w, y, tc, false, &mut wrapped);
+                    self.emit_line(&mut line, x, w, y, tc, false);
                     self.pend_space = false;
                     any_line = true;
                     queue.push_front(r);
@@ -1140,13 +1139,12 @@ impl<'a> Layouter<'a> {
             line.push(a);
         }
         if !line.is_empty() || !any_line {
-            self.emit_line(&mut line, x, w, y, tc, false, &mut wrapped);
+            self.emit_line(&mut line, x, w, y, tc, false);
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn emit_line(&mut self, line: &mut Vec<Atom>, x: f32, w: f32, y: &mut f32, tc: &Tc, hard: bool, wrapped: &mut bool) {
-        // strip trailing spaces
+    fn emit_line(&mut self, line: &mut Vec<Atom>, x: f32, w: f32, y: &mut f32, tc: &Tc, hard: bool) {
         while matches!(line.last().map(|a| &a.k), Some(AK::Space)) {
             line.pop();
         }
@@ -1163,31 +1161,28 @@ impl<'a> Layouter<'a> {
             }
         }
         let width: f32 = line.iter().map(|a| a.w).sum();
-        let mut cx = match (tc.align, self.align_of(tc)) {
-            (_, 1) => x + ((w - width) / 2.0).max(0.0),
-            (_, 2) => x + (w - width).max(0.0),
-            _ => x,
+        let mut cx = match tc.align {
+            Align::Center => x + ((w - width) / 2.0).max(0.0),
+            Align::Right => x + (w - width).max(0.0),
+            Align::Left => x,
         };
         let base = *y + up;
-        let mut bg_run: Option<(u8, f32, f32, FKey, usize)> = None;
+        let mut bg_run: Option<(Bg, f32, f32, FKey, usize)> = None;
         let mut link_run: Option<(u32, f32, f32)> = None;
-        let n = line.len();
         for (i, a) in line.iter().enumerate() {
             let x0 = cx;
-            // background run management
             match (&mut bg_run, a.bg) {
-                (Some((k, _, e, _, _)), b) if *k == b && b != 0 => *e = x0 + a.w,
+                (Some((k, _, e, _, _)), b) if *k == b && b != Bg::None => *e = x0 + a.w,
                 _ => {
                     if let Some((k, s0, e0, f, idx)) = bg_run.take() {
                         self.fill_bg(idx, k, s0, e0, base, f);
                     }
-                    if a.bg != 0 {
+                    if a.bg != Bg::None {
                         let idx = self.push(x0, base, 0.0, 0.0, Kind::Rect { fill: 0, stroke: None, radius: 0.0 });
                         bg_run = Some((a.bg, x0, x0 + a.w, a.f, idx));
                     }
                 }
             }
-            // link run
             match (&mut link_run, a.link) {
                 (Some((l, _, e)), k) if *l == k && k != 0 => *e = x0 + a.w,
                 _ => {
@@ -1202,24 +1197,24 @@ impl<'a> Layouter<'a> {
             match &a.k {
                 AK::Word(t) => {
                     if a.link > 0
-                        && let Some(l) = self.page.urls.get(a.link as usize - 1).and_then(|u| u.strip_prefix("#fn-"))
+                        && let Some(l) = self.page.urls.get(a.link as usize - 1).and_then(|u| u.strip_prefix('#')?.strip_prefix(NOTE))
                     {
-                        let key = format!("fnref-{l}");
+                        let key = format!("{BACK}{l}");
                         self.page.anchors.entry(key).or_insert(*y);
                     }
                     let (fa, fd) = self.fonts.ascent_descent(a.f);
                     let tx = self.note_text(t);
-                    let tw = a.w - a.ox - if a.bg == 1 || a.bg == 2 { if is_last_word(line, i) { a.f.px() * if a.bg == 1 { self.th.code_padding } else { 0.35 } } else { 0.0 } } else { 0.0 };
+                    let tw = a.w - a.ox - a.bg.side_pad(self.th).filter(|_| is_last_word(line, i)).map_or(0.0, |em| a.f.px() * em);
                     self.push(x0 + a.ox, base + a.shift - fa, tw, fa + fd, Kind::Text { s: t.clone(), f: a.f, color: a.color, under: a.under, strike: a.strike, asc: fa, tx });
                 }
                 AK::Space => {
                     self.pend_space = true;
                     // An underline or strike carries across a space between two words that have it.
                     if let Some(next) = line.get(i + 1).filter(|b| i > 0 && matches!(b.k, AK::Word(_))) {
-                        let (px, th) = (a.f.px(), (a.f.px() / 16.0).max(1.0));
-                        for (on, dy) in [(a.under && next.under, 0.12), (a.strike && next.strike, -0.3)] {
+                        let (under, strike, th) = a.f.lines();
+                        for (on, dy) in [(a.under && next.under, under), (a.strike && next.strike, strike)] {
                             if on {
-                                self.push(x0, base + a.shift + dy * px, a.w, th, Kind::Rect { fill: 0xff000000 | a.color, stroke: None, radius: 0.0 });
+                                self.push(x0, base + a.shift + dy, a.w, th, Kind::Rect { fill: 0xff000000 | a.color, stroke: None, radius: 0.0 });
                             }
                         }
                     }
@@ -1230,7 +1225,7 @@ impl<'a> Layouter<'a> {
                 }
                 AK::Math(m) => {
                     let mb = m.clone();
-                    self.emit_math(&mb, x0, base + a.shift, a.color, false);
+                    self.emit_math(&mb, x0, base + a.shift, a.color);
                 }
                 AK::Ext => {
                     // Lucide's external-link icon, 0.825 em at the right end of the 0.9 em, 0.25 em below the
@@ -1252,7 +1247,6 @@ impl<'a> Layouter<'a> {
                 AK::Hard => {}
             }
             cx += a.w;
-            let _ = n;
         }
         if let Some((k, s0, e0, f, idx)) = bg_run.take() {
             self.fill_bg(idx, k, s0, e0, base, f);
@@ -1268,22 +1262,17 @@ impl<'a> Layouter<'a> {
         } else {
             self.pend_space = true;
         }
-        *wrapped = !hard;
     }
 
-    fn align_of(&self, tc: &Tc) -> u8 {
-        if tc.align != 0 { tc.align } else { 0 }
-    }
-
-    fn fill_bg(&mut self, idx: usize, kind: u8, x0: f32, x1: f32, base: f32, f: FKey) {
+    fn fill_bg(&mut self, idx: usize, kind: Bg, x0: f32, x1: f32, base: f32, f: FKey) {
         let s = self.s;
         let (a, d) = self.fonts.ascent_descent(f);
         let (fill, stroke, r) = match kind {
-            1 => (0xff000000 | self.th.code_bg, None, self.th.radius * s),
-            2 => (0xff000000 | self.th.pre_bg, Some((s.max(1.0), 0xff000000 | self.th.rule)), self.th.radius * s),
-            _ => (0xff000000 | self.th.mark_bg, None, 2.0 * s),
+            Bg::Code => (0xff000000 | self.th.code_bg, None, self.th.radius * s),
+            Bg::Kbd => (0xff000000 | self.th.pre_bg, Some((s.max(1.0), 0xff000000 | self.th.rule)), self.th.radius * s),
+            Bg::Mark | Bg::None => (0xff000000 | self.th.mark_bg, None, 2.0 * s),
         };
-        let pad = if kind == 3 { 0.0 } else { 0.1 * f.px() };
+        let pad = if kind == Bg::Mark { 0.0 } else { 0.1 * f.px() };
         self.page.items[idx] = Item { x: x0, y: base - a - pad, w: x1 - x0, h: a + d + 2.0 * pad, clip: self.clip, k: Kind::Rect { fill, stroke, radius: r } };
     }
 
@@ -1298,13 +1287,7 @@ fn external(url: &str) -> bool {
     ["http", "https", "mailto"].iter().any(|k| scheme.eq_ignore_ascii_case(k))
 }
 
-/// A 16-unit octicon path filled with `color`, `px` device pixels square.
-fn octicon(path: &str, color: Rgb, px: f32) -> Option<Bitmap> {
-    let svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"><path fill="#{color:06x}" d="{path}"/></svg>"##);
-    let n = px.round() as u32;
-    render_svg(&crate::native::images::svg_tree(svg.as_bytes())?, n, n)
-}
-
+/// Whether no later word on the line shares `line[i]`'s background.
 fn is_last_word(line: &[Atom], i: usize) -> bool {
     !line[i + 1..].iter().any(|a| matches!(a.k, AK::Word(_)) && a.bg == line[i].bg)
 }

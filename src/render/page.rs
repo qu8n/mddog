@@ -1,6 +1,6 @@
 //! The laid-out page: a display list in device pixels plus the data the viewer needs.
-use crate::native::text::FKey;
-use crate::native::theme::Rgb;
+use crate::render::text::FKey;
+use crate::render::theme::Rgb;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -10,6 +10,9 @@ pub struct Bitmap {
     pub h: u32,
     pub px: Vec<u8>,
 }
+
+/// A text item's `tx` when it is not part of the page's text, such as a list marker: search and selection skip it.
+pub const NO_TEXT: usize = usize::MAX;
 
 pub enum Kind {
     /// `fill` is 0xAARRGGBB.
@@ -67,10 +70,28 @@ pub struct HScroll {
     pub y: f32,
     pub w: f32,
     pub h: f32,
-    /// Largest offset.
     pub max: f32,
-    /// Bar track rect (relative to page).
+    /// The scroll bar's top, in device px from the page's top.
     pub bar_y: f32,
+}
+
+impl HScroll {
+    /// The scroll bar's height, in CSS px.
+    pub const BAR: f32 = 6.0;
+
+    /// The track's left edge and width, and the thumb's width, at `s` device px per CSS px. The track sits
+    /// 4 px in from each side, and the thumb is at least 16 px wide.
+    pub fn track(&self, s: f32) -> (f32, f32, f32) {
+        let tw = self.w - 8.0 * s;
+        (self.x + 4.0 * s, tw, (tw * self.w / (self.w + self.max)).max(16.0 * s))
+    }
+
+    /// The thumb's left edge and width at offset `off`.
+    pub fn thumb(&self, off: f32, s: f32) -> (f32, f32) {
+        let (tx, tw, thumb) = self.track(s);
+        let r = if self.max > 0.0 { (off / self.max).clamp(0.0, 1.0) } else { 0.0 };
+        (tx + r * (tw - thumb), thumb)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -119,6 +140,13 @@ pub struct Diagram {
     pub zoom: Option<ZoomBar>,
 }
 
+impl Diagram {
+    /// The most a zoom goes to, in device px per SVG unit: three CSS px, or the fit size when larger.
+    pub fn max_zoom(&self, scale: f32) -> f32 {
+        self.fit.max(3.0 * scale)
+    }
+}
+
 /// A shrunk diagram's frame, which a zoomed view fills, and its zoom bar (device px).
 pub struct ZoomBar {
     pub frame: (f32, f32, f32, f32),
@@ -127,6 +155,8 @@ pub struct ZoomBar {
     pub right: f32,
     /// The zoom in, zoom out and reset buttons.
     pub buttons: [usize; 3],
+    /// Device px per CSS px, as laid out.
+    pub scale: f32,
 }
 
 /// A top-level block: its 1-based source lines, where it sits (device px), and its span of `Page::text`.

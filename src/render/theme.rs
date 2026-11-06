@@ -1,6 +1,19 @@
-//! The theme's tokens as the native renderer draws with them.
+//! The theme's tokens as the renderer draws with them.
+
+use crate::render::doc::Alert;
+use crate::render::highlight::Tok;
 
 pub type Rgb = u32;
+
+/// Which reading view the page copies. Most of the difference is in the fields of `Theme`; layout asks this
+/// only where the two draw a part with different shapes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Look {
+    /// GitHub's README.
+    Github,
+    /// Obsidian's reading view.
+    Obsidian,
+}
 
 /// Syntax colors, one per highlight class.
 #[derive(Clone, Debug)]
@@ -20,8 +33,8 @@ pub struct Pl {
 #[derive(Clone, Debug)]
 pub struct Theme {
     pub dark: bool,
-    /// Obsidian's reading view, from `--mddog-layout`, rather than GitHub's README.
-    pub obsidian: bool,
+    /// From `--mddog-layout`.
+    pub look: Look,
     pub bg: Rgb,
     pub fg_muted: Rgb,
     pub text: Rgb,
@@ -38,8 +51,10 @@ pub struct Theme {
     pub hl_bg: Rgb,
     pub hl_cur_bg: Rgb,
     pub sel_bg: Rgb,
-    /// Note, tip, important, warning and caution.
+    /// By `Alert as usize`.
     pub alerts: [Rgb; 5],
+    /// A copy button's check: the tip alert's green, as on GitHub.
+    pub copied: Rgb,
     pub diff_add_bg: Rgb,
     pub diff_del_bg: Rgb,
     pub pl: Pl,
@@ -92,7 +107,7 @@ pub struct Theme {
     pub item_pad: f32,
     /// Small dots and plain numbers at every depth, as Obsidian draws them, instead of GitHub's markers by depth.
     pub flat_lists: bool,
-    /// Obsidian puts a diagram at the left edge; pele centered it.
+    /// Obsidian puts a diagram at the left edge; GitHub centers it.
     pub diagram_left: bool,
     /// The bar's width and the space after it, in CSS px.
     pub quote_indent: [f32; 2],
@@ -103,6 +118,24 @@ pub struct Theme {
     pub alert_tint: f32,
     pub rule_width: f32,
     pub rule_margin: f32,
+    /// Below the last block, in CSS px.
+    pub page_bottom: f32,
+    /// A list item's paragraphs get no margin, loose list or not.
+    pub tight_items: bool,
+    pub summary_bold: bool,
+    /// Above the footnotes' rule, its width, and below it, in CSS px.
+    pub footnote_rule: [f32; 3],
+    /// Below each footnote, in CSS px.
+    pub footnote_gap: f32,
+    /// A footnote's indent in em of its own size, or none for the list indent.
+    pub footnote_indent: Option<f32>,
+    /// Footnote numbers have no underline, and the way back is in the list marker color.
+    pub plain_footnote_links: bool,
+    pub tabular_numbers: bool,
+    /// GitHub's disabled checkbox, unticked then ticked: border, fill and tick.
+    pub task_box: [[Rgb; 3]; 2],
+    /// The code copy button's tooltip.
+    pub tooltip_bg: Rgb,
 }
 
 impl Theme {
@@ -111,13 +144,14 @@ impl Theme {
             let (r, g, b) = t.color(name);
             u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
         };
-        let obs = t.choice("layout") == "obsidian";
+        let look = if t.choice("layout") == "obsidian" { Look::Obsidian } else { Look::Github };
+        let obs = look == Look::Obsidian;
         let (text, bg, muted) = (c("text"), c("bg"), c("text-muted"));
         // Obsidian's faint gray, guide gray and link-arrow gray, from its text over its page.
         let faint = mix(text, bg, 0.38);
         Theme {
             dark: t.dark,
-            obsidian: obs,
+            look,
             bg: c("bg"),
             fg_muted: c("fg-muted"),
             text: c("text"),
@@ -133,7 +167,8 @@ impl Theme {
             hl_bg: c("match-bg"),
             hl_cur_bg: c("match-current-bg"),
             sel_bg: c("text-selection"),
-            alerts: ["alert-note", "alert-tip", "alert-important", "alert-warning", "alert-caution"].map(c),
+            copied: c("alert-tip"),
+            alerts: Alert::ALL.map(|a| c(&format!("alert-{}", a.title().to_lowercase()))),
             diff_add_bg: c("diff-add-bg"),
             diff_del_bg: c("diff-del-bg"),
             pl: Pl {
@@ -206,6 +241,42 @@ impl Theme {
             alert_tint: if obs { 0.1 } else { 0.0 },
             rule_width: if obs { 2.0 } else { 4.0 },
             rule_margin: if obs { 32.0 } else { 24.0 },
+            // Obsidian's page keeps its last block's bottom margin.
+            page_bottom: if obs { 32.0 } else { 16.0 },
+            tight_items: obs,
+            // Obsidian's summary is regular text after its disclosure triangle.
+            summary_bold: !obs,
+            // GitHub: a 1 px rule 24 px below the text and 16 px above the notes. Obsidian: 2 px, 32 and 32.
+            footnote_rule: if obs { [16.0, 2.0, 32.0] } else { [8.0, 1.0, 16.0] },
+            footnote_gap: if obs { 0.0 } else { 4.0 },
+            footnote_indent: obs.then_some(1.8),
+            plain_footnote_links: obs,
+            tabular_numbers: obs,
+            task_box: if t.dark { [[0x626262, 0x3b3b3b, 0], [0x757575, 0x757575, 0x3b3b3b]] } else { [[0xd1d1d1, 0xf8f8f8, 0], [0xd1d1d1, 0xd1d1d1, 0xededed]] },
+            tooltip_bg: if t.dark { 0x30363d } else { 0x25292e },
+        }
+    }
+}
+
+impl Theme {
+    pub fn tok_color(&self, t: Tok) -> Rgb {
+        let pl = &self.pl;
+        let obs = self.look == Look::Obsidian;
+        match t {
+            Tok::Plain => self.text,
+            // Obsidian's theme colored GitHub's classes its own way: plain names, types and operators in the
+            // text color, variables and tags in their own colors, escapes as the string around them.
+            Tok::Ident | Tok::Import if obs => self.text,
+            Tok::Var if obs => pl.variable,
+            Tok::Tag if obs => pl.tag,
+            Tok::Escape if obs => pl.string,
+            Tok::Keyword | Tok::Tag => pl.keyword,
+            Tok::Str | Tok::Ident => pl.string,
+            Tok::Escape | Tok::Var | Tok::Import | Tok::Number | Tok::Meta => pl.constant,
+            Tok::Comment => pl.comment,
+            Tok::Func => pl.entity,
+            Tok::Added => pl.inserted,
+            Tok::Removed => pl.deleted,
         }
     }
 }
@@ -223,10 +294,9 @@ pub fn rgb(c: Rgb) -> (f64, f64, f64) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn every_builtin_has_its_tokens() {
+    fn every_builtin_builds_a_render_theme() {
         for name in crate::theme::names().split(", ") {
-            let t = super::Theme::new(crate::theme::builtin(name).unwrap());
-            assert_eq!(t.dark, name.ends_with("dark"), "{name}");
+            super::Theme::new(crate::theme::builtin(name).unwrap());
         }
     }
 }

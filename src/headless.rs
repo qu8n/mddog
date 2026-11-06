@@ -1,17 +1,18 @@
 use std::collections::VecDeque;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread::ScopedJoinHandle;
 use std::time::Duration;
 
-use crate::engine::{self, Engine};
-use crate::page;
+use crate::render::engine::{Engine, Snapshot};
 use crate::term;
 use crate::term::kitty;
 use crate::watch;
 
 const TILE_ROWS: u32 = 100;
+/// The desktop pane's cell in CSS px. register.tsx draws a column as `MDD_COLUMN_PX`, so the two change together.
+const PANE_CELL: (f64, f64) = (8.0, 16.0);
 /// How long remote images may take. A slower one shows as failed in the tiles.
 const REMOTE_LIMIT: Duration = Duration::from_secs(4);
 const ENCODERS: usize = 4;
@@ -27,7 +28,7 @@ const WEBP_SMALL_MAX: usize = 20_000;
 const WEBP_LOSSY_FROM: usize = 12_000;
 
 pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
-    let dir = crate::sweep::temp_path("mddog-tiles-", "");
+    let dir = crate::tmp::tiles_dir();
     if let Err(e) = std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(&dir) {
         eprintln!("mdd: can't make {}: {}", dir.display(), term::io_error(&e));
         return 1;
@@ -42,15 +43,19 @@ pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
         });
     }
     let (tx, rx) = mpsc::channel();
-    let Some(_watcher) = watch::spawn(&file, tx) else {
+    let Some(_watcher) = watch::spawn(&file, move || {
+        let _ = tx.send(());
+    }) else {
         let _ = std::fs::remove_dir_all(&dir);
         eprintln!("mdd: can't watch {} for changes", term::printable(&file.display().to_string()));
         return 1;
     };
-    let engine = Engine::new(800.0, engine::display_scale());
+    let engine = Engine::new(800.0, crate::term::screen::display_scale(), crate::config::font_smoothing());
     let scale = engine.scale.get();
-    let (cell_w, cell_h) = cell_size(scale).unwrap_or(((8.0 * scale) as u32, (16.0 * scale) as u32));
-    let mut r = Renderer { engine, file, dir, scale, cell_w, cell_h, cols: u32::from(cols.max(1)), round: 0, stamp: None, gone: false, webp };
+    // The desktop pane, which asks for WebP, lays the page out at its own cell, whatever terminal Claude Code was
+    // started from.
+    let (cell_w, cell_h) = if webp { ((PANE_CELL.0 * scale) as u32, (PANE_CELL.1 * scale) as u32) } else { cell_size(scale).unwrap_or_else(|| term::fallback_cell(scale)) };
+    let mut r = Renderer { engine, file, dir, scale, cell_w, cell_h, cols: u32::from(cols), round: 0, stamp: None, gone: false, webp };
     let mut swept = false;
     let code = loop {
         if let Err(e) = r.render() {
@@ -117,14 +122,14 @@ impl Renderer {
         }
         let width_px = self.cols * self.cell_w;
         self.engine.resize(f64::from(width_px) / self.scale);
-        self.engine.load(&String::from_utf8_lossy(&bytes), &page::base_dir(&self.file, false), false, crate::config::theme());
+        self.engine.load(&String::from_utf8_lossy(&bytes), &crate::render::images::base_dir(&self.file, false), false, crate::config::theme());
         if self.engine.pending_images() > 0 {
             self.engine.wait_images(REMOTE_LIMIT);
         }
         let bottom = self.engine.layout().height;
         let rows = ((bottom * self.scale).ceil() as u32).div_ceil(self.cell_h).max(1);
         let round = self.round + 1;
-        let tile_rows = TILE_ROWS.min(kitty::TILE_BYTES as u32 / (width_px.max(1) * 4) / self.cell_h).max(1);
+        let tile_rows = TILE_ROWS.min(kitty::tile_rows(width_px, self.cell_h)).max(1);
         let tiles = if self.webp {
             self.webp_tiles(round, rows)?
         } else {
@@ -135,15 +140,13 @@ impl Renderer {
                 let mut top = 0;
                 while top < rows {
                     let n = tile_rows.min(rows - top);
-                    let mut bmp = self.engine.snapshot(f64::from(top * self.cell_h) / self.scale, f64::from(n * self.cell_h) / self.scale, self.scale).ok_or("can't draw the page")?;
-                    // Claude Code kills this process on every width change, and a named object outlives it.
-                    bmp.rgba.unlink();
+                    let bmp = self.snapshot(f64::from(top * self.cell_h) / self.scale, f64::from(n * self.cell_h) / self.scale, self.scale)?;
                     let path = self.dir.join(format!("{round}-{}.png", tiles.len()));
-                    tiles.push(serde_json::json!({ "file": path, "rows": n }));
+                    tiles.push(OutTile { picture: Picture { file: path.clone(), size: None }, rows: n, small: None });
                     if encoding.len() == ENCODERS {
                         encoded(encoding.pop_front())?;
                     }
-                    encoding.push_back(s.spawn(move || bmp.write_png(&path).map_err(|e| format!("can't write {}: {e}", path.display()))));
+                    encoding.push_back(s.spawn(move || write_png(&bmp, &path)));
                     top += n;
                 }
                 encoding.into_iter().try_for_each(|h| encoded(Some(h)))?;
@@ -151,8 +154,8 @@ impl Renderer {
             })?
         };
         self.round = round;
-        let keep = kitty::storage_limit(std::env::var("TERM_PROGRAM").as_deref() == Ok("herdr")) / kitty::TILE_BYTES;
-        let line = serde_json::json!({ "columns": self.cols, "keep": keep, "tiles": tiles });
+        let keep = kitty::storage_limit(term::herdr_by_env()) / kitty::TILE_BYTES;
+        let line = serde_json::to_string(&Out { keep, tiles }).map_err(|e| e.to_string())?;
         let mut out = std::io::stdout().lock();
         if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
             self.gone = true;
@@ -160,6 +163,10 @@ impl Renderer {
         self.drop_rounds(|g| g + 1 < self.round);
         self.stamp = Some(bytes);
         Ok(())
+    }
+
+    fn snapshot(&self, y: f64, h: f64, scale: f64) -> Result<Tile, String> {
+        self.engine.snapshot(y, h, scale, |n| Some(vec![0; n])).ok_or_else(|| "can't draw the page".to_string())
     }
 
     /// Cuts the page into WebP tiles of `WEBP_ROWS` rows, halving a tile whose file would not fit one
@@ -170,7 +177,7 @@ impl Renderer {
     /// threads while the next are taken, each taken as if the tiles above it fit. A tile that doesn't drops the
     /// tiles after it and is taken again at half the rows, and the tiles after it go one at a time until one fits
     /// whole: a big picture would drop every guess.
-    fn webp_tiles(&self, round: u64, rows: u32) -> Result<Vec<serde_json::Value>, String> {
+    fn webp_tiles(&self, round: u64, rows: u32) -> Result<Vec<OutTile>, String> {
         let workers = std::thread::available_parallelism().map_or(ENCODERS, usize::from);
         let mut ahead = workers;
         std::thread::scope(|s| {
@@ -181,10 +188,8 @@ impl Renderer {
                 if top < rows && encoding.len() < ahead {
                     let at = n.min(rows - top);
                     let (y, h) = (f64::from(top * self.cell_h) / self.scale, f64::from(at * self.cell_h) / self.scale);
-                    let mut bmp = self.engine.snapshot(y, h, self.scale).ok_or("can't draw the page")?;
-                    bmp.rgba.unlink();
-                    let mut low = self.engine.snapshot(y, h, (self.scale / 2.0).max(1.0)).ok_or("can't draw the page")?;
-                    low.rgba.unlink();
+                    let bmp = self.snapshot(y, h, self.scale)?;
+                    let low = self.snapshot(y, h, (self.scale / 2.0).max(1.0))?;
                     encoding.push_back((top, at, s.spawn(move || webp_tile(&bmp, &low, at == 1))));
                     (top, n) = (top + at, WEBP_ROWS);
                     continue;
@@ -206,14 +211,48 @@ impl Renderer {
                 for (p, b) in [(&path, &t.sharp), (&small, &t.small)] {
                     std::fs::write(p, b).map_err(|e| format!("can't write {}: {}", p.display(), term::io_error(&e)))?;
                 }
-                tiles.push(serde_json::json!({
-                    "file": path, "rows": got, "width": t.width, "height": t.height, "bytes": t.sharp.len(),
-                    "small": { "file": small, "width": t.small_width, "height": t.small_height, "bytes": t.small.len() },
-                }));
+                tiles.push(OutTile {
+                    picture: Picture { file: path, size: Some(Size { width: t.width, height: t.height, bytes: t.sharp.len() }) },
+                    rows: got,
+                    small: Some(Picture { file: small, size: Some(Size { width: t.small_width, height: t.small_height, bytes: t.small.len() }) }),
+                });
             }
             Ok(tiles)
         })
     }
+}
+
+/// One line of standard output per render. The plugin's `register.tsx` reads it, so the two change together.
+#[derive(serde::Serialize)]
+struct Out {
+    /// How many tiles the terminal keeps at once.
+    keep: usize,
+    tiles: Vec<OutTile>,
+}
+
+#[derive(serde::Serialize)]
+struct OutTile {
+    #[serde(flatten)]
+    picture: Picture,
+    rows: u32,
+    /// A copy at 1x, for the desktop app to draw where sharp tiles don't fit. WebP only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    small: Option<Picture>,
+}
+
+#[derive(serde::Serialize)]
+struct Picture {
+    file: PathBuf,
+    /// WebP only.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    size: Option<Size>,
+}
+
+#[derive(serde::Serialize)]
+struct Size {
+    width: usize,
+    height: usize,
+    bytes: usize,
 }
 
 struct WebpTile {
@@ -227,12 +266,12 @@ struct WebpTile {
 
 /// Encodes a tile and its small copy, or returns `None` when the tile is too big for one `Svg` and `last` (one
 /// row, so it can't be halved) is false.
-fn webp_tile(bmp: &engine::Bitmap, low: &engine::Bitmap, last: bool) -> Result<Option<WebpTile>, String> {
-    let mut sharp = bmp.webp(None)?;
+fn webp_tile(bmp: &Tile, low: &Tile, last: bool) -> Result<Option<WebpTile>, String> {
+    let mut sharp = webp(bmp, None)?;
     // A picture takes a third of its lossless bytes as lossy, text four fifths or more: only a picture
     // goes lossy, so a pane full of one stays 2x within the desktop's 262,144 characters.
     if sharp.len() > WEBP_LOSSY_FROM {
-        let lossy = bmp.webp(Some(75.0))?;
+        let lossy = webp(bmp, Some(75.0))?;
         if lossy.len() * 10 <= sharp.len() * 6 {
             sharp = lossy;
         }
@@ -241,28 +280,49 @@ fn webp_tile(bmp: &engine::Bitmap, low: &engine::Bitmap, last: bool) -> Result<O
         return Ok(None);
     }
     // Lossless suits text and lossy suits pictures, at a third to a tenth of the other's bytes.
-    let lossless = low.webp(None)?;
-    let mut small = low.webp(Some(75.0))?;
+    let lossless = webp(low, None)?;
+    let mut small = webp(low, Some(75.0))?;
     if small.len() > lossless.len() {
         small = lossless;
     }
     // The plugin must fit the view in small copies, about seven tiles to a drawing.
     if small.len() > WEBP_SMALL_MAX {
-        small = low.webp(Some(40.0))?;
+        small = webp(low, Some(40.0))?;
     }
     Ok(Some(WebpTile { sharp, width: bmp.width, height: bmp.height, small, small_width: low.width, small_height: low.height }))
+}
+
+/// A tile in memory, for the encoders.
+type Tile = Snapshot<Vec<u8>>;
+
+fn write_png(t: &Tile, path: &Path) -> Result<(), String> {
+    let png = kitty::png(t.width, t.height, &t.rgba).ok_or("can't encode PNG")?;
+    std::fs::write(path, png).map_err(|e| format!("can't write {}: {e}", path.display()))
+}
+
+/// WebP at libwebp's method 2: lossy at `quality` when given, else lossless. Lossless takes about a sixth of
+/// `write_png`'s bytes for a page of text, so a tile fits in the 128 KiB `Svg` source the Claude Code desktop
+/// app draws; lossy is for pictures, and for the small copies it draws where sharp tiles don't fit.
+fn webp(t: &Tile, quality: Option<f32>) -> Result<Vec<u8>, String> {
+    let mut cfg = webp::WebPConfig::new().map_err(|()| "can't set up the WebP encoder".to_string())?;
+    cfg.lossless = i32::from(quality.is_none());
+    // Lossless reads it as effort.
+    cfg.quality = quality.unwrap_or(75.0);
+    cfg.method = 2;
+    let mem = webp::Encoder::from_rgba(&t.rgba[..], t.width as u32, t.height as u32).encode_advanced(&cfg).map_err(|e| format!("can't encode WebP: {e:?}"))?;
+    Ok(mem.to_vec())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn bitmap(width: usize, height: usize, px: impl Fn(usize, usize) -> [u8; 4]) -> engine::Bitmap {
-        let mut rgba = kitty::Shm::create(kitty::shm_name(), width * height * 4).unwrap();
+    fn bitmap(width: usize, height: usize, px: impl Fn(usize, usize) -> [u8; 4]) -> Tile {
+        let mut rgba = vec![0; width * height * 4];
         for (i, p) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             p.copy_from_slice(&px(i % width, i / width));
         }
-        engine::Bitmap { width, height, rgba }
+        Snapshot { width, height, rgba }
     }
 
     /// A fixed xorshift, so the noise and its encoded size are the same on every run.
@@ -278,7 +338,7 @@ mod tests {
     fn flat_tiles_stay_lossless_and_keep_the_small_size() {
         let (bmp, low) = (bitmap(800, 200, |_, _| [250, 250, 250, 255]), bitmap(400, 100, |_, _| [250, 250, 250, 255]));
         let tile = webp_tile(&bmp, &low, false).unwrap().unwrap();
-        assert_eq!(tile.sharp, bmp.webp(None).unwrap());
+        assert_eq!(tile.sharp, webp(&bmp, None).unwrap());
         assert!(tile.sharp.len() < WEBP_LOSSY_FROM);
         assert_eq!((tile.width, tile.height, tile.small_width, tile.small_height), (800, 200, 400, 100));
     }
@@ -287,7 +347,7 @@ mod tests {
     fn pictures_go_lossy() {
         let px = |x: usize, y: usize| [(x / 4) as u8, (y + x / 8) as u8, 128u8.wrapping_add(noise(x * 7 + y * 13) % 24), 255];
         let (bmp, low) = (bitmap(600, 200, px), bitmap(300, 100, px));
-        let lossless = bmp.webp(None).unwrap();
+        let lossless = webp(&bmp, None).unwrap();
         assert!(lossless.len() > WEBP_LOSSY_FROM, "the fixture must be big enough to try lossy");
         let tile = webp_tile(&bmp, &low, false).unwrap().unwrap();
         assert!(tile.sharp.len() * 10 <= lossless.len() * 6, "{} lossy against {} lossless", tile.sharp.len(), lossless.len());

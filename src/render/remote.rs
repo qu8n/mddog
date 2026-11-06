@@ -1,4 +1,4 @@
-//! Fetches remote images for the page. `native::images` calls `fetch` on `spawn`'s small pool of worker threads. Each connection goes only to addresses checked here, so
+//! Fetches remote images for the page. `render::images` calls `fetch` on `spawn`'s small pool of worker threads. Each connection goes only to addresses checked here, so
 //! a redirect to a name that resolves to a private address, or a DNS answer that changes between check and connect,
 //! can't reach one.
 
@@ -246,7 +246,7 @@ fn store(entry: Arc<Entry>) {
 /// The disk cache, so a reopen in a new process skips the network too: one file per whole response, named by a
 /// hash of its URL, holding a JSON line of the URL, type, and expiry, then the body. The sweep removes files past
 /// the longest lifetime and keeps the folder under `DISK_BYTES`.
-pub fn disk_dir() -> PathBuf {
+fn disk_dir() -> PathBuf {
     cache_dir().join("remote")
 }
 
@@ -259,9 +259,39 @@ fn cache_dir() -> PathBuf {
     home.join("Library/Caches/mddog")
 }
 
-/// The longest any response is kept; also the age at which the sweep removes a file.
-pub const KEEP_MAX: Duration = Duration::from_secs(3600);
-pub const DISK_BYTES: u64 = 64 << 20;
+/// The longest any response is kept; also the age at which `prune` removes a file.
+const KEEP_MAX: Duration = Duration::from_secs(3600);
+const DISK_BYTES: u64 = 64 << 20;
+
+/// Called by the sweep.
+pub fn prune_disk(now: SystemTime) {
+    prune(&disk_dir(), now);
+}
+
+/// Removes remote cache files past the longest lifetime, so expired and half-written ones, then the oldest until
+/// the folder fits in `DISK_BYTES`.
+fn prune(dir: &Path, now: SystemTime) {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let meta = std::fs::symlink_metadata(e.path()).ok().filter(|m| m.is_file() && crate::tmp::mine(m))?;
+            Some((meta.modified().ok()?, meta.len(), e.path()))
+        })
+        .collect();
+    files.sort();
+    let mut total: u64 = files.iter().map(|f| f.1).sum();
+    for (modified, len, path) in files {
+        let old = now.duration_since(modified).is_ok_and(|age| age > KEEP_MAX);
+        if !old && total <= DISK_BYTES {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total -= len;
+        }
+    }
+}
 
 fn disk_path(dir: &Path, url: &str) -> PathBuf {
     use std::hash::{DefaultHasher, Hash, Hasher};
@@ -306,7 +336,7 @@ fn write_disk(dir: &Path, e: &Entry, keep: Duration) {
     }
 }
 
-/// Images, and the generic binary types some servers send images as. The native engine draws nothing else.
+/// Images, and the generic binary types some servers send images as. The page draws nothing else.
 fn image_type(mime: &str) -> bool {
     let m = mime.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
     m.starts_with("image/") || m == "application/octet-stream" || m == "binary/octet-stream"
@@ -314,7 +344,11 @@ fn image_type(mime: &str) -> bool {
 
 /// Fetches `url` (http or https) and returns its body. Returns `None`, early and silently, once `stop` is set.
 pub fn fetch(agent: &ureq::Agent, url: &str, stop: &AtomicBool) -> Option<Result<Arc<Vec<u8>>, Fail>> {
-    let disk = (!cfg!(test)).then(disk_dir);
+    fetch_in(agent, url, stop, Some(disk_dir()))
+}
+
+/// `fetch`, with the disk cache in `disk`, or none.
+fn fetch_in(agent: &ureq::Agent, url: &str, stop: &AtomicBool, disk: Option<PathBuf>) -> Option<Result<Arc<Vec<u8>>, Fail>> {
     if let Some(e) = cached(url) {
         return Some(Ok(e.body.clone()));
     }
@@ -365,6 +399,23 @@ pub fn fetch(agent: &ureq::Agent, url: &str, stop: &AtomicBool) -> Option<Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_cache_drops_expired_then_oldest() {
+        let d = std::env::temp_dir().join(format!("mddog-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let big = vec![0u8; (DISK_BYTES / 2) as usize];
+        let files = [("expired", 2 * 3600, &b"x"[..]), ("oldest", 120, &big[..]), ("older", 60, &big[..]), ("newest", 0, &big[..])];
+        for (name, age, body) in files {
+            std::fs::write(d.join(name), body).unwrap();
+            std::fs::File::open(d.join(name)).unwrap().set_modified(SystemTime::now() - Duration::from_secs(age)).unwrap();
+        }
+        prune(&d, SystemTime::now());
+        let left: Vec<_> = files.iter().map(|f| f.0).filter(|n| d.join(n).exists()).collect();
+        assert_eq!(left, ["older", "newest"]);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicU16, AtomicUsize};
@@ -461,7 +512,7 @@ mod tests {
 
     /// The body's length, or why the fetch failed.
     fn get(agent: &ureq::Agent, url: &str) -> Result<usize, Fail> {
-        fetch(agent, url, &AtomicBool::new(false)).unwrap().map(|b| b.len())
+        fetch_in(agent, url, &AtomicBool::new(false), None).unwrap().map(|b| b.len())
     }
 
     #[test]
@@ -532,7 +583,7 @@ mod tests {
                     let mut most = lock(&most);
                     *most = (most.0.max(now.values().sum()), most.1.max(now[&h]));
                 }
-                let ok = fetch(agent, &url, &stop).is_some_and(|r| r.is_ok());
+                let ok = fetch_in(agent, &url, &stop, None).is_some_and(|r| r.is_ok());
                 *lock(&now).get_mut(&h).unwrap() -= 1;
                 tx.send(ok).unwrap();
             }));
@@ -548,6 +599,6 @@ mod tests {
     #[test]
     fn stop_ends_a_fetch_without_a_result() {
         let agent = agent_with(test_lookup, |_| true);
-        assert!(fetch(&agent, "http://img.test:9/x.png", &AtomicBool::new(true)).is_none());
+        assert!(fetch_in(&agent, "http://img.test:9/x.png", &AtomicBool::new(true), None).is_none());
     }
 }

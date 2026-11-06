@@ -38,3 +38,11 @@ Other
   Ctrl-p                  list Markdown files in this repo or folder: type to filter, Enter to open
   Ctrl-z                  pause mddog and go back to the shell (fg to resume)
   q, Ctrl-c               quit mddog";
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_wheel_line_states_the_wheel_step() {
+        assert!(super::KEYS.contains(&format!("scroll {} rows", super::super::app::WHEEL)));
+    }
+}

@@ -4,10 +4,10 @@
 //! Points on the page come from search rects and the layout, so the tests don't depend on exact pixels.
 //! `docs/behavior.md` names these tests.
 
-use mddog::engine::{Engine, Pointer, Press, Rect, Select};
+use mddog::render::engine::{Engine, Pointer, Press, Rect, Select};
 
 fn page(src: &str, width: f64) -> Engine {
-    let e = Engine::new(width, 2.0);
+    let e = Engine::new(width, 2.0, false);
     e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-dark").unwrap());
     e
 }
@@ -28,7 +28,7 @@ fn count(src: &str, width: f64, query: &str) -> usize {
 }
 
 fn pixels(e: &Engine) -> Vec<u8> {
-    e.snapshot(0.0, 300.0, 1.0).unwrap().rgba.to_vec()
+    e.snapshot(0.0, 300.0, 1.0, |n| Some(vec![0; n])).unwrap().rgba
 }
 
 #[test]
@@ -105,7 +105,7 @@ const LINKS: &str = "see [example](https://example.com/a) and https://auto.dev/x
 
 fn link(e: &Engine, text: &str) -> Option<String> {
     let (x, y) = at(e, text);
-    e.link(x, y).map(|l| l.1)
+    e.link(x, y)
 }
 
 #[test]
@@ -140,11 +140,11 @@ fn s0_half_pixel_tile_matches_whole() {
     // With an odd cell height at scale 2, every other tile starts on a half CSS pixel. Its pixels must be the
     // same rows as a snapshot from the whole pixel above, not a shifted or re-rasterized copy.
     let e = page("# Heading\n\nalpha beta gamma\n", 600.0);
-    let whole = e.snapshot(10.0, 41.0, 2.0).unwrap();
+    let whole = e.snapshot(10.0, 41.0, 2.0, |n| Some(vec![0; n])).unwrap();
     let row = whole.width * 4;
-    let half = e.snapshot(10.5, 40.5, 2.0).unwrap();
+    let half = e.snapshot(10.5, 40.5, 2.0, |n| Some(vec![0; n])).unwrap();
     assert!(half.height == 81 && half.rgba[..] == whole.rgba[row..]);
-    let ends_half = e.snapshot(10.0, 40.5, 2.0).unwrap();
+    let ends_half = e.snapshot(10.0, 40.5, 2.0, |n| Some(vec![0; n])).unwrap();
     assert!(ends_half.height == 81 && ends_half.rgba[..] == whole.rgba[..81 * row]);
 }
 
@@ -338,7 +338,7 @@ fn p4_the_first_zoom_keeps_the_top_row() {
     let e = page(&src, 600.0);
     let top = e.layout().blocks[0].top + 16.0;
     let first = |e: &Engine| {
-        let s = e.snapshot(top, 40.0, 2.0).unwrap();
+        let s = e.snapshot(top, 40.0, 2.0, |n| Some(vec![0; n])).unwrap();
         // All but the right 120 px, which hold the copy and expand buttons.
         let w = s.width * 4;
         let half = |r: usize| &s.rgba[r * w..(r + 1) * w - 960];

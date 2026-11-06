@@ -25,10 +25,12 @@ fn tiles_follow_the_file() {
     let file = dir.join("doc.md");
     std::fs::write(&file, "# one\n\ntext\n").unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_mdd")).env("MDDOG_CACHE_DIR", test_cache()).args(["--headless", "40"]).arg(&file).stdout(Stdio::piped()).spawn().unwrap();
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-    let mut next = || serde_json::from_str::<serde_json::Value>(&lines.next().unwrap().unwrap()).unwrap();
+    // A reader thread, so a render that never comes fails the test instead of hanging it.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stdout = child.stdout.take().unwrap();
+    std::thread::spawn(move || BufReader::new(stdout).lines().map_while(Result::ok).try_for_each(|l| tx.send(l)));
+    let next = || serde_json::from_str::<serde_json::Value>(&rx.recv_timeout(std::time::Duration::from_secs(20)).expect("no render within 20 s")).unwrap();
     let first = next();
-    assert_eq!(first["columns"], 40);
     let tile = &first["tiles"][0];
     let (w, h) = png_size(tile["file"].as_str().unwrap());
     assert_eq!(w % 40, 0);

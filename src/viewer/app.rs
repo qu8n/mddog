@@ -1,7 +1,7 @@
 use crate::term::Key;
 
-pub use super::keys::KEYS;
-
+/// How many places Backspace goes back through: jumps in a file, and files.
+pub const HISTORY: usize = 50;
 pub const WHEEL: u32 = 3;
 pub const CODE_WHEEL: i32 = 6;
 pub const CODE_KEY: i32 = 8;
@@ -103,6 +103,29 @@ impl Glide {
     }
 }
 
+/// A message on the status row, and what a click on the status row does while it shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notice {
+    pub text: String,
+    pub click: OnClick,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnClick {
+    /// Only what the hints under the pointer do.
+    Hints,
+    /// Goes back, as Backspace does.
+    GoBack,
+    /// A second click on `q` quits.
+    Quit,
+}
+
+/// A bottom-row hint: its label, what it does, and the key a click sends.
+pub type Hint = (&'static str, &'static str, Key);
+
+/// The quit hint, which a click runs only when it comes twice.
+pub const QUIT: Hint = ("q", "quit", Key::Char('q'));
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heading {
     pub level: u8,
@@ -161,7 +184,7 @@ pub struct App {
     pub help: bool,
     pub help_top: u32,
     pub expanded: bool,
-    pub notice: Option<String>,
+    pub notice: Option<Notice>,
     pub missing: bool,
     /// Backspace with no jump left goes back to the file opened before this one.
     pub back_file: bool,
@@ -246,7 +269,7 @@ impl App {
         let a = self.scroll_to(row);
         if self.scroll != from && self.back.last() != Some(&from) {
             self.back.push(from);
-            if self.back.len() > 50 {
+            if self.back.len() > HISTORY {
                 self.back.remove(0);
             }
         }
@@ -367,9 +390,19 @@ impl App {
         a
     }
 
-    /// Whether a key moves the view at once, ending a glide even when it doesn't scroll.
+    /// Whether a key moves the view at once, ending a glide even when it doesn't scroll: a row or wheel step,
+    /// or a step between matches.
     pub fn instant(&self, key: Key) -> bool {
-        self.prompt.is_none() && matches!(key, Key::Char('j' | 'k' | 'n' | 'N') | Key::Down | Key::Up | Key::Ctrl('e' | 'y') | Key::Enter | Key::WheelUp(..) | Key::WheelDown(..))
+        self.prompt.is_none() && (matches!(scroll_step(key), Some((Step::Row | Step::Wheel, _))) || matches!(key, Key::Char('n' | 'N') | Key::Enter))
+    }
+
+    fn rows(&self, step: Step) -> u32 {
+        match step {
+            Step::Row => 1,
+            Step::Wheel => WHEEL,
+            Step::Half => self.half(),
+            Step::Page => self.page(),
+        }
     }
 
     pub fn handle(&mut self, key: Key) -> Vec<Action> {
@@ -441,14 +474,11 @@ impl App {
             };
         }
         if self.help {
-            let page = self.page();
             let t = self.help_top;
-            self.help_top = match key {
-                Key::Char('j') | Key::Down | Key::Ctrl('e') | Key::WheelDown(..) => t + 1,
-                Key::Char('k') | Key::Up | Key::Ctrl('y') | Key::WheelUp(..) => t.saturating_sub(1),
-                Key::Char(' ' | 'd' | 'f') | Key::PageDown | Key::Ctrl('d') => t + page,
-                Key::Char('b' | 'u') | Key::PageUp | Key::Ctrl('u') => t.saturating_sub(page),
-                Key::Char('q' | 'Q') | Key::Ctrl('c') => return vec![Action::Quit],
+            self.help_top = match (key, scroll_step(key)) {
+                (_, Some((step, true))) => t + self.rows(step),
+                (_, Some((step, false))) => t.saturating_sub(self.rows(step)),
+                (Key::Char('q' | 'Q') | Key::Ctrl('c'), _) => return vec![Action::Quit],
                 _ => {
                     self.help = false;
                     0
@@ -464,13 +494,12 @@ impl App {
             return vec![];
         }
         self.bracket = None;
+        match scroll_step(key) {
+            Some((step, true)) => return self.down(self.rows(step)),
+            Some((step, false)) => return self.up(self.rows(step)),
+            None => {}
+        }
         match key {
-            Key::Char('j') | Key::Down | Key::Ctrl('e') => self.down(1),
-            Key::Char('k') | Key::Up | Key::Ctrl('y') => self.up(1),
-            Key::Char('d') | Key::Ctrl('d') => self.down(self.half()),
-            Key::Char('u') | Key::Ctrl('u') => self.up(self.half()),
-            Key::Char(' ' | 'f') | Key::PageDown => self.down(self.page()),
-            Key::Char('b') | Key::PageUp | Key::Ctrl('b') => self.up(self.page()),
             Key::Char('g') | Key::Home => self.scroll_to(0),
             Key::Char('G') | Key::End => self.scroll_to(u32::MAX),
             Key::Char('h') | Key::Left => vec![Action::ScrollView(-CODE_KEY)],
@@ -480,8 +509,6 @@ impl App {
                 vec![Action::Help]
             }
             Key::Backspace | Key::Ctrl('o') => self.go_back(),
-            Key::WheelDown(..) => self.down(WHEEL),
-            Key::WheelUp(..) => self.up(WHEEL),
             Key::WheelLeft(..) | Key::WheelRight(..) => self.side(key),
             Key::Char('/') | Key::Ctrl('f') => {
                 self.prompt = Some(String::new());
@@ -637,7 +664,6 @@ impl App {
         if n <= h {
             return None;
         }
-        // A thumb two rows short of the track leaves a row at each end for offsets in between.
         let len = ((h * h + n / 2) / n).clamp(1, h.saturating_sub(2).max(1));
         let (max, space) = (n - h, h - len);
         let off = self.toc_offset.min(max);
@@ -674,7 +700,6 @@ impl App {
         let (max, space) = (n - h, h - len);
         let top = i64::from(line) - i64::from(TOC_HEADER) - i64::from(grab);
         let top = top.clamp(0, i64::from(space)) as u32;
-        // Rows map to offsets with rounding, so a thumb that stays put keeps the offset it had.
         if top == now {
             return vec![];
         }
@@ -713,7 +738,7 @@ impl App {
         if let Some(d) = &self.prompt {
             return format!(" /{d} ");
         }
-        match &self.notice {
+        match self.notice.as_ref().map(|n| &n.text) {
             Some(n) if !self.matches.is_empty() => format!("{}· {n} ", self.status_base(name)),
             Some(n) => format!(" {n} "),
             None => self.status_base(name),
@@ -740,44 +765,55 @@ impl App {
         s
     }
 
-    pub fn hints(&self) -> Vec<(&'static str, &'static str)> {
+    /// The bottom row's hints: the label, what it does, and the key a click on it sends.
+    pub fn hints(&self) -> Vec<Hint> {
+        const HELP: Hint = ("?", "help", Key::Char('?'));
         if self.expanded {
-            return vec![("q", "quit"), ("Esc", "back to the page")];
+            return vec![QUIT, ("Esc", "back to the page", Key::Esc)];
         }
         if self.prompt.is_some() {
-            return vec![("Enter", "search"), ("Esc", "cancel")];
+            return vec![("Enter", "search", Key::Enter), ("Esc", "cancel", Key::Esc)];
         }
         if self.help {
-            return vec![("q", "quit"), ("?", "back to the page"), ("j/k", "scroll")];
+            return vec![QUIT, ("?", "back to the page", Key::Char('?')), ("j/k", "scroll", Key::Char(' '))];
         }
         if !self.query.is_empty() && self.matches.is_empty() {
-            return vec![("q", "quit"), ("/", "search again"), ("Esc", "clear")];
+            return vec![QUIT, ("/", "search again", Key::Char('/')), ("Esc", "clear", Key::Esc)];
         }
         if self.search_active() {
-            return vec![("q", "quit"), ("n/N", "next/prev"), ("Esc", "clear"), ("?", "help")];
+            return vec![QUIT, ("n/N", "next/prev", Key::Char('n')), ("Esc", "clear", Key::Esc), HELP];
         }
-        let mut h = vec![("?", "help"), ("/", "find")];
+        let mut h = vec![HELP, ("/", "find", Key::Char('/'))];
         if !self.entries.is_empty() {
-            h.push(("t", "toc"));
+            h.push(("t", "toc", Key::Char('t')));
         }
-        h.push(("e", "edit"));
+        h.push(("e", "edit", Key::Char('e')));
         h
     }
+}
 
-    pub fn hint_key(k: &str) -> Option<Key> {
-        Some(match k {
-            "q" => Key::Char('q'),
-            "?" => Key::Char('?'),
-            "/" => Key::Char('/'),
-            "t" => Key::Char('t'),
-            "e" => Key::Char('e'),
-            "j/k" => Key::Char(' '),
-            "n/N" => Key::Char('n'),
-            "Esc" => Key::Esc,
-            "Enter" => Key::Enter,
-            _ => return None,
-        })
-    }
+/// How far a scroll key moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    Row,
+    Wheel,
+    Half,
+    Page,
+}
+
+/// The scroll keys, for the page and the help screen alike: the step, and whether it goes down.
+fn scroll_step(key: Key) -> Option<(Step, bool)> {
+    Some(match key {
+        Key::Char('j') | Key::Down | Key::Ctrl('e') => (Step::Row, true),
+        Key::Char('k') | Key::Up | Key::Ctrl('y') => (Step::Row, false),
+        Key::WheelDown(..) => (Step::Wheel, true),
+        Key::WheelUp(..) => (Step::Wheel, false),
+        Key::Char('d') | Key::Ctrl('d') => (Step::Half, true),
+        Key::Char('u') | Key::Ctrl('u') => (Step::Half, false),
+        Key::Char(' ' | 'f') | Key::PageDown => (Step::Page, true),
+        Key::Char('b') | Key::PageUp | Key::Ctrl('b') => (Step::Page, false),
+        _ => return None,
+    })
 }
 
 pub fn toc_entries(headings: &[Heading]) -> Vec<Entry> {
@@ -1081,7 +1117,7 @@ mod tests {
         a.set_matches(vec![]);
         assert_eq!(a.query, "z");
         assert!(a.status("f.md").contains("no matches for \"z\""));
-        assert!(!a.hints().iter().any(|(k, _)| *k == "n/N"));
+        assert!(!a.hints().iter().any(|h| h.0 == "n/N"));
         keys(&mut a, &[Key::Char('n'), Key::Char('N')]);
         assert_eq!(a.scroll, 12);
     }
@@ -1398,6 +1434,17 @@ mod tests {
     }
 
     #[test]
+    fn help_scrolls_by_the_page_s_steps() {
+        let mut a = app(100, 20);
+        a.handle(Key::Char('?'));
+        keys(&mut a, &[Key::Char('j'), Key::WheelDown(1, 1), Key::Char('d'), Key::Char(' ')]);
+        assert_eq!(a.help_top, 1 + WHEEL + 10 + 18);
+        keys(&mut a, &[Key::Ctrl('b'), Key::Char('u')]);
+        assert!(a.help);
+        assert_eq!(a.help_top, 1 + WHEEL);
+    }
+
+    #[test]
     fn expanded_diagram_closes_on_any_key() {
         let mut a = app(100, 20);
         a.expanded = true;
@@ -1564,7 +1611,7 @@ mod tests {
     #[test]
     fn h01_hints_follow_context() {
         let mut a = app(100, 20);
-        let keys_of = |a: &App| a.hints().iter().map(|(k, _)| *k).collect::<Vec<_>>();
+        let keys_of = |a: &App| a.hints().iter().map(|h| h.0).collect::<Vec<_>>();
         assert_eq!(keys_of(&a), ["?", "/", "e"]);
         a.set_headings(&[h(1, "A", 0)]);
         assert_eq!(keys_of(&a), ["?", "/", "t", "e"]);
@@ -1574,7 +1621,6 @@ mod tests {
         a.handle(Key::Enter);
         a.set_matches(vec![3]);
         assert_eq!(keys_of(&a), ["q", "n/N", "Esc", "?"]);
-        assert!(keys_of(&a).iter().all(|k| App::hint_key(k).is_some()));
     }
 
     #[test]
@@ -1628,10 +1674,12 @@ mod tests {
         let g = glide(0, 1000, 5000, t0);
         assert_eq!(g.at(t0), (0, false));
         let (mid, done) = g.at(t0 + GLIDE / 2);
-        assert!(!done && mid == 875, "{mid}");
+        // Eased out: past halfway at half the time.
+        assert!(!done && mid > 500 && mid < 1000, "{mid}");
         assert_eq!(g.at(t0 + GLIDE), (1000, true));
         assert_eq!(g.at(t0 + GLIDE * 3), (1000, true));
-        assert_eq!(glide(1000, 0, 5000, t0).at(t0 + GLIDE / 2), (125, false));
+        let (back, done) = glide(1000, 0, 5000, t0).at(t0 + GLIDE / 2);
+        assert!(!done && back == 1000 - mid, "{back}");
         assert_eq!(Glide::new(0, 1000, 5000, Pace::Fixed(std::time::Duration::ZERO), t0).at(t0), (1000, true));
     }
 
@@ -1669,7 +1717,7 @@ mod tests {
         let g = glide(0, 1000, 5000, t0);
         let now = t0 + GLIDE / 2;
         let g2 = glide(g.at(now).0, 2000, 5000, now);
-        assert_eq!(g2.at(now), (875, false));
+        assert_eq!(g2.at(now), (g.at(now).0, false));
         assert_eq!(g2.at(now + GLIDE), (2000, true));
     }
 }

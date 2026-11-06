@@ -1,6 +1,6 @@
 use similar::{ChangeTag, TextDiff};
 
-use crate::engine::Block;
+use crate::render::engine::Block;
 
 pub fn top_text(blocks: &[Block], texts: &[String], y: f64) -> String {
     match capture(blocks, y) {
@@ -21,10 +21,6 @@ pub struct Anchor {
 pub fn capture(blocks: &[Block], y: f64) -> Option<Anchor> {
     let b = blocks.iter().filter(|b| b.start > 0).find(|b| y < b.top + b.height).or_else(|| blocks.iter().rfind(|b| b.start > 0))?;
     Some(Anchor { line: b.start, offset: y - b.top })
-}
-
-pub fn map_line(old: &str, new: &str, line: u32) -> u32 {
-    line_map(old, new)(line)
 }
 
 /// Maps each line of `old` to its line in `new`, from one diff: a deleted line to the line that
@@ -74,8 +70,8 @@ mod tests {
     fn line_moves_with_insertions_above() {
         let old = "a\nb\nc\n";
         let new = "x\ny\na\nb\nc\n";
-        assert_eq!(map_line(old, new, 3), 5);
-        assert_eq!(map_line(old, "b\nc\n", 3), 2);
+        assert_eq!(line_map(old, new)(3), 5);
+        assert_eq!(line_map(old, "b\nc\n")(3), 2);
     }
 
     #[test]
@@ -84,7 +80,7 @@ mod tests {
         let anchor = capture(&old_blocks, 70.0).unwrap();
         let old = "# T\n\npara\npara\npara\n\nend\n";
         let new = format!("{}{}", "added\n\n".repeat(20), old);
-        let line = map_line(old, &new, anchor.line);
+        let line = line_map(old, &new)(anchor.line);
         let shifted: Vec<Block> = old_blocks.iter().map(|b| Block { start: b.start + 40, end: b.end + 40, top: b.top + 900.0, ..*b }).collect();
         let y = restore(&shifted, Anchor { line, offset: anchor.offset }).unwrap();
         assert_eq!(y, 970.0);
@@ -116,10 +112,10 @@ mod tests {
     #[test]
     fn line_in_a_truncated_file_lands_at_the_end() {
         let old = "a\nb\nc\nd\n";
-        assert_eq!(map_line(old, "a\nb\n", 1), 1);
-        assert_eq!(map_line(old, "a\nb\n", 2), 2);
-        assert_eq!(map_line(old, "a\nb\n", 4), 3);
-        assert_eq!(map_line(old, "a\nb\n", 40), 3);
-        assert_eq!(map_line(old, "", 3), 1);
+        assert_eq!(line_map(old, "a\nb\n")(1), 1);
+        assert_eq!(line_map(old, "a\nb\n")(2), 2);
+        assert_eq!(line_map(old, "a\nb\n")(4), 3);
+        assert_eq!(line_map(old, "a\nb\n")(40), 3);
+        assert_eq!(line_map(old, "")(3), 1);
     }
 }

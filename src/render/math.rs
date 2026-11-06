@@ -1,14 +1,5 @@
 //! TeX math: a small parser and box layout. Draws with STIX glyphs and rules.
-use crate::native::text::{BOLD, FKey, Fonts, ITALIC, MATH};
-
-thread_local! {
-    /// Commands the parser did not know, since the last `take_unknown`. Spike instrumentation.
-    static UNKNOWN: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
-}
-
-pub fn take_unknown() -> Vec<String> {
-    UNKNOWN.with(|u| std::mem::take(&mut *u.borrow_mut()))
-}
+use crate::render::text::{BOLD, FKey, Fonts, ITALIC, MATH};
 
 pub enum MItem {
     Text {
@@ -567,7 +558,6 @@ impl P {
         })
     }
     fn command(&mut self) -> N {
-        // escaped single characters
         if let Some(c) = self.peek()
             && !c.is_ascii_alphabetic()
         {
@@ -644,7 +634,6 @@ impl P {
                 self.ws();
                 let l = self.delim_char();
                 let body = self.seq(&[]);
-                // expect \right
                 let save = self.i;
                 self.ws();
                 let mut r = String::new();
@@ -724,10 +713,7 @@ impl P {
             "LaTeX" => N::Logo("LaTeX"),
             "KaTeX" => N::Logo("KaTeX"),
             _ if FUNCS.contains(&n) => N::Name(n.to_string(), if LIMIT_FUNCS.contains(&n) { Lim::Display } else { Lim::Side }),
-            _ => {
-                UNKNOWN.with(|u| u.borrow_mut().push(n.to_string()));
-                N::Text(format!("\\{n}"))
-            }
+            _ => N::Text(format!("\\{n}")),
         }
     }
     fn delim_char(&mut self) -> String {
@@ -1212,7 +1198,6 @@ impl<'a> Lay<'a> {
                 let k = if st.display { if sym == "∫" { 1.6 } else { 1.35 } } else { 1.1 };
                 let s2 = St { size: st.size * k, ..st };
                 let mut b = self.text(sym, s2, false, false);
-                // center on the math axis
                 let drop = 0.25 * st.size + (s2.size - st.size) * 0.22;
                 shift(&mut b, 0.0, drop);
                 b.asc = 0.73 * s2.size - drop;

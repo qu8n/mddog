@@ -523,7 +523,8 @@ fn help_follows_an_appearance_change() {
     let before = out.lock().unwrap().len();
     tty.write_all(b"?").unwrap();
     let keys = wait_for(&out, before, b"mddog keys");
-    let dark = find(&out.lock().unwrap()[before..keys], b"\x1b[0m\x1b[48;2;28;28;28m\x1b[2J").is_some();
+    let clear = format!("{}\x1b[2J", mddog::theme::builtin("obsidian-dark").unwrap().palette.reset());
+    let dark = find(&out.lock().unwrap()[before..keys], clear.as_bytes()).is_some();
     tty.write_all(b"q").unwrap();
     let _ = exits_within(&mut child, LIMIT);
     let _ = child.kill();
@@ -538,7 +539,7 @@ fn help_flag_points_to_the_key_screen() {
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(out.status.success());
     assert!(text.contains("press ? to list the keys"), "{text}");
-    assert!(!text.contains(mddog::viewer::app::KEYS.lines().nth(1).unwrap()), "{text}");
+    assert!(!text.contains(mddog::viewer::keys::KEYS.lines().nth(1).unwrap()), "{text}");
 }
 
 #[test]

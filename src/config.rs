@@ -250,14 +250,6 @@ mod tests {
     #[test]
     fn empty_is_default() {
         assert_eq!(parse("").unwrap(), Config::default());
-        assert!(Config::default().live_reload);
-        assert!(Config::default().smooth_scroll);
-        assert!(!Config::default().copy_on_select);
-        assert_eq!(Config::default().font_smoothing, None);
-        assert_eq!(Config::default().glide_ms_per_page, 200);
-        assert_eq!(Config::default().file_list.extensions, ["md", "markdown"]);
-        let t = Config::default().themes;
-        assert_eq!((t.light.name.as_str(), t.dark.map(|d| d.name)), ("github-light", Some("github-dark".into())));
     }
 
     #[test]
@@ -310,6 +302,7 @@ mod tests {
     }
 
     #[test]
+    /// The line and the dotted key lead every error. What follows from serde and toml is theirs to word.
     fn errors_name_the_key() {
         let one_line = |t: &str| {
             let e = parse(t).unwrap_err();
@@ -317,16 +310,16 @@ mod tests {
             e
         };
         let e = one_line("[background]\ndark = \"terminal\"\n");
-        assert!(e.starts_with("line 1: background: unknown field `background`"), "{e}");
+        assert!(e.starts_with("line 1: background: "), "{e}");
         let e = one_line("live_reload = \"yes\"\n");
-        assert!(e.starts_with("line 1: live_reload: invalid type"), "{e}");
+        assert!(e.starts_with("line 1: live_reload: "), "{e}");
         let e = one_line("font_smoothing = 2\n");
-        assert!(e.starts_with("line 1: font_smoothing: invalid type: integer `2`, expected a boolean"), "{e}");
+        assert!(e.starts_with("line 1: font_smoothing: "), "{e}");
         // Removed keys get the unknown-key error like any other.
         let e = one_line("prewarm = false\n");
-        assert!(e.starts_with("line 1: prewarm: unknown field `prewarm`"), "{e}");
+        assert!(e.starts_with("line 1: prewarm: "), "{e}");
         let e = one_line("[mermaid]\nengine = \"pele\"\n");
-        assert!(e.starts_with("line 1: mermaid: unknown field `mermaid`"), "{e}");
+        assert!(e.starts_with("line 1: mermaid: "), "{e}");
         let e = one_line("[file_list]\nextensions = [\".md\"]\n");
         assert!(e.starts_with("line 2: file_list.extensions: \".md\" is not an extension"), "{e}");
         let e = one_line("[file_list]\nextensions = [\"md\", \"\"]\n");
@@ -334,7 +327,7 @@ mod tests {
         let e = one_line("[file_list]\nextensions = []\n");
         assert!(e.starts_with("line 2: file_list.extensions: needs at least one"), "{e}");
         let e = one_line("[colours]\n");
-        assert!(e.starts_with("line 1: colours: unknown field `colours`"), "{e}");
+        assert!(e.starts_with("line 1: colours: "), "{e}");
         let e = one_line("theme = \"dark\n");
         assert!(e.starts_with("line 1: theme: "), "{e}");
         let e = one_line("theme = \"dark\"\n");

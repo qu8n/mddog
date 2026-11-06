@@ -1,17 +1,16 @@
 //! Mermaid diagrams: mermaid-rs-renderer draws SVG, resvg rasterizes it.
-use crate::native::images::svg_tree;
-use crate::native::theme::Theme;
+use crate::render::svg::svg_tree;
+use crate::render::theme::Theme;
 use mermaid_rs_renderer::{RenderOptions, Theme as MTheme};
 
 fn hex(c: u32) -> String {
     format!("#{c:06x}")
 }
 
-/// Pele's series colors for pie slices, the same in every theme.
+/// Series colors for pie slices, the same in every theme.
 const SERIES: [&str; 8] = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#eeca3b", "#b279a2", "#9d755d"];
 
-/// The diagram as an SVG tree, in pele's colors: nodes on `pre-bg` with a `border` outline, on the page's own
-/// background.
+/// The diagram as an SVG tree, in the theme's diagram colors, on the page's own background.
 pub fn tree(src: &str, th: &Theme) -> Option<resvg::usvg::Tree> {
     svg_tree(svg(src, th)?.as_bytes())
 }
@@ -32,7 +31,7 @@ fn svg(src: &str, th: &Theme) -> Option<String> {
     mt.cluster_background = hex(th.diagram_fill);
     mt.cluster_border = hex(th.diagram_border);
     mt.edge_label_background = hex(th.diagram_label_bg);
-    mt.font_family = crate::native::images::svg_families(&th.font_body);
+    mt.font_family = crate::render::svg::svg_families(&th.font_body);
     // Sequence and pie diagrams have their own colors, which otherwise keep mermaid.js's palette.
     mt.sequence_actor_fill = hex(th.diagram_fill);
     mt.sequence_actor_border = hex(th.diagram_border);
@@ -46,7 +45,7 @@ fn svg(src: &str, th: &Theme) -> Option<String> {
     mt.pie_stroke_color = hex(th.bg);
     mt.pie_stroke_width = 1.0;
     mt.pie_outer_stroke_width = 0.0;
-    // Slice labels are dark on pele's mid-tone series in every theme: the page color on a dark page, the text
+    // Slice labels are dark on the mid-tone series in every theme: the page color on a dark page, the text
     // color on a light one.
     let ink = if th.dark { th.bg } else { th.text };
     mt.pie_section_text_color = hex(ink);
@@ -54,21 +53,22 @@ fn svg(src: &str, th: &Theme) -> Option<String> {
     mt.pie_title_text_size = 16.0;
     mt.pie_legend_text_color = hex(th.text);
     mt.pie_legend_text_size = 16.0;
-    // Pele's percentages are smaller than its 16 px text: "40%" is 29 px wide, SF at 14 px.
+    // Percentages are smaller than the 16 px text: "40%" is 29 px wide, SF at 14 px.
     mt.pie_section_text_size = 14.0;
-    // The renderer draws state labels at 0.85 of the font size, and pele at 16 px like the rest.
+    // The renderer draws state labels at 0.85 of the font size, so scale the size up to land on 16 px like the rest.
     mt.font_size = if kind == DiagramKind::State { 16.0 / 0.85 } else { 16.0 };
-    // Pele's flowchart metrics, measured against the WebKit build: 16 px labels in the body font, 12 px inside
-    // each node, 48 px between nodes, and labels wrapped near pele's 200 px (20 of the renderer's average
-    // characters at 16 px). The renderer's own spacing, scaled by graph size, gave 25 to 41 px.
+    // Flowchart metrics: 16 px labels in the body font, 12 px inside each node, 48 px between nodes, and labels
+    // wrapped near 200 px (20 of the renderer's average characters at 16 px). The renderer's own spacing, scaled by
+    // graph size, gave 25 to 41 px.
     let mut layout = mermaid_rs_renderer::LayoutConfig { node_padding_x: 12.0, node_padding_y: 12.0, max_label_width_chars: 20, node_spacing: 48.0, rank_spacing: 48.0, ..Default::default() };
     layout.flowchart.auto_spacing.enabled = false;
-    // Pele's pie has a 120 px radius: the renderer's radius is half this height less its 28 px margin.
+    // The pie has a 120 px radius: the renderer's radius is half this height less its 28 px margin.
     layout.pie.height = 296.0;
     let opts = RenderOptions { theme: mt, layout };
     let svg = mermaid_rs_renderer::render_with_options(src, opts).ok()?;
     // CoreText tightens SF at 16 px by 0.31 px a letter from the font's tracking table, which resvg doesn't read.
-    let svg = svg.replace(r#"font-family="System Font""#, r#"font-family="System Font" letter-spacing="-0.31""#);
+    let font = crate::render::svg::SYSTEM_FONT;
+    let svg = svg.replace(&format!(r#"font-family="{font}""#), &format!(r#"font-family="{font}" letter-spacing="-0.31""#));
     // Gantt grid lines come in a fixed light slate, which glares on a dark page.
     let svg = if kind == DiagramKind::Gantt { svg.replace(r##"stroke="#E2E8F0""##, &format!(r#"stroke="{}""#, hex(th.border))) } else { svg };
     // The renderer keeps the quotes around an ER relationship's label, which mermaid's syntax uses only to allow spaces.
@@ -158,8 +158,8 @@ mod tests {
         for name in crate::theme::names().split(", ") {
             let th = super::Theme::new(crate::theme::builtin(name).unwrap());
             let s = super::svg("pie\n    \"A\" : 50\n    \"B\" : 50\n", &th).unwrap();
-            let ink = if th.dark { th.bg } else { th.text };
-            assert!(s.contains(&format!("fill=\"#{ink:06x}\">50")), "{name}: {s}");
+            let at = s.find("\">50").unwrap_or_else(|| panic!("{name}: no slice label in {s}"));
+            let ink = u32::from_str_radix(&s[at - 6..at], 16).unwrap();
             // Relative luminance well under the series colors', so the labels read on every slice.
             let (r, g, b) = super::super::theme::rgb(ink);
             assert!(0.2126 * r + 0.7152 * g + 0.0722 * b < 0.15, "{name}");
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn pie_and_gantt_take_the_theme() {
         let s = svg("pie title Pets\n    \"Dogs\" : 40\n    \"Cats\" : 60\n");
-        assert!(s.contains("#4c78a8") && s.contains("#f58518"), "pele's series colors");
+        assert!(s.contains("#4c78a8") && s.contains("#f58518"), "the series colors");
         let s = svg("gantt\n    dateFormat YYYY-MM-DD\n    section A\n    Task :a1, 2026-01-01, 7d\n");
         assert!(!s.contains("#E2E8F0") && s.contains("#3d444d"), "grid lines take the border color");
     }
