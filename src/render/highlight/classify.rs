@@ -66,12 +66,74 @@ fn ts_config(name: &str) -> Option<HighlightConfiguration> {
         "css" => (tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.to_string(), "", ""),
         "html" | "htm" | "xhtml" => (tree_sitter_html::LANGUAGE.into(), tree_sitter_html::HIGHLIGHTS_QUERY.to_string(), tree_sitter_html::INJECTIONS_QUERY, ""),
         "php" | "inc" => (tree_sitter_php::LANGUAGE_PHP.into(), tree_sitter_php::HIGHLIGHTS_QUERY.to_string(), tree_sitter_php::INJECTIONS_QUERY, ""),
+        "nix" | "nixos" => (tree_sitter_nix::LANGUAGE.into(), nix_highlights(), tree_sitter_nix::INJECTIONS_QUERY, ""),
         _ => return None,
     };
     let mut config = HighlightConfiguration::new(language, name, &highlights, injections, locals).ok()?;
     let names: Vec<&str> = CAPTURES.iter().map(|(n, _)| *n).collect();
     config.configure(&names);
     Some(config)
+}
+
+/// Patterns removed from the Nix query. Once the query is reversed, each would color a whole attrpath on
+/// top of the name inside it, so `builtins.length` would lose its function color. `(identifier) @property`
+/// already colors these names.
+const NIX_DROP: [&str; 2] = ["(select_expression\n  attrpath: (attrpath (identifier)) @property)", "(binding\n  attrpath: (attrpath (identifier)) @property)"];
+
+/// The Nix query, changed to color code the way GitHub does: the first pattern that matches wins, and
+/// built-in functions get the function color.
+fn nix_highlights() -> String {
+    let query = NIX_DROP.iter().fold(tree_sitter_nix::HIGHLIGHTS_QUERY.replace("@function.builtin", "@function"), |q, p| q.replace(p, ""));
+    reversed(&query)
+}
+
+/// `query` with its top-level patterns in reverse order. When several patterns match one node,
+/// tree-sitter-highlight uses the last one, but the Nix query is written for the first one to win.
+fn reversed(query: &str) -> String {
+    let b = query.as_bytes();
+    let mut items: Vec<&str> = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b';' => i += query[i..].find('\n').unwrap_or(query.len() - i),
+            b'(' | b'[' => {
+                let start = i;
+                let mut depth = 0;
+                while i < b.len() {
+                    match b[i] {
+                        b'(' | b'[' => depth += 1,
+                        b')' | b']' => depth -= 1,
+                        b'"' => {
+                            i += 1;
+                            while i < b.len() && b[i] != b'"' {
+                                i += if b[i] == b'\\' { 2 } else { 1 };
+                            }
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                // Trailing captures and quantifiers belong to the pattern.
+                loop {
+                    let rest = query[i..].trim_start_matches([' ', '\t']);
+                    match rest.bytes().next() {
+                        Some(b'@' | b'?' | b'*' | b'+') => {
+                            let skip = query.len() - i - rest.len();
+                            i += skip + rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+                        }
+                        _ => break,
+                    }
+                }
+                items.push(&query[start..i]);
+            }
+            _ => i += 1,
+        }
+    }
+    items.reverse();
+    items.join("\n\n")
 }
 
 thread_local! {
@@ -210,6 +272,24 @@ mod tests {
         assert_eq!(class_of("ruby", code, "require"), "pl-en");
         assert_eq!(class_of("ruby", code, "defined?"), "pl-en");
         assert_eq!(class_of("ruby", code, "/b/"), "pl-sr");
+    }
+
+    #[test]
+    fn nix_gets_github_class() {
+        let code = "{ a = import b; c = builtins.length d; e = true; f = x: x; }\n";
+        assert_eq!(class_of("nix", code, "a"), "pl-c1");
+        assert_eq!(class_of("nix", code, "import"), "pl-en");
+        assert_eq!(class_of("nix", code, "b"), "pl-s1");
+        assert_eq!(class_of("nix", code, "length"), "pl-en");
+        assert_eq!(class_of("nix", code, "true"), "pl-smi");
+        // A crate update that rewrites these patterns would make the removal do nothing.
+        assert!(NIX_DROP.iter().all(|p| tree_sitter_nix::HIGHLIGHTS_QUERY.contains(p)));
+    }
+
+    #[test]
+    fn reversed_keeps_each_pattern_whole() {
+        let q = "; note\n(a) @x\n\n[\n  \"(\"\n  \"]\"\n] @y\n((b) @z (#match? @z \"^c$\"))";
+        assert_eq!(reversed(q), "((b) @z (#match? @z \"^c$\"))\n\n[\n  \"(\"\n  \"]\"\n] @y\n\n(a) @x");
     }
 
     #[test]

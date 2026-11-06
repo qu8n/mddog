@@ -1,7 +1,12 @@
 //! Mermaid diagrams: mermaid-rs-renderer draws SVG, resvg rasterizes it.
+use crate::render::doc::Block;
 use crate::render::svg::svg_tree;
 use crate::render::theme::Theme;
 use mermaid_rs_renderer::{RenderOptions, Theme as MTheme};
+use resvg::usvg::Tree;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn hex(c: u32) -> String {
     format!("#{c:06x}")
@@ -10,9 +15,48 @@ fn hex(c: u32) -> String {
 /// Series colors for pie slices, the same in every theme.
 const SERIES: [&str; 8] = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#eeca3b", "#b279a2", "#9d755d"];
 
+thread_local! {
+    /// The current page's diagrams as `prefetch` built them, each kept until layout takes it.
+    static MEMO: RefCell<HashMap<String, Option<Tree>>> = RefCell::default();
+}
+
 /// The diagram as an SVG tree, in the theme's diagram colors, on the page's own background.
-pub fn tree(src: &str, th: &Theme) -> Option<resvg::usvg::Tree> {
+pub fn tree(src: &str, th: &Theme) -> Option<Tree> {
+    MEMO.with_borrow_mut(|m| m.remove(src)).unwrap_or_else(|| build(src, th))
+}
+
+fn build(src: &str, th: &Theme) -> Option<Tree> {
     svg_tree(svg(src, th)?.as_bytes())
+}
+
+/// Builds the diagrams layout will draw on several threads, so the first layout finds them ready instead of
+/// building each in turn. A flowchart takes about 14 ms.
+pub fn prefetch(blocks: &[Block], th: &Theme) {
+    let mut srcs = vec![];
+    crate::render::doc::walk_shown(blocks, &mut |b| {
+        if let Block::Mermaid(src) = b {
+            srcs.push(src.as_str());
+        }
+    });
+    srcs.sort_unstable();
+    srcs.dedup();
+    let workers = std::thread::available_parallelism().map_or(4, usize::from).min(srcs.len());
+    let next = AtomicUsize::new(0);
+    let (srcs_ref, next_ref) = (&srcs, &next);
+    let done: HashMap<String, Option<Tree>> = std::thread::scope(|s| {
+        let work = move || {
+            let mut got = vec![];
+            loop {
+                let i = next_ref.fetch_add(1, Ordering::Relaxed);
+                let Some(src) = srcs_ref.get(i) else { break got };
+                got.push((src.to_string(), build(src, th)));
+            }
+        };
+        // A worker that failed to start leaves its share to the others, and to layout if none started.
+        let handles: Vec<_> = (0..workers).filter_map(|_| std::thread::Builder::new().stack_size(crate::render::STACK).spawn_scoped(s, work).ok()).collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
+    });
+    MEMO.set(done);
 }
 
 fn svg(src: &str, th: &Theme) -> Option<String> {
@@ -111,6 +155,19 @@ fn unquote_labels(svg: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prefetch_builds_the_shown_diagrams_once() {
+        let th = super::Theme::new(crate::theme::builtin("github-light").unwrap());
+        let md = "```mermaid\nflowchart LR\n  A --> B\n```\n\n<details><summary>s</summary>\n\n```mermaid\nflowchart LR\n  C --> D\n```\n\n</details>\n";
+        super::prefetch(&crate::render::doc::parse(md).blocks, &th);
+        let held = super::MEMO.with_borrow(|m| m.keys().cloned().collect::<Vec<_>>());
+        assert_eq!(held, ["flowchart LR\n  A --> B"]);
+        // Layout takes it, and a later layout builds its own.
+        assert!(super::tree(&held[0], &th).is_some());
+        assert!(super::MEMO.with_borrow(std::collections::HashMap::is_empty));
+        assert!(super::tree(&held[0], &th).is_some());
+    }
+
     fn svg(src: &str) -> String {
         super::svg(src, &super::Theme::new(crate::theme::builtin("github-dark").unwrap())).unwrap()
     }

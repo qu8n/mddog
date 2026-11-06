@@ -20,6 +20,22 @@ fn keys_scroll_a_wide_code_block_sideways() {
 }
 
 #[test]
+fn a_rescale_keeps_a_wide_block_on_the_same_text() {
+    let wide = format!("```\n{}\n```\n", "x".repeat(400));
+    // Scrolled 80 CSS px in, the block must still be 80 CSS px in at any scale: 80 back reaches the left edge, and no further.
+    let at_left = |e: &Engine| !e.code_scroll_view(0.0, 400.0, -80.0).is_empty() && e.code_scroll_view(0.0, 400.0, -1.0).is_empty();
+    let e = engine(&wide);
+    e.code_scroll_view(0.0, 400.0, 80.0);
+    let saved = e.code_positions();
+    e.rescale(1.0, 640.0);
+    assert!(at_left(&e), "a font zoom moved the block sideways");
+    let small = Engine::new(640.0, 1.0, false);
+    small.load(&wide, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
+    small.code_restore(&saved);
+    assert!(at_left(&small), "a reload at another scale moved the block sideways");
+}
+
+#[test]
 fn a_relayout_forgets_button_indices() {
     // A copy button inside an open <details>, which a toggle removes.
     let e = engine("<details open><summary>More</summary>\n\n```\ncode\n```\n\n</details>\n");

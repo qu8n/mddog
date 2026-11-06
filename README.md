@@ -14,7 +14,7 @@
   Preview Markdown in your terminal the way a browser renders it.
 </p>
 
-https://github.com/user-attachments/assets/dbb4fddc-95a9-47dd-afcf-ce04fe8b5002
+https://github.com/user-attachments/assets/3a6fda37-b0d3-4678-bff6-7a5085d48719
 
 mddog fetches the Markdown (pun intended), lays it out and draws it with macOS's own text and graphics engines in GitHub's style, and sends the result to the terminal, so you see and use the Markdown as you would in a browser.
 

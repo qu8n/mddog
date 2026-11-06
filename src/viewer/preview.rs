@@ -84,6 +84,13 @@ fn pixel_spot((x, y): (u16, u16), (cell_w, cell_h): (u32, u32), (cols, rows): (u
     Spot { cell, sub: Some((cx.fract(), cy.fract())) }
 }
 
+/// Device pixels per CSS pixel on the page: the display's scale, zoomed by how much the cell grew since
+/// startup (`base`), so the page follows the terminal's font size. The page then still spans the pane's
+/// pixels, so its tiles need no more memory at any zoom.
+fn page_scale(display: f64, cell_h: u32, base: u32) -> f64 {
+    if base == 0 { display } else { display * f64::from(cell_h) / f64::from(base) }
+}
+
 /// Snapshots `height` device pixels from `top`.
 fn snapper(engine: &Engine, scale: f64) -> impl FnMut(u32, u32) -> Option<Pixels> + '_ {
     move |top, height| engine.snapshot(f64::from(top) / scale, f64::from(height) / scale, scale, |n| Shm::create(kitty::shm_name(), n))
@@ -110,7 +117,12 @@ pub struct Preview {
     tx: Sender<Event>,
     paused: Arc<AtomicBool>,
     probe: Probe,
+    /// Device pixels per CSS pixel on the page: the display's scale times the font zoom (see `page_scale`).
     scale: f64,
+    /// The display's backing scale, which the cell size guesses need.
+    display: f64,
+    /// The terminal's size at startup, whose cell height is the page's zoom of 1.
+    start: Size,
     cell_w: u32,
     cell_h: u32,
     size: Size,
@@ -282,8 +294,9 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         return 1;
     }
     let size = tty.size();
-    let scale = engine.scale.get();
-    let (cell_w, cell_h) = probe.cell_px(size, scale);
+    let display = engine.scale.get();
+    let scale = display;
+    let (cell_w, cell_h) = probe.cell_px(size, display);
     if let Some(l) = &loader {
         l.tune(scale, (cell_w, cell_h));
     }
@@ -301,6 +314,8 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         paused,
         probe,
         scale,
+        display,
+        start: size,
         cell_w,
         cell_h,
         size,
@@ -1166,7 +1181,7 @@ impl Preview {
         let base = self.base();
         let theme = config::theme();
         self.theme = theme;
-        self.engine.resize(css_width);
+        self.size_engine(css_width);
         self.app.expanded = false;
         self.touched = false;
         self.engine.load(&src, &base, self.app.wrap, theme);
@@ -1197,25 +1212,38 @@ impl Preview {
     /// guess lays the page out again here, before anything of it is drawn.
     fn settle_scale(&mut self) {
         let real = screen::display_scale();
-        if real == self.scale {
+        if real == self.display {
             return;
         }
         trace::mark("scale guess was wrong");
-        self.scale = real;
-        (self.cell_w, self.cell_h) = self.probe.cell_px(self.size, real);
+        self.display = real;
         let (_, css_width) = self.fit();
-        self.engine.rescale(real, css_width);
+        self.engine.rescale(self.scale, css_width);
         if let Some(l) = &self.loader {
-            l.tune(real, (self.cell_w, self.cell_h));
+            l.tune(self.scale, (self.cell_w, self.cell_h));
         }
     }
 
     /// Takes the terminal's size in cells and, when it tells, in pixels: a font size change keeps
-    /// the cells but not their pixels, which the pixel mouse divides by.
+    /// the cells but not their pixels, which the pixel mouse divides by. The page scale follows the
+    /// cell height, so the page zooms with the terminal's font.
     fn take_size(&mut self) {
         self.size = self.tty.size();
-        if let Some((w, h)) = self.size.cell_px(self.scale) {
-            (self.cell_w, self.cell_h) = (w, h);
+        (self.cell_w, self.cell_h) = self.probe.cell_px(self.size, self.display);
+        let base = self.probe.cell_px(self.start, self.display).1;
+        self.scale = page_scale(self.display, self.cell_h, base);
+        if trace::enabled() {
+            let s = self.size;
+            trace::mark(&format!("size {}x{} cells, {}x{} px, cell {}x{} px, probe cell {:?}, scale {}", s.cols, s.rows, s.xpix, s.ypix, self.cell_w, self.cell_h, self.probe.cell, self.scale));
+        }
+    }
+
+    /// Gives the engine the page width, and the page scale when a font zoom changed it.
+    fn size_engine(&self, css_width: f64) {
+        if self.engine.scale.get() == self.scale {
+            self.engine.resize(css_width);
+        } else {
+            self.engine.rescale(self.scale, css_width);
         }
     }
 
@@ -1244,7 +1272,7 @@ impl Preview {
         let anchor = self.anchor();
         let back = self.back_anchors();
         let (toc, css_width) = self.fit();
-        self.engine.resize(css_width);
+        self.size_engine(css_width);
         self.measure();
         self.stale_hover();
         self.settle_at(anchor, 0);
@@ -1285,7 +1313,7 @@ impl Preview {
         self.layout = self.engine.layout();
         self.doc_px = (self.layout.height * self.scale).ceil() as u32;
         if trace::enabled() {
-            trace::mark(&format!("page height {} px", self.layout.height));
+            trace::mark(&format!("page height {} px, width {} px", self.layout.height, f64::from(u32::from(self.img_cols) * self.cell_w) / self.scale));
         }
     }
 
@@ -1735,6 +1763,15 @@ fn input_loop(fd: i32, tx: Sender<Event>, paused: Arc<AtomicBool>, first: Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_page_scale_follows_the_cell_height() {
+        assert_eq!(page_scale(2.0, 38, 38), 2.0);
+        assert_eq!(page_scale(2.0, 57, 38), 3.0);
+        assert_eq!(page_scale(2.0, 19, 38), 1.0);
+        assert_eq!(page_scale(1.0, 40, 32), 1.25);
+        assert_eq!(page_scale(2.0, 38, 0), 2.0);
+    }
 
     #[test]
     fn maps_cells_to_page_points() {

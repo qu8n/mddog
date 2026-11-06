@@ -525,7 +525,7 @@ fn c2_scroll_moves_code() {
     let before = pixels(&e);
     let code = e.layout().blocks[0];
     assert_eq!(e.code_scroll(300.0, code.top + code.height / 2.0, 50.0).len(), 1);
-    assert_eq!(e.code_positions(), [100.0], "50 CSS px at scale 2");
+    assert_eq!(e.code_positions(), [50.0], "in CSS px");
     assert_ne!(pixels(&e), before, "the scroll repaints");
 }
 
@@ -616,7 +616,7 @@ fn w1_wide_table_scrolls() {
 fn w2_scroll_view_moves_both() {
     let e = page(WIDE_TABLE, 400.0);
     assert_eq!(e.code_scroll_view(0.0, e.layout().height, 40.0).len(), 2);
-    assert_eq!(e.code_positions(), [80.0, 80.0]);
+    assert_eq!(e.code_positions(), [40.0, 40.0]);
 }
 
 #[test]

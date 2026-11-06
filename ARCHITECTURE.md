@@ -248,11 +248,18 @@ Layout needs the display's backing scale. `term::screen::display_scale()` reads 
 - With several displays at one scale, that scale wins. With mixed scales, the scale of the display that holds the frontmost window wins, because that is where the terminal was typed into. If that lookup fails, the main display wins.
 - Headless mode starts with `display_scale()` directly.
 
+**Font zoom.** The page scale follows the terminal's font size: `page_scale` in `preview.rs` is the display scale times the cell height over the cell height at startup. `Preview::display` holds the display scale, and `Preview::scale` holds the page scale that every CSS-to-device conversion divides by (mouse hits, scroll math, tiles, the loader). `Preview::start` keeps the terminal size at startup, and the startup cell comes from it at the current display scale, so a wrong `SCALE_GUESS` doesn't skew the zoom. The cell size guesses in `Probe::cell_px` take the display scale, not the page scale.
+
+- `take_size` sets the cell and the page scale together on every size read. `size_engine` then calls `Engine::resize`, or `Engine::rescale` when the scale changed.
+- The page width in CSS px is the pane's pixels over the page scale, so the page always spans the pane's pixels. Zooming in or out never makes the tiles bigger than the pane, which keeps them in herdr's image quota.
+- `Engine::rescale` scales the sideways offsets of wide blocks with the page, so a scrolled code block stays on the same text. `code_positions` saves them in CSS px, so a reload at another scale restores them too.
+- A terminal that doesn't report its pixel size gets a fixed cell (the probe's answer or `fallback_cell`), so its page never zooms.
+
 ### Highlighting
 
 Code is highlighted in two steps. `render::highlight::classify` (tree-sitter) and `render::highlight::textmate` (irosashi, a Rust port of vscode-textmate) classify code the way GitHub does, with `pl-*` classes. `classify::block` maps each class to a token (`Tok`: keyword, string, comment, number, function, added, removed, meta, and a few GitHub-specific kinds) and returns per-line runs. Layout then colors each token with the theme's syntax colors.
 
-- tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, and PHP. TextMate covers the rest with 128 grammars from starry-night. A TextMate grammar is a JSON file of regex rules that tag code with scope names such as `comment`. The format comes from the TextMate editor, and VS Code and GitHub now use it too. `tests/textmate.golden` pins the TextMate output.
+- tree-sitter covers JS, TS, TSX, Python, Rust, Go, Ruby, CSS, HTML, PHP, and Nix. The Nix query is written for the first matching pattern to win, but tree-sitter-highlight uses the last one, so `classify.rs` reverses the order of its patterns. GitHub also uses tree-sitter for C#, Swift, and Elixir, but each of those parsers would add 1.4 to 5.4 MB to the binary, so they stay on TextMate. TextMate covers the rest with 128 grammars from starry-night. A TextMate grammar is a JSON file of regex rules that tag code with scope names such as `comment`. The format comes from the TextMate editor, and VS Code and GitHub now use it too. `tests/textmate.golden` pins the TextMate output.
 - Grammars are embedded deflated. `build.rs` compresses each one into `OUT_DIR` (2.9 MB to 0.54 MB) and lists them by scope. A page inflates only the grammars it needs, and the highlighter is built again when a new language's include chain adds grammars. It reads a grammar's header when it registers it, and parses the grammar when tokenizing first reaches it.
 - A code block with no known language comes back plain. TextMate reads `\r` as a line end, so the highlighter gives it a space of the same length, and CRLF code keeps its offsets.
 - **Pool.** `highlight::prefetch(doc)` runs inside `Engine::load`. It sends each code block (language and text) to one of 4 threads (`WORKERS_MAX`). A language always goes to the same thread, in the order languages first showed up, so the first use of each language (a query compile or a grammar load, up to about 12 ms) runs beside the others. The threads live on, so a compiled language serves later pages. A made-up fence label can't start more than 4 threads, and the table of language slots is cleared at 256.
@@ -340,7 +347,7 @@ Each tile is sent with one extra cell row below it, a copy of the next tile's fi
 
 Past the limit, the tiles farthest from the view are freed and re-sent when needed. Visible tiles are never freed. So a view larger than the limit on its own (a full-screen pane on a 5K display under herdr) goes over it, and herdr then drops the oldest images.
 
-**Pixels.** `Engine::snapshot` draws into a buffer the caller allocates. The viewer allocates a zeroed shm object (its size rounds up to whole pages), so CoreGraphics draws straight into it and a tile needs no pixel conversion and no copy. A tile is drawn at the display's scale. The page is laid out at that scale too, so nothing is resampled. The engine keeps no image of the whole page: it draws each tile from the display list when asked. So memory does not grow with the page, and a tile that was freed is drawn again from the list.
+**Pixels.** `Engine::snapshot` draws into a buffer the caller allocates. The viewer allocates a zeroed shm object (its size rounds up to whole pages), so CoreGraphics draws straight into it and a tile needs no pixel conversion and no copy. A tile is drawn at the page scale: the display's scale, zoomed with the terminal font (see Scale). The page is laid out at that scale too, so nothing is resampled. The engine keeps no image of the whole page: it draws each tile from the display list when asked. So memory does not grow with the page, and a tile that was freed is drawn again from the list.
 
 ### Bands under herdr
 
@@ -364,7 +371,7 @@ A glide (see Keys and scrolling) draws the view at any pixel offset, not only on
 
 ### First paint
 
-The main thread probes the terminal while the worker reads the file. `Tty::probe` sends CSI 16 t, XTVERSION, DECRQM for modes 2026 and 1016, a Kitty `a=q` query for each route, then DA1, and waits up to 1 s. It makes the shm object and temp file the queries name, and removes them when it is done.
+The main thread probes the terminal while the worker reads the file. `Tty::probe` sends CSI 16 t, XTVERSION, DECRQM for modes 2026 and 1016, a Kitty `a=q` query for each route, then DA1, and waits up to 1 s. It makes the shm object and temp file the queries name, and removes them when it is done. The cell size comes from the window: its pixel size from `TIOCGWINSZ` over its rows and columns, read again on each resize. The CSI 16 t answer is the fallback for a terminal that reports no pixel size, since iTerm2 answers it in points. Warp reports its window in points and ignores CSI 16 t, so when CSI 16 t gets no answer, a cell under 7 points wide is taken as points. A terminal that answers CSI 16 t reports its window in device pixels, so that guess is skipped there: a font zoomed far out has cells that small too, and doubling them drew the page at twice the pane's size, which went over herdr's image quota and blanked the top of the view.
 
 - `Engine::new` makes no window and starts no framework, so it takes almost no time. The load, which is parse, highlight, and layout, is the first real cost. A trace of a cold start, with the stand-in terminal, shows layout at about 15 ms, highlighting at about 14 ms (bounded by the slowest language's query compile), and raster and send at about 10 ms. The page reaches the terminal in about 40 ms of mddog's own time.
 - The page lays out at `SCALE_GUESS` while a thread reads the real scale. `settle_scale` fixes a wrong guess before anything is drawn (see Scale).
@@ -381,7 +388,7 @@ While a file loads, `Loader` (`loading.rs`) draws a page-shaped skeleton in term
 
 - It draws only when the page is not ready after 100 ms (`DELAY`), so a warm start usually finishes before it shows.
 - Once drawn, it stays at least 100 ms (`MIN_SHOWN`), so it never flashes.
-- The margins are the page's 24 CSS px padding times the screen scale, over the cell size. The colors come from the theme.
+- The margins are the page's 24 CSS px padding times the page scale, over the cell size. The colors come from the theme.
 - `Loader::tune` takes the probe's answers. A resize redraws the frame in full.
 - `show()` calls `finish()` after the tile snapshots, so the minimum wait overlaps that work, and the clear and the first tiles go out in one synchronized update.
 - The `term::WRITE` lock covers each whole write from `Tty::write` and the loader, so a frame can't split the probe query.
@@ -395,7 +402,7 @@ While a file loads, `Loader` (`loading.rs`) draws a page-shaped skeleton in term
 
 One `scroll_step` table maps the scroll keys to a step: a row, a wheel step (3 rows), half a screen, or a screen. The page, the `?` screen, and `App::instant` all read it, so the help screen scrolls with the page's keys: `d` and `u` go half a screen, Space, `f`, `b`, and the page keys a screen, `j` and `k` a row, and the wheel 3 rows. Ctrl-b scrolls up a page there too. `q` and Ctrl-c quit, and any other key closes help.
 
-**Resize.** Resizes are debounced by 120 ms. A resize or contents toggle reuses the file's bytes when they still match. A resize lays the live page out again instead of loading it (`Preview::resize_in_place`): it calls `Engine::resize`, which lays the same `Doc` out at the new width, measures, and scrolls to the same content anchor a reload uses. A resize takes a few milliseconds, because it re-parses nothing. It falls back to a full reload when the result could differ from a fresh load:
+**Resize.** Resizes are debounced by 120 ms. A resize or contents toggle reuses the file's bytes when they still match. A resize lays the live page out again instead of loading it (`Preview::resize_in_place`): it calls `Engine::resize` (or `Engine::rescale` after a font zoom, see Scale), which lays the same `Doc` out at the new width, measures, and scrolls to the same content anchor a reload uses. A resize takes a few milliseconds, because it re-parses nothing. It falls back to a full reload when the result could differ from a fresh load:
 
 - The file changed (with live reload on), or the macOS appearance changed under a theme pair.
 - A click changed the page (a copy, a `<details>` toggle, a zoom), text is selected, or a diagram is expanded.

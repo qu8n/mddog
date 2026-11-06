@@ -158,17 +158,20 @@ impl Engine {
         st.fonts.set_families(body, code);
         st.doc = Some(doc::parse(if src.trim().is_empty() { "*This file is empty.*" } else { src }));
         crate::trace::mark("parsed");
-        if let Some(doc) = &st.doc {
-            crate::render::highlight::prefetch(doc);
+        st.images = Images::new(base.to_path_buf());
+        let St { doc, images, th, .. } = &mut *st;
+        if let Some(doc) = doc {
+            let mut srcs = vec![];
+            crate::render::images::sources(&doc.blocks, &mut srcs);
+            // The local images decode and the diagrams build while the code highlights.
+            crate::render::highlight::prefetch(doc, || {
+                images.prefetch(srcs);
+                crate::trace::mark("local images decoded");
+                crate::render::mermaid::prefetch(&doc.blocks, th);
+                crate::trace::mark("diagrams built");
+            });
             crate::trace::mark("code highlighted");
         }
-        st.images = Images::new(base.to_path_buf());
-        let mut srcs = vec![];
-        if let Some(doc) = &st.doc {
-            crate::render::images::sources(&doc.blocks, &mut srcs);
-        }
-        st.images.prefetch(srcs);
-        crate::trace::mark("local images decoded");
         st.wrap = wrap;
         st.toggled.clear();
         st.views.clear();
@@ -237,9 +240,14 @@ impl Engine {
     }
 
     pub fn rescale(&self, scale: f64, width: f64) {
+        let ratio = (scale / self.scale.get()) as f32;
         self.scale.set(scale);
         self.width.set(width);
         let mut st = self.st.borrow_mut();
+        // Sideways offsets are in layout pixels, so they scale with the page to stay on the same text.
+        for o in &mut st.ov.hoff {
+            *o *= ratio;
+        }
         self.relayout(&mut st);
     }
 
@@ -610,9 +618,10 @@ impl Engine {
         out
     }
 
-    /// The wide blocks' sideways offsets in layout pixels, in page order, for `code_restore`.
+    /// The wide blocks' sideways offsets in CSS pixels, in page order, for `code_restore`, which may run at another scale.
     pub fn code_positions(&self) -> Vec<f32> {
-        self.st.borrow().ov.hoff.clone()
+        let s = self.scale.get() as f32;
+        self.st.borrow().ov.hoff.iter().map(|o| o / s).collect()
     }
 
     pub fn code_restore(&self, saved: &[f32]) {
@@ -620,7 +629,7 @@ impl Engine {
         let st = &mut *st;
         for (i, &v) in saved.iter().enumerate() {
             if let (Some(o), Some(h)) = (st.ov.hoff.get_mut(i), st.page.hscroll.get(i)) {
-                *o = v.min(h.max);
+                *o = (v * self.scale.get() as f32).min(h.max);
             }
         }
         self.overlay(st);

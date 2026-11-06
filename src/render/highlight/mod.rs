@@ -50,8 +50,8 @@ thread_local! {
 /// Highlights the code blocks of a new page on a few threads, each language always on the same one, so the
 /// first use of each language (a tree-sitter query compile or a TextMate grammar load, up to about 12 ms)
 /// runs alongside the others. The threads live on, so a compiled grammar serves later pages too. Layout then
-/// reads `MEMO`.
-pub fn prefetch(doc: &Doc) {
+/// reads `MEMO`. `meanwhile` runs while the threads work.
+pub fn prefetch(doc: &Doc, meanwhile: impl FnOnce()) {
     let mut blocks = vec![];
     code_blocks(&doc.blocks, &mut blocks);
     let old = MEMO.take();
@@ -84,6 +84,7 @@ pub fn prefetch(doc: &Doc) {
         }
     });
     drop(back);
+    meanwhile();
     for (lang, text, runs) in results {
         memo.insert((lang, text), runs);
     }
@@ -124,7 +125,7 @@ mod tests {
     #[test]
     fn made_up_fence_labels_share_a_few_threads() {
         let md: String = (0..50).map(|i| format!("```lang{i}\nx = {i}\n```\n\n")).collect();
-        super::prefetch(&crate::render::doc::parse(&md));
+        super::prefetch(&crate::render::doc::parse(&md), || {});
         assert!(super::WORKERS.with_borrow(Vec::len) <= super::WORKERS_MAX);
         assert_eq!(super::MEMO.with_borrow(std::collections::HashMap::len), 50);
     }

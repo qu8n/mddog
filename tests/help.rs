@@ -366,6 +366,67 @@ fn backspace_after_a_resize_returns_to_the_same_text() {
     assert_eq!(back, before, "Backspace went to another place after a resize re-wrapped the page");
 }
 
+/// The last page size in the trace, as (scale, CSS width), after the `after` mark.
+fn page_after(trace: &std::path::Path, after: &str) -> (f64, f64) {
+    let end = Instant::now() + LIMIT;
+    loop {
+        let log = std::fs::read_to_string(trace).unwrap_or_default();
+        if let Some(i) = log.rfind(after) {
+            let scale = log[i..].lines().rev().find_map(|l| l.rsplit_once(", scale ").map(|s| s.1.trim().to_string()));
+            let width = log[i..].lines().rev().find_map(|l| l.rsplit_once(" px, width ").and_then(|w| w.1.strip_suffix(" px")).map(str::to_string));
+            if let (Some(s), Some(w)) = (scale, width) {
+                return (s.parse().unwrap(), w.parse().unwrap());
+            }
+        }
+        assert!(Instant::now() < end, "no page size after {after:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn the_page_zooms_with_the_terminal_font() {
+    let dir = scratch("zoom");
+    let trace = dir.join("trace.log");
+    let tiles = dir.join("tiles");
+    std::fs::create_dir_all(&tiles).unwrap();
+    std::fs::write(dir.join("mddog/config.toml"), "smooth_scroll = false\n").unwrap();
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("MDDOG_SCALE", "2"), ("MDDOG_DUMP_TILES", tiles.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = open(GFM, 100, &env);
+    wait_for(&out, 0, b"a=p,");
+    let start = page_after(&trace, "terminal probed");
+    tty.write_all(b"]]]]]]").unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let top = top_after(&trace, "key Char(']')");
+    // A font twice as big in the same window: half the cells, each twice as big.
+    let sent = out.lock().unwrap().len();
+    resize(&tty, libc::winsize { ws_row: 20, ws_col: 50, ws_xpixel: 100 * 18, ws_ypixel: 40 * 38 });
+    wait_trace(&trace, "mark resize");
+    let zoomed = page_after(&trace, "mark resize");
+    let zoomed_top = top_after(&trace, "mark resize");
+    wait_for(&out, sent, b"a=p,");
+    // And back to the startup font.
+    resize(&tty, libc::winsize { ws_row: 40, ws_col: 100, ws_xpixel: 100 * 18, ws_ypixel: 40 * 38 });
+    let end = Instant::now() + LIMIT;
+    let back = loop {
+        let back = page_after(&trace, "mark resize");
+        if back == start || Instant::now() > end {
+            break back;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    // Tiles span the pane's pixels and no more at any zoom, so the image quota holds. The width sits at bytes 16..20 of a PNG.
+    let widths: Vec<u32> = std::fs::read_dir(&tiles).unwrap().filter_map(|e| std::fs::read(e.ok()?.path()).ok()?.get(16..20).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))).collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(start, (2.0, 900.0), "the page at startup is not at the display's scale");
+    assert_eq!(zoomed, (4.0, 450.0), "the page did not zoom with the font");
+    assert!(!top.is_empty());
+    assert_eq!(zoomed_top, top, "the zoom moved the view to other content");
+    assert_eq!(back, start, "the page did not come back to its startup size");
+    assert!(!widths.is_empty() && widths.iter().all(|&w| w == 100 * 18), "tiles are not the pane's width: {widths:?}");
+}
+
 #[test]
 fn hints_work_while_help_shows() {
     let Viewer { mut child, mut tty, out } = open(GFM, 100, &[]);

@@ -27,13 +27,18 @@ pub struct Size {
 
 impl Size {
     /// The cell in pixels. Warp fills the window's pixel size in points, so a cell under 7 px wide per unit of
-    /// `scale` (no real font is that small) is taken as points and scaled up.
+    /// `scale` is taken as points and scaled up. A zoomed-out font can be that small too, so `Probe::cell_px`
+    /// skips this guess when the terminal answered `CSI 16 t`, which Warp ignores.
     pub fn cell_px(&self, scale: f64) -> Option<(u32, u32)> {
+        let cols = u32::from(self.cols);
+        let guess = cols > 0 && f64::from(u32::from(self.xpix) / cols) < 7.0 * scale;
+        self.cell_px_in(if guess { scale } else { 1.0 })
+    }
+
+    /// The cell, with the window's pixel size taken as `unit` device pixels each.
+    fn cell_px_in(self, unit: f64) -> Option<(u32, u32)> {
         let (cols, rows) = (u32::from(self.cols), u32::from(self.rows));
-        let (mut x, mut y) = (u32::from(self.xpix), u32::from(self.ypix));
-        if cols > 0 && f64::from(x / cols) < 7.0 * scale {
-            (x, y) = ((f64::from(x) * scale) as u32, (f64::from(y) * scale) as u32);
-        }
+        let (x, y) = ((f64::from(self.xpix) * unit) as u32, (f64::from(self.ypix) * unit) as u32);
         let (w, h) = (x.checked_div(cols)?, y.checked_div(rows)?);
         (w > 0 && h > 0).then_some((w, h))
     }
@@ -77,11 +82,14 @@ impl Probe {
         self.answered && !(self.kitty_direct || self.kitty_shm || self.kitty_temp)
     }
 
+    /// The cell in device pixels: from the window's size, else the probe's answer, else a default. The window
+    /// comes first because iTerm2 answers `CSI 16 t` in points, and the window's size follows a font change.
+    /// Every terminal that answers `CSI 16 t` gives its window in device pixels, so then the window is not
+    /// taken as points, however small the font.
     pub fn cell_px(&self, size: Size, scale: f64) -> (u32, u32) {
-        match self.cell {
-            Some((w, h)) if w > 0 && h > 0 => (u32::from(w), u32::from(h)),
-            _ => size.cell_px(scale).unwrap_or_else(|| fallback_cell(scale)),
-        }
+        let probed = self.cell.filter(|&(w, h)| w > 0 && h > 0).map(|(w, h)| (u32::from(w), u32::from(h)));
+        let window = if probed.is_some() { size.cell_px_in(1.0) } else { size.cell_px(scale) };
+        window.or(probed).unwrap_or_else(|| fallback_cell(scale))
     }
 
     pub fn medium(&self) -> kitty::Medium {
@@ -571,13 +579,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cell_size_comes_from_the_probe_then_the_window_then_a_default() {
+    fn cell_size_comes_from_the_window_then_the_probe_then_a_default() {
+        // iTerm2 on a Retina screen: the window in device pixels, the probe's answer in points.
         let size = Size { cols: 80, rows: 24, xpix: 1600, ypix: 960 };
         let probe = Probe { cell: Some((10, 20)), ..Probe::default() };
-        assert_eq!(probe.cell_px(size, 2.0), (10, 20));
-        assert_eq!(Probe::default().cell_px(size, 2.0), (20, 40));
+        assert_eq!(probe.cell_px(size, 2.0), (20, 40));
+        assert_eq!(probe.cell_px(Size { xpix: 0, ypix: 0, ..size }, 2.0), (10, 20));
         assert_eq!(Probe::default().cell_px(Size { xpix: 0, ..size }, 2.0), (16, 32));
         assert_eq!(Size { cols: 0, ..size }.cell_px(2.0), None);
+    }
+
+    #[test]
+    fn a_small_font_is_not_taken_as_points_when_the_terminal_answered_the_probe() {
+        // Ghostty zoomed far out, here or under herdr: 12 px cells. Doubled, the tiles went over herdr's image quota.
+        let size = Size { cols: 215, rows: 78, xpix: 2580, ypix: 1872 };
+        let probe = Probe { cell: Some((19, 38)), ..Probe::default() };
+        assert_eq!(probe.cell_px(size, 2.0), (12, 24));
+        // Warp ignores `CSI 16 t` and gives its window in points.
+        let warp = Size { cols: 89, rows: 53, xpix: 749, ypix: 863 };
+        assert_eq!(Probe::default().cell_px(warp, 2.0), (16, 32));
     }
 
     #[test]
