@@ -18,6 +18,8 @@ pub const RESIZE_DEBOUNCE: std::time::Duration = std::time::Duration::from_milli
 /// A jump key this soon after the last one glides in `FAST_GLIDE`, so a held key keeps up.
 pub const REPEAT: std::time::Duration = std::time::Duration::from_millis(100);
 pub const FAST_GLIDE: std::time::Duration = std::time::Duration::from_millis(50);
+/// How long a glide over one screen takes. A shorter glide takes its share.
+pub const GLIDE_PER_PAGE: std::time::Duration = std::time::Duration::from_millis(200);
 
 #[derive(Default)]
 pub struct Debounce {

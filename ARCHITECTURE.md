@@ -16,7 +16,6 @@ Related docs:
 
 - [docs/behavior.md](docs/behavior.md): the contract for keys and events, with a test for each row.
 - [docs/themes.md](docs/themes.md): how to write a theme.
-- [docs/archive/](docs/archive/design-notes.md): measurements, spike findings, and rejected approaches.
 
 ## Project structure
 
@@ -24,7 +23,7 @@ Related docs:
 src/
   lib.rs             crate root: exports render, the other modules are hidden and serve the binary
   main.rs            CLI: options, file and stdin checks
-  config.rs          optional config file: theme, live reload, smooth scroll, glide time, copy on select, font smoothing, file list extensions
+  config.rs          optional config file: theme and copy on select
   theme.rs           themes: the token list, built-in themes, theme files and bases, and the terminal chrome palette
   headless.rs        --headless: render to PNG or WebP files, for the Claude Code plugin
   watch.rs           file watcher
@@ -75,7 +74,7 @@ build.rs             deflates each TextMate grammar into OUT_DIR and lists them
 fixtures/            gfm.md, diagram.svg, math/ (real-world math files), themes/ (sample theme files)
 tests/               integration tests (help over a pty, engine checks, search, watch, headless, math and textmate goldens)
 reference/           Node and Python dev tools: GitHub capture, grammar export, e2e, bench
-docs/                behavior spec, theme guide, terminal UAT notes, archive
+docs/                behavior spec, theme guide and terminal UAT notes
 plugins/
   claude-code/       Claude Code plugin: a pane that draws --headless output
 ```
@@ -95,7 +94,7 @@ flowchart TD
 
 1. The viewer or headless mode reads the file and calls `Engine::load(src, base, wrap, theme)`.
 2. `render::doc::dollars::protect_math` escapes math so the parser keeps it. `render::doc::parse` then reads the Markdown with pulldown-cmark (GFM tables, footnotes, strike-through, task lists, front matter) and a small raw HTML reader. The result is a `Doc`: a block tree plus each top-level block's source lines.
-3. `render::highlight::prefetch` highlights the code blocks on a few threads.
+3. `render::highlight::prefetch` highlights the code blocks on a few threads. While they run, `Engine::load` decodes local images and builds the Mermaid diagrams (see Overlap below).
 4. `render::layout::layout` turns the `Doc` into a `Page`: a display list of rects, text runs, images, and polylines in device pixels, plus links, anchors, headings, buttons, wide blocks, and the text of the page.
 5. The viewer asks for tiles. `Engine::snapshot` draws the items that touch a tile with CoreGraphics, straight into the buffer that is sent to the terminal. Headless mode gives it a plain buffer and writes the tiles as PNG or WebP files instead.
 
@@ -147,7 +146,7 @@ A SIGINT that arrives while the editor runs is ignored. The signal handler check
 - `--help` is short and points to the `?` screen for keys. It works even when the config file is broken, because `main` loads the config only after it parses the options.
 - `--headless COLS FILE` runs headless mode. Like the viewer, it stops on a broken config. `--webp` needs `--headless`.
 - The viewer refuses to start in a terminal that has no Kitty graphics, and in Warp and zellij, which garble a scrolled image. It also stops with an error when it can't put the terminal in raw mode, since keys would echo onto the page.
-- `mdd FILE` opens any text file. When the extension is not in `file_list.extensions`, the status row says `Not a .md file, shown as Markdown`.
+- `mdd FILE` opens any text file. When the extension is not `.md` or `.markdown`, the status row says `Not a .md file, shown as Markdown`.
 
 ### Config
 
@@ -156,16 +155,13 @@ A SIGINT that arrives while the editor runs is ignored. The signal handler check
 | Key | Default | Effect |
 |---|---|---|
 | `theme` | `light:github-light,dark:github-dark` | One theme, or one per macOS appearance. A theme is a built-in name or a `.css` path. |
-| `live_reload` | `true` | Reload when the file changes. |
-| `smooth_scroll` | `true` | Jump keys glide. `false` makes every jump instant. |
-| `glide_ms_per_page` | `200` | How long a glide over one screen takes. |
 | `copy_on_select` | `false` | Copy a selection when the mouse button is released. |
-| `font_smoothing` | the macOS setting | Draw text with font smoothing, which makes it a little heavier. Unset, mddog reads `defaults -g AppleFontSmoothing` once at startup (0 turns it off). |
-| `file_list.extensions` | `["md", "markdown"]` | Which files the file list shows, and which ones "Did you mean" suggests. The full list, without dots, in any case. `mdd FILE` opens any text file, whatever its extension. |
 
 `main` loads the file once, before the viewer takes the terminal, into a `OnceLock`. Everything else calls `config::get()`, which returns the defaults when nothing was loaded (tests, the library).
 
-Unknown keys and bad values stop the run with one line that names the file, the line, and the dotted key. `parse` also reads the theme files, so a missing file or a bad theme stops the run the same way. A key that was removed from mddog, such as `mermaid.engine`, is an unknown key like any other.
+Unknown keys and bad values stop the run with one line that names the file, the line, and the dotted key. `parse` also reads the theme files, so a missing file or a bad theme stops the run the same way. A key that was removed from mddog, such as `mermaid.engine` or `smooth_scroll`, is an unknown key like any other.
+
+Some choices are constants, not keys: live reload is always on for a file, jump keys always glide (200 ms a screen, `app::GLIDE_PER_PAGE`), font smoothing follows macOS's `AppleFontSmoothing` read once at startup (0 turns it off), and the file list shows `.md` and `.markdown` files (`picker::EXTENSIONS`).
 
 ## Page look: themes
 
@@ -218,7 +214,7 @@ The terminal parts draw with the theme's `Palette`: the file list, the status ba
 
 ### Raster
 
-`render::raster::render_into` draws the items that touch a tile with CoreGraphics into an RGBA buffer, then draws the overlay on top: search marks (the current match in another color), the selection, button hover and "Copied!" state, the scroll bars of wide blocks, and the expanded diagram. The overlay lives outside the display list, so a search or selection change never needs a new layout. Text is drawn with antialiasing and sub-pixel positions. Font smoothing is the engine's `smooth` flag, which comes from the config (see `font_smoothing`). `Engine::snapshot` takes a CSS-pixel range, a scale, and a function that allocates the buffer, and draws at that scale even when it differs from the layout scale (headless uses this for its small WebP copies).
+`render::raster::render_into` draws the items that touch a tile with CoreGraphics into an RGBA buffer, then draws the overlay on top: search marks (the current match in another color), the selection, button hover and "Copied!" state, the scroll bars of wide blocks, and the expanded diagram. The overlay lives outside the display list, so a search or selection change never needs a new layout. Text is drawn with antialiasing and sub-pixel positions. Font smoothing is the engine's `smooth` flag, which comes from the macOS setting (`config::font_smoothing`). `Engine::snapshot` takes a CSS-pixel range, a scale, and a function that allocates the buffer, and draws at that scale even when it differs from the layout scale (headless uses this for its small WebP copies).
 
 ### Engine
 
@@ -264,6 +260,7 @@ Code is highlighted in two steps. `render::highlight::classify` (tree-sitter) an
 - A code block with no known language comes back plain. TextMate reads `\r` as a line end, so the highlighter gives it a space of the same length, and CRLF code keeps its offsets.
 - **Pool.** `highlight::prefetch(doc)` runs inside `Engine::load`. It sends each code block (language and text) to one of 4 threads (`WORKERS_MAX`). A language always goes to the same thread, in the order languages first showed up, so the first use of each language (a query compile or a grammar load, up to about 12 ms) runs beside the others. The threads live on, so a compiled language serves later pages. A made-up fence label can't start more than 4 threads, and the table of language slots is cleared at 256.
 - **`MEMO`.** The results go into a thread-local `MEMO`, keyed by language and text. `highlight()` reads `MEMO` first and computes on the calling thread only on a miss. `prefetch` keeps the old page's entries it can reuse, so a reload with unchanged code costs nothing. `highlight::code_text` (a tab as four spaces) is the one rule that layout and `prefetch` both use for the text, so they share one `MEMO` key.
+- **Overlap.** `Engine::load` has one overlap window. `highlight::prefetch(doc, meanwhile)` sends the highlight jobs, runs `meanwhile` (local image decode, then Mermaid diagram builds on bounded scoped threads), then collects the highlights. `render::mermaid` keeps a thread-local `MEMO` too: `mermaid::prefetch` fills it, and it keeps each tree until the next `mermaid::prefetch` (see Mermaid).
 - A closed `<details>` lays out its body only when opened, so its code is highlighted then.
 - The threads and the file reader have a 64 MiB stack (`render::STACK`).
 
@@ -292,7 +289,7 @@ Known gaps are small and readable: script letter shapes differ from TeX's, `\mat
 
 ### Mermaid
 
-`render::mermaid::tree` draws a diagram in two steps. mermaid-rs-renderer lays the diagram out and writes SVG, and resvg draws that SVG into a bitmap. Both run in process, with no browser and no script. Layout calls it for each Mermaid block, so diagrams are in the first paint. A diagram that fails to draw shows its source as a code block.
+`render::mermaid::tree` draws a diagram in two steps. mermaid-rs-renderer lays the diagram out and writes SVG, and resvg draws that SVG into a bitmap. Both run in process, with no browser and no script. Layout calls it for each Mermaid block, so diagrams are in the first paint. Each built tree stays in the thread-local `MEMO`, keyed by source, until the next `Engine::load` calls `mermaid::prefetch`, so a resize or a `<details>` toggle draws the diagrams again without building them again. Only a load changes the theme, so the source alone is a safe key, and the memo holds no more than the page's diagrams. A diagram that fails to draw shows its source as a code block, and so does one whose bitmap would pass the SVG caps (see Images).
 
 **Look.** The theme decides how a diagram looks. There is no config key for it. mermaid-rs-renderer's light or dark base palette is picked by the theme's `dark` flag, and the diagram colors are `Theme` fields: `diagram_fill`, `diagram_border`, `diagram_line`, and `diagram_label_bg`. With the `github` layout they come from the theme's tokens (`pre-bg`, `border`, `fg-muted`, `bg`). With the `obsidian` layout they are the colors of mermaid's default theme, inverted in dark mode, and the diagram sits at the left edge (`diagram_left`). In both, the background, text, and cluster colors also come from the tokens (`bg`, `text`, `code-bg`, `alt-bg`). The text uses the theme's body font. resvg has its own font database (`svg::fontdb`), so `svg::svg_families` turns CSS's names for the system font into SF's family name there (`SYSTEM_FONT`).
 
@@ -309,11 +306,11 @@ Known gaps are small and readable: script letter shapes differ from TeX's, `\mat
 `render::images::Images` loads each image the layout asks for, by its `src`.
 
 - **Local files** load at once, during layout. They are confined to a root folder (see Security) by `render::media::confined_media`. A path outside the root, a path that isn't a file, or bytes that don't decode make the image fail.
-- **Decode.** SVG goes through resvg (`usvg`), so it stays sharp at any size. PNG, JPEG, GIF, and WebP go through the `image` crate and are premultiplied. An image wider than its line is scaled down to the line's width.
+- **Decode.** SVG goes through resvg (`usvg`), so it stays sharp at any size. PNG, JPEG, GIF, and WebP go through the `image` crate and are premultiplied. An image wider than its line is scaled down to the line's width. An SVG draw is capped at 16384 px a side (`svg::MAX_SIDE`) and 2^25 pixels (`MAX_PIXELS`), since an SVG may declare any size and a bigger draw panics in tiny-skia or takes gigabytes. `svg::fit` rounds the size to whole pixels first, then scales a bigger image down to the caps in f64, keeping its aspect.
 - **Remote images** (`http` and `https`) are not fetched during layout. The layout draws each as its alt text and records the URL in `Page::wanted`. After the layout, `Engine::load` passes them to `Images::fetch`, which queues each on `render::remote`. `media::is_remote` decides what counts as a web URL, with a browser's rules: tabs and line breaks dropped, the ends trimmed, `http` or `https` in any case. Each `Images` has a stop flag per fetch, and its `Drop` sets them, so a reload ends the fetches of the page it replaces.
 - **Late.** When a fetch ends, the image is decoded on the main thread by `take_images()` (which the viewer polls) or `wait_images()` (which headless calls), and the page is laid out again. A failed fetch leaves the box as it was, with no layout change. `pending_images()` says how many are still loading.
-- An image with a `width` attribute keeps it. An image that is still loading, or failed, shows its alt text in muted italics, or `[image]` when it has none.
-- The viewer gives remote images 60 s (`LATE_LIMIT`), and keeps its position when the page grows. Headless mode gives them 4 s (`REMOTE_LIMIT`) and draws what it has.
+- An image with a `width` attribute keeps it. An image that is still loading, or failed, or an SVG that won't draw, shows its alt text in muted italics, or `[image]` when it has none. A failed fetch is not retried until a reload (`r`), and needs no new layout, since it draws the same alt text as a loading one.
+- The viewer keeps its position when the page grows. For 60 s after a load (`LATE_LIMIT`) it ticks fast and holds back prefetch while fetches are pending (`image_wait`). Images that arrive later still show. The window only sets the tick. Headless mode gives them 4 s (`REMOTE_LIMIT`) and draws what it has.
 
 ### Remote images
 
@@ -411,9 +408,9 @@ One `scroll_step` table maps the scroll keys to a step: a row, a wheel step (3 r
 **Glides.** The jump keys glide: `d`/`u`, `f`/`b`, Space, PageUp/PageDown, `g`/`G`, Home/End, Backspace/Ctrl-o, digits, `J`/`K`, `]]`/`[[`. `App::handle` turns their `Action::Scroll` into `Action::Glide`. The keys in `App::instant` (`j`, `k`, `n`, `N`, Enter, the wheel) move at once. `App.scroll` takes the target at once, so the status row and sidebar show where the view is going. Only the drawn offset moves.
 
 - `app::Glide` eases out (cubic) from where the view was drawn to the target. It is time-based, so a late frame skips ahead and the glide still ends on time. It covers at most one screen, so `G` from the top glides only the last screen. A jump during a glide starts a new one from the drawn offset, and may cover one screen more than the old glide had left, so quick repeated presses never skip.
-- `app::Pace` sets the time. A glide over one screen takes `glide_ms_per_page`, and a shorter one takes its share. A jump key within 100 ms (`REPEAT`) of the last one glides in 50 ms (`FAST_GLIDE`), like snacks.nvim's `animate_repeat`. Holding `f` keeps the view 1.4 to 1.9 screens behind the target, with no frame moving more than one screen.
+- `app::Pace` sets the time. A glide over one screen takes 200 ms (`GLIDE_PER_PAGE`), and a shorter one takes its share. A jump key within 100 ms (`REPEAT`) of the last one glides in 50 ms (`FAST_GLIDE`), like snacks.nvim's `animate_repeat`. Holding `f` keeps the view 1.4 to 1.9 screens behind the target, with no frame moving more than one screen.
 - `Preview` holds the running glide, `drawn` (the offset `show` last drew, where a new glide starts), `path` (the tiles a new glide passes over), and `last_jump`. `shown_px()` feeds `view()`, `grid()`, and `view_css()`, so drawing and mouse hits use the drawn offset, while `scroll_px()` stays the target everywhere else.
-- `start_glide` jumps instead when `smooth_scroll` is off, the terminal lacks mode 2026, or the path's tiles don't fit in the storage limit together (`Cache::fits`, bands included). The first `show()` sends the path's missing tiles inside its synchronized update and keeps them from eviction. Then it restarts the glide clock, so a slow send doesn't shorten the glide.
+- `start_glide` jumps instead when the terminal lacks mode 2026, or the path's tiles don't fit in the storage limit together (`Cache::fits`, bands included). The first `show()` sends the path's missing tiles inside its synchronized update and keeps them from eviction. Then it restarts the glide clock, so a slow send doesn't shorten the glide.
 - While a glide runs, the event loop wakes every 8 ms and `tick()` advances it, skipping frames that land on the same pixel. The glide ends on the first frame that reaches the target, which the easing gives a frame or two before its time runs out. Prefetch and the hover check pause.
 - `settle()`, `Action::Scroll`, `Action::Search`, a resize, an instant key, a mouse press, help, and the file list end a glide. A press ends it before it is handled, so the press and its release hit the same page point. `show()` uses `path` only while a glide runs, so a glide that ended before its first frame doesn't leave stale tile indices behind.
 - The trace's `view` line starts with `px=` (the drawn offset) and `took=` (ms in `show()`).
@@ -429,10 +426,10 @@ One `scroll_step` table maps the scroll keys to a step: a row, a wheel step (3 r
 `picker.rs` holds the list. `Picker` keeps the items, the filter, and the selection, and `draw` paints the list over the whole screen as terminal text, as the `?` screen does. `preview::browse(root)` starts with the list and no document. It draws the list right after raw mode, before the engine starts and before the terminal probe, and waits up to 50 ms for the first batch. Ctrl-p (`Action::Browse`) opens the same list over a file and keeps the last filter.
 
 - **Root.** `scope` picks the nearest folder with `.git` above the start, else the current folder. `mdd` starts from the current folder, and Ctrl-p from the open file's folder (the current folder for standard input). A folder argument is the root itself. Each Ctrl-p calls `Picker::follow`: when the open file is outside the current root, the root becomes `scope` of the file's folder, and the filter is cleared. A file under the root keeps it, so a list of a plain folder, or of a folder that holds several repos, stays put.
-- **Walk.** A walker thread uses `ignore::WalkBuilder` with `require_git(false)`, so it skips hidden and gitignored files with or without git. It keeps files whose extension is in `file_list.extensions` (`.md` and `.markdown` by default) and stops at 10,000 (`CAP`), in walk order. It sends a batch every 30 ms with `viewer::Event::Listed`, which wakes the event loop. An `AtomicBool` stops the walk when the list closes or restarts.
+- **Walk.** A walker thread uses `ignore::WalkBuilder` with `require_git(false)`, so it skips hidden and gitignored files with or without git. It keeps `.md` and `.markdown` files and stops at 10,000 (`CAP`), in walk order. It sends a batch every 30 ms with `viewer::Event::Listed`, which wakes the event loop. An `AtomicBool` stops the walk when the list closes or restarts.
 - **Titles.** `title` reads the first ATX heading from each file's first 4 KiB. Setext headings and headings after long front matter don't give a title.
 - **Filter.** `nucleo-matcher` scores `path + " " + title` as one string. `Picker` splits the match positions back into the path and the title for highlighting. The filter takes fzf's syntax (`!`, `^`, `'`, `$`).
-- **Switching files.** `open`, `switch`, and `back_file` change files inside one `Preview`. `open` pushes a `Visit`: the file, the stdin flag, the name, the whole `App`, a position anchor, and the source. The history holds 50 (`HISTORY`). `switch` resets the document state, restarts the watcher, and calls `render_doc`, which maps `restore_at` through a line diff as a reload does. `replace_app` is the one place that gives the new `App` the old one's `wrap` and contents panel.
+- **Switching files.** `open`, `switch`, and `back_file` change files inside one `Preview`. `open(path, bytes, heading)` pushes a `Visit`: the file, the stdin flag, the name, the whole `App`, and a `Place { view, back, src }` (the view's anchor, the Backspace anchors, and the source). The history holds 50 (`HISTORY`). `pick(path)` reads a file for the list and writes the list's error note. `follow(url)` handles a click on a `Link::File`. `switch` resets the document state, restarts the watcher, and calls `render_doc`. With no `Place`, `render_doc` builds one from the live page when `keep` is set, else an empty one. It maps the `Place` through a line diff as a reload does, then always calls `restore_back`, which does nothing on a fresh `App`. `land_on` is the heading id a followed link names, and `render_doc` passes it to `settle_at` as the fallback. `replace_app` is the one place that gives the new `App` the old one's `wrap` and contents panel.
 - **Back.** Backspace and Ctrl-o first go back through jumps in the current file. With none left, `App` emits `Action::BackFile`, and `back_file` returns to the file before at its old position. A file that can't be read is dropped from the history, so older files stay reachable.
 - When the list is up, `show()` frees the tiles and draws it, and `draw_chrome` and `prefetch_target` skip. Opening a file renders it on the main thread, as a reload does.
 
@@ -460,7 +457,7 @@ Code blocks, wide tables, and zoomed diagrams scroll sideways on their own. The 
 
 ### Mouse, links, and selection
 
-Clicks map from cells to page CSS pixels. On release, mddog tries a link (`link()`), then a button or toggle (`press()`). `viewer::link::Link::of` sorts a link: web and mail links go to `open` (`link::open`), a `#` link jumps to a heading, and any other link, such as a local file, only shows a notice. Drag and double-click select text and draw the selection. Releasing copies nothing unless `copy_on_select` is on.
+Clicks map from cells to page CSS pixels. On release, mddog tries a link (`link()`), then a button or toggle (`press()`). `viewer::link::Link::of` sorts a link: web and mail links go to `open` (`link::open`), a `#` link jumps to a heading, and a local link is a `Link::File`. `link::follow(url, dir)` decides what a click on that does: `Follow::Show(path, heading)` opens a `.md` or `.markdown` file inside the repo (else the home folder), or a folder's README, and `Follow::Refuse(notice)` shows why it won't. It decodes `%XX` in the path and the heading with `render::media::percent_decode`, as `Link::of` does for a `#` link. `Preview::follow` turns a `Show` of the file already shown into an in-page jump, so it adds no file to the history. Any other scheme only shows a notice. Drag and double-click select text and draw the selection. Releasing copies nothing unless `copy_on_select` is on.
 
 **Selection.** `Select::Range` takes the anchor and focus points, finds the characters under them in the page's text (`hit_char`), and selects between. `Select::Word` selects the word at a point. The selection is an overlay too. A relayout clears it, so a click that lays out again drops it.
 
@@ -491,7 +488,7 @@ Clicks map from cells to page CSS pixels. On release, mddog tries a link (`link(
 
 `e` leaves the alternate screen, runs `$EDITOR` (or `vi`) through `sh -c`, then re-renders with the position kept. The shell exits 127 when it can't find the program, which is how the status row reports a bad `$EDITOR`. A preview of standard input has no watcher, and `e` shows `Can't edit standard input`.
 
-The watcher watches the parent folder, so a save done as write-then-rename still counts. It reloads only when the content changed. With `live_reload = false` the watcher does not start.
+The watcher watches the parent folder, so a save done as write-then-rename still counts. It reloads only when the content changed.
 
 On Ctrl-z the viewer also leaves the alternate screen. It sends SIGTSTP to its own process group, then draws the page again when the shell resumes it. When mdd leads its own session, as in a terminal that runs it with no shell, its group is orphaned. The kernel drops SIGTSTP sent to an orphaned group, so the viewer comes back at once.
 
@@ -505,7 +502,7 @@ It cuts the page into PNG tiles of at most 100 rows (a Claude Code image can't e
 {"keep": 37, "tiles": [{"file": "/path/to/tile.png", "rows": 100}]}
 ```
 
-`keep` is how many tiles the host may mount at once: the storage limit over 8 MiB, so 7 under herdr and 37 elsewhere. It renders again on every file change, even with `live_reload = false`, because live refresh is why the plugin exists.
+`keep` is how many tiles the host may mount at once: the storage limit over 8 MiB, so 7 under herdr and 37 elsewhere. It renders again on every file change.
 
 - Tiles are written with fast PNG compression. A PNG takes about as long to encode as a snapshot, so up to 4 threads encode while the main thread takes the next snapshot.
 - It starts no helper process. It creates an `Engine` at the display's scale, loads the file, and waits up to 4 s for remote images (`REMOTE_LIMIT`), so a slow image is drawn as its alt text rather than as a late arrival. It waits rather than rendering again when images arrive, because each render writes every tile again and the plugin redraws them all.

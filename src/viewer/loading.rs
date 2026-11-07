@@ -24,7 +24,7 @@ pub struct Look {
     pub dark: bool,
     pub bg: Rgb,
     /// The theme's `--mddog-skeleton` minus its `--mddog-bg`.
-    pub lift: (f64, f64, f64),
+    pub lift: [f64; 3],
     pub bar_bg: Rgb,
     pub muted: Rgb,
     pub pad_cols: u16,
@@ -35,15 +35,14 @@ impl Look {
     /// `cell` is the cell size in device pixels.
     pub fn new(t: &Theme, scale: f64, cell: (u32, u32)) -> Look {
         let bg = t.palette.bg;
-        let d = |a: u8, b: u8| f64::from(a) - f64::from(b);
-        let s = t.palette.skeleton;
+        let (s, b) = (theme::channels(t.palette.skeleton), theme::channels(bg));
         let pad = |px: u32| (f64::from(crate::render::layout::PAD) * scale / f64::from(px.max(1))).round() as u16;
-        Look { dark: t.dark, bg, lift: (d(s.0, bg.0), d(s.1, bg.1), d(s.2, bg.2)), bar_bg: t.palette.bar_bg, muted: t.palette.fg_muted, pad_cols: pad(cell.0), pad_rows: pad(cell.1) }
+        Look { dark: t.dark, bg, lift: std::array::from_fn(|i| f64::from(s[i]) - f64::from(b[i])), bar_bg: t.palette.bar_bg, muted: t.palette.fg_muted, pad_cols: pad(cell.0), pad_rows: pad(cell.1) }
     }
 
     fn mix(&self, k: f64) -> Rgb {
-        let m = |c: u8, l: f64| (f64::from(c) + l * k).round().clamp(0.0, 255.0) as u8;
-        (m(self.bg.0, self.lift.0), m(self.bg.1, self.lift.1), m(self.bg.2, self.lift.2))
+        let bg = theme::channels(self.bg);
+        theme::pack(std::array::from_fn(|i| (f64::from(bg[i]) + self.lift[i] * k).round().clamp(0.0, 255.0) as u8))
     }
 
     fn bar(&self) -> Rgb {
@@ -251,8 +250,8 @@ pub fn frame(i: usize, name: &str, size: Size, look: &Look, full: bool) -> Strin
             if l != level {
                 level = l;
                 let k = l as f64 / 3.0;
-                let m = |a: u8, b: u8| (f64::from(a) + (f64::from(b) - f64::from(a)) * k).round() as u8;
-                out.push_str(&sgr(3, (m(bar.0, shine.0), m(bar.1, shine.1), m(bar.2, shine.2))));
+                let (a, b) = (theme::channels(bar), theme::channels(shine));
+                out.push_str(&sgr(3, theme::pack(std::array::from_fn(|i| (f64::from(a[i]) + (f64::from(b[i]) - f64::from(a[i])) * k).round() as u8))));
             }
             out.push(glyph);
         }
@@ -281,12 +280,12 @@ mod tests {
         let dark = look("github-dark");
         assert_eq!((dark.pad_cols, dark.pad_rows), (3, 2));
         let light = look("github-light");
-        assert_eq!(light.bg, (255, 255, 255));
+        assert_eq!(light.bg, 0xffffff);
         assert_eq!(light.bar(), theme::builtin("github-light").unwrap().palette.skeleton);
         assert!(light.bar() < light.bg && light.shine() > light.bar());
         // A darker page keeps the bars as far above it.
-        let lower = Look { bg: (3, 7, 13), ..dark };
-        assert_eq!(lower.bar(), (dark.bar().0 - 10, dark.bar().1 - 10, dark.bar().2 - 10));
+        let lower = Look { bg: 0x03070d, ..dark };
+        assert_eq!(lower.bar(), dark.bar() - 0x0a0a0a);
     }
 
     #[test]
@@ -295,7 +294,7 @@ mod tests {
         let f = frame(3, "a.md", Size { rows: 30, ..SIZE }, &look("github-light"), true);
         assert!(f.contains(&theme::bg(light.bar_bg)) && f.contains(&theme::fg(light.fg_muted)));
         for c in crate::viewer::sgr_colors(&f) {
-            assert!(c.0 > 80 && c.1 > 80 && c.2 > 80 || c == light.fg_muted, "dark color {c:?} in {f:?}");
+            assert!(theme::channels(c).iter().all(|&v| v > 80) || c == light.fg_muted, "dark color {c:?} in {f:?}");
         }
     }
 

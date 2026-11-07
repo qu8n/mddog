@@ -269,14 +269,21 @@ pub fn prune_disk(now: SystemTime) {
 }
 
 /// Removes remote cache files past the longest lifetime, so expired and half-written ones, then the oldest until
-/// the folder fits in `DISK_BYTES`.
+/// the folder fits in `DISK_BYTES`. It also makes the folder and its files owner-only, so a cache an older mddog
+/// left readable to others is closed before it is read.
 fn prune(dir: &Path, now: SystemTime) {
+    use std::os::unix::fs::PermissionsExt;
+    let owner_only = |p: &Path, mode| std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode));
+    if std::fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir() && crate::tmp::mine(&m)) {
+        let _ = owner_only(dir, 0o700);
+    }
     let mut files: Vec<_> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
             let meta = std::fs::symlink_metadata(e.path()).ok().filter(|m| m.is_file() && crate::tmp::mine(m))?;
+            let _ = owner_only(&e.path(), 0o600);
             Some((meta.modified().ok()?, meta.len(), e.path()))
         })
         .collect();
@@ -324,9 +331,12 @@ fn write_disk(dir: &Path, e: &Entry, keep: Duration) {
     let path = disk_path(dir, &e.url);
     let tmp = path.with_extension(format!("tmp{}-{}", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
     let head = serde_json::json!({ "url": e.url, "mime": e.mime, "until": epoch() + keep.as_secs() });
+    // Owner-only: the header holds the full URL, which can carry a signed token.
     let write = || -> std::io::Result<()> {
-        std::fs::create_dir_all(dir)?;
-        let mut f = std::fs::File::create(&tmp)?;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
         std::io::Write::write_all(&mut f, format!("{head}\n").as_bytes())?;
         std::io::Write::write_all(&mut f, &e.body)?;
         std::fs::rename(&tmp, &path)
@@ -414,6 +424,9 @@ mod tests {
         prune(&d, SystemTime::now());
         let left: Vec<_> = files.iter().map(|f| f.0).filter(|n| d.join(n).exists()).collect();
         assert_eq!(left, ["older", "newest"]);
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!((mode(&d), mode(&d.join("newest"))), (0o700, 0o600), "an older, readable cache is closed");
         std::fs::remove_dir_all(&d).unwrap();
     }
     use std::io::{BufRead, BufReader, Write};
@@ -440,6 +453,9 @@ mod tests {
         write_disk(&dir, &e, Duration::from_secs(60));
         let back = read_disk(&dir, "https://x.test/a.png").unwrap();
         assert_eq!((back.mime.as_str(), back.body.as_slice()), ("image/png", &b"PNG"[..]));
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!((mode(&dir), mode(&disk_path(&dir, &e.url))), (0o700, 0o600));
         assert!(read_disk(&dir, "https://x.test/b.png").is_none());
         write_disk(&dir, &e, Duration::ZERO);
         assert!(read_disk(&dir, "https://x.test/a.png").is_none(), "expired");

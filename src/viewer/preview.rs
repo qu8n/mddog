@@ -20,7 +20,7 @@ use crate::term::{self, Click, Key, Probe, Size, Tty};
 use crate::theme::Theme;
 use crate::{config, editor, trace, watch};
 
-/// How long the page waits on its remote images before it stops laying out again for them.
+/// How long the page waits on its remote images before it ticks slowly again and prefetches.
 const LATE_LIMIT: Duration = Duration::from_secs(60);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const COPY_FEEDBACK: Duration = Duration::from_secs(2);
@@ -102,7 +102,16 @@ struct Visit {
     stdin: bool,
     name: String,
     app: App,
-    anchor: Option<position::Anchor>,
+    place: Place,
+}
+
+/// Where a page was, in its content rather than its rows, so a new layout can come back to it.
+struct Place {
+    /// The view, None at the top.
+    view: Option<position::Anchor>,
+    /// Each Backspace row, as `back_anchors` takes them.
+    back: Vec<Option<position::Anchor>>,
+    /// The source the anchors were taken from.
     src: String,
 }
 
@@ -160,7 +169,7 @@ pub struct Preview {
     theme: &'static Theme,
     /// A click changed the page (a copy, a disclosure, a button) since it loaded, which a reload undoes.
     touched: bool,
-    /// Until when the page lays out again as its remote images arrive.
+    /// Until when the page waits on its remote images: a fast tick, and no prefetch. They still arrive after it.
     late: Option<Instant>,
     resize: app::Debounce,
     quit: bool,
@@ -169,8 +178,10 @@ pub struct Preview {
     picker: Option<Picker>,
     listing: bool,
     history: Vec<Visit>,
-    /// Where `render_doc` scrolls to instead of the top, with the source it was taken from.
-    restore_at: Option<(position::Anchor, String)>,
+    /// Where `render_doc` puts the page instead of the top.
+    restore_at: Option<Place>,
+    /// The heading id `render_doc` scrolls to on a page opened by a link.
+    land_on: Option<String>,
     /// The running glide and the position it last drew.
     glide: Option<(app::Glide, u32)>,
     /// The scroll position `show` last drew, where a new glide starts.
@@ -357,6 +368,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         picker,
         history: Vec::new(),
         restore_at: None,
+        land_on: None,
     };
     let mut leftover = leftover;
     if p.listing {
@@ -536,7 +548,7 @@ impl Preview {
                     Pick::Nothing => false,
                     Pick::Redraw => true,
                     Pick::Open(path) => {
-                        self.open(path);
+                        self.pick(path);
                         false
                     }
                     Pick::Close if self.opened => {
@@ -883,7 +895,7 @@ impl Preview {
                 let target = self.engine.link(x, y);
                 let link = target.as_deref().and_then(Link::of);
                 if target.is_some() && link.is_none() {
-                    self.notify("Links to local files don't open in the preview");
+                    self.notify("Only web, mail and file links open here");
                     return cleared;
                 }
                 if let Some(link) = link {
@@ -996,19 +1008,27 @@ impl Preview {
                 link::open(url);
                 false
             }
+            Link::File(url) => self.follow(&url),
+            // An empty `#` is the top, as in a browser.
+            Link::Anchor(id) if id.is_empty() => self.jump_to(0),
             Link::Anchor(id) => {
                 let Some(y) = self.engine.anchor_y(&id) else { return false };
-                let (row, from) = (self.row_of(y), self.app.scroll);
-                let actions = self.app.jump(row);
-                // A jump that didn't move saved no place to go back to.
-                let moved = self.app.scroll != from;
-                let show = self.act_all(actions);
-                if moved {
-                    self.notify_with("Backspace or a click here goes back", OnClick::GoBack, NOTICE);
-                }
-                show
+                self.jump_to(self.row_of(y))
             }
         }
+    }
+
+    /// Scrolls to `row` as a link does, saving the place for Backspace.
+    fn jump_to(&mut self, row: u32) -> bool {
+        let from = self.app.scroll;
+        let actions = self.app.jump(row);
+        // A jump that didn't move saved no place to go back to.
+        let moved = self.app.scroll != from;
+        let show = self.act_all(actions);
+        if moved {
+            self.notify_with("Backspace or a click here goes back", OnClick::GoBack, NOTICE);
+        }
+        show
     }
 
     /// Redraws `rects` after a page change. Returns whether there were any.
@@ -1144,7 +1164,7 @@ impl Preview {
     }
 
     fn live(&self) -> bool {
-        !self.stdin && config::get().live_reload
+        !self.stdin
     }
 
     fn rerender_keep(&mut self) {
@@ -1169,14 +1189,13 @@ impl Preview {
 
     /// Lays out `src` in place of the page, keeping the reading position when `keep` is set.
     fn render_doc(&mut self, bytes: Vec<u8>, src: String, keep: bool) {
-        let anchor = if keep { self.anchor() } else { None };
-        let back = if keep { self.back_anchors() } else { Vec::new() };
         let code = if keep { self.engine.code_positions() } else { Vec::new() };
-        let mut old_src = std::mem::take(&mut self.src);
-        let mut anchor = anchor;
-        if let Some((a, src)) = self.restore_at.take() {
-            (anchor, old_src) = (Some(a), src);
-        }
+        let old = std::mem::take(&mut self.src);
+        let Place { view: anchor, back, src: old_src } = match self.restore_at.take() {
+            Some(place) => place,
+            None if keep => Place { view: self.anchor(), back: self.back_anchors(), src: old },
+            None => Place { view: None, back: Vec::new(), src: old },
+        };
         let (toc, css_width) = self.fit();
         let base = self.base();
         let theme = config::theme();
@@ -1195,10 +1214,9 @@ impl Preview {
         self.loaded = true;
         self.src = src;
         let line = position::line_map(&old_src, &self.src);
-        self.settle_at(anchor.map(|a| position::Anchor { line: line(a.line), offset: a.offset }), 0);
-        if keep {
-            self.restore_back(&back, line);
-        }
+        let landing = self.land_on.take().and_then(|id| self.engine.anchor_y(&id)).map_or(0, |y| self.px_of(y));
+        self.settle_at(anchor.map(|a| position::Anchor { line: line(a.line), offset: a.offset }), landing);
+        self.restore_back(&back, line);
         if self.app.toc_cols(self.size.cols) != toc {
             self.rerender_keep();
             return;
@@ -1471,17 +1489,17 @@ impl Preview {
         self.tty.flush();
     }
 
-    /// Glides from where the view is drawn to `scroll_px`, or jumps there when gliding is off, the terminal can't
+    /// Glides from where the view is drawn to `scroll_px`, or jumps there when the terminal can't
     /// draw a frame at once (no mode 2026), or the tiles along the way don't fit in the storage limit together.
     fn start_glide(&mut self) {
         let to = self.scroll_px();
         // A jump during a glide adds to it, so the screen it may cover grows by what that glide had left.
         let left = self.glide.take().map_or(0, |(g, _)| g.to().abs_diff(self.drawn));
-        if !config::get().smooth_scroll || !self.probe.sync || self.drawn == to {
+        if !self.probe.sync || self.drawn == to {
             return;
         }
         let now = Instant::now();
-        let pace = app::Pace::for_jump(self.last_jump.replace(now), now, Duration::from_millis(config::get().glide_ms_per_page.into()), self.view_px());
+        let pace = app::Pace::for_jump(self.last_jump.replace(now), now, app::GLIDE_PER_PAGE, self.view_px());
         let g = app::Glide::new(self.drawn, to, self.view_px() + left, pace, now);
         let (lo, hi) = (g.from().min(to), g.from().max(to));
         let path = View { scroll_px: lo, bottom: hi + self.view_px() + self.cell_h, ..self.view() };
@@ -1536,15 +1554,16 @@ impl Preview {
                 self.rerender_keep();
             }
         }
-        if let Some(until) = self.late {
+        let (poll, late) = image_wait(self.late, self.engine.pending_images(), Instant::now());
+        if poll {
             // Each engine relayout gets a measure here before the next tile goes out, so tiles and offsets agree.
             if self.engine.take_images() {
                 self.relayout();
             }
-            if self.engine.pending_images() == 0 || Instant::now() > until {
-                self.late = None;
+            self.late = late;
+            if late.is_some() {
+                return;
             }
-            return;
         }
         if let Some(i) = self.prefetch_target() {
             let v = self.view();
@@ -1631,22 +1650,46 @@ impl Preview {
         self.enter_screen(live);
     }
 
-    /// Opens a file from the list. The file shown before goes on the Back history.
-    fn open(&mut self, path: PathBuf) {
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
+    /// Opens a file from the list.
+    fn pick(&mut self, path: PathBuf) {
+        match std::fs::read(&path) {
+            Ok(bytes) => self.open(path, bytes, None),
             Err(e) => {
                 if let Some(p) = self.picker.as_mut() {
                     p.note = Some(format!("Can't open {}: {}", path.display(), term::io_error(&e)));
                 }
                 self.show();
-                return;
             }
-        };
-        let anchor = self.anchor();
-        let old = self.replace_app(App::default());
+        }
+    }
+
+    /// Follows a link to a local file. Only Markdown opens, here; nothing local goes to the system's `open`.
+    /// A link to the page shown jumps within it, as a `#` link does. Returns whether to show.
+    fn follow(&mut self, url: &str) -> bool {
+        match link::follow(url, &self.base) {
+            link::Follow::Refuse(why) => self.notify(&why),
+            link::Follow::Show(path, heading) if !self.stdin && std::fs::canonicalize(&self.file).is_ok_and(|f| f == path) => {
+                // At the heading, else the top, as opening the file would land.
+                let y = heading.and_then(|id| self.engine.anchor_y(&id)).unwrap_or(0.0);
+                return self.jump_to(self.row_of(y));
+            }
+            link::Follow::Show(path, heading) => match std::fs::read(&path) {
+                Ok(bytes) => self.open(path, bytes, heading),
+                Err(e) => self.notify(&format!("Can't open {}: {}", path.display(), term::io_error(&e))),
+            },
+        }
+        false
+    }
+
+    /// Shows `bytes`, read from `path`, at the top or at the heading with id `heading`. The file shown before goes on
+    /// the Back history.
+    fn open(&mut self, path: PathBuf, bytes: Vec<u8>, heading: Option<String>) {
+        let place = Place { view: self.anchor(), back: self.back_anchors(), src: self.src.clone() };
+        let mut old = self.replace_app(App::default());
+        // Its timer runs on, so coming back would show it with none.
+        old.notice = None;
         if self.opened {
-            let visit = Visit { file: std::mem::take(&mut self.file), stdin: self.stdin, name: std::mem::take(&mut self.name), app: old, anchor, src: self.src.clone() };
+            let visit = Visit { file: std::mem::take(&mut self.file), stdin: self.stdin, name: std::mem::take(&mut self.name), app: old, place };
             self.history.push(visit);
             if self.history.len() > app::HISTORY {
                 self.history.remove(0);
@@ -1655,6 +1698,7 @@ impl Preview {
         self.app.back_file = !self.history.is_empty();
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
         self.start_loader(&name);
+        self.land_on = heading;
         self.switch(path, false, name, bytes, None);
     }
 
@@ -1669,7 +1713,7 @@ impl Preview {
         self.replace_app(v.app);
         self.app.back_file = !self.history.is_empty();
         self.start_loader(&v.name);
-        self.switch(v.file, v.stdin, v.name, bytes, v.anchor.map(|a| (a, v.src)));
+        self.switch(v.file, v.stdin, v.name, bytes, Some(v.place));
     }
 
     /// Puts `next` in place of the page's state, keeping the settings that hold across files. Returns the old state.
@@ -1685,7 +1729,7 @@ impl Preview {
         self.loader = Some(l);
     }
 
-    fn switch(&mut self, file: PathBuf, stdin: bool, name: String, bytes: Vec<u8>, at: Option<(position::Anchor, String)>) {
+    fn switch(&mut self, file: PathBuf, stdin: bool, name: String, bytes: Vec<u8>, at: Option<Place>) {
         self.base = crate::render::images::base_dir(&file, stdin);
         (self.file, self.stdin, self.name) = (file, stdin, name);
         self.matches.clear();
@@ -1760,9 +1804,28 @@ fn input_loop(fd: i32, tx: Sender<Event>, paused: Arc<AtomicBool>, first: Vec<u8
     }
 }
 
+/// Whether `tick` takes arrived remote images, and until when the page still waits on them. Taking goes on while
+/// any fetch is pending, since a slow host can answer after `LATE_LIMIT`. The wait only keeps the tick fast and
+/// holds back prefetch.
+fn image_wait(late: Option<Instant>, pending: usize, now: Instant) -> (bool, Option<Instant>) {
+    (late.is_some() || pending > 0, late.filter(|&until| pending > 0 && now <= until))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn images_after_the_late_limit_still_arrive() {
+        let now = Instant::now();
+        let past = now - Duration::from_secs(1);
+        // An image still loading past the limit is still taken, though the page no longer waits on it.
+        assert_eq!(image_wait(Some(past), 1, now), (true, None));
+        assert_eq!(image_wait(None, 1, now), (true, None));
+        assert_eq!(image_wait(Some(now + LATE_LIMIT), 2, now), (true, Some(now + LATE_LIMIT)));
+        assert_eq!(image_wait(Some(now + LATE_LIMIT), 0, now), (true, None));
+        assert_eq!(image_wait(None, 0, now), (false, None));
+    }
 
     #[test]
     fn the_page_scale_follows_the_cell_height() {

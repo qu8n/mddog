@@ -25,5 +25,5 @@ pub enum Event {
 #[cfg(test)]
 fn sgr_colors(s: &str) -> Vec<crate::theme::Rgb> {
     let re = regex::Regex::new(r"\x1b\[[34]8;2;(\d+);(\d+);(\d+)m").unwrap();
-    re.captures_iter(s).map(|c| (c[1].parse().unwrap(), c[2].parse().unwrap(), c[3].parse().unwrap())).collect()
+    re.captures_iter(s).map(|c| crate::theme::pack([c[1].parse().unwrap(), c[2].parse().unwrap(), c[3].parse().unwrap()])).collect()
 }

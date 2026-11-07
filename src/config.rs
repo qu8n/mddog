@@ -9,16 +9,8 @@ use crate::theme::{self, Theme};
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     pub theme: ThemeSpec,
-    pub live_reload: bool,
-    /// d/u, f/b, Space, g/G and other jump keys glide instead of jumping.
-    pub smooth_scroll: bool,
-    /// How long a glide over one screen takes. A shorter glide takes its share.
-    pub glide_ms_per_page: u32,
     /// Releasing a drag or double-click selection copies it.
     pub copy_on_select: bool,
-    /// Unset, mddog follows the macOS font smoothing setting.
-    pub font_smoothing: Option<bool>,
-    pub file_list: FileListConfig,
     /// The `theme` key's themes, read.
     #[serde(skip)]
     pub themes: Themes,
@@ -28,7 +20,7 @@ impl Default for Config {
     fn default() -> Config {
         let theme = ThemeSpec::default();
         let themes = theme.load(Path::new("")).expect("built-in themes");
-        Config { theme, live_reload: true, smooth_scroll: true, glide_ms_per_page: 200, copy_on_select: false, font_smoothing: None, file_list: FileListConfig::default(), themes }
+        Config { theme, copy_on_select: false, themes }
     }
 }
 
@@ -102,51 +94,6 @@ impl Default for Themes {
     }
 }
 
-#[derive(Deserialize, Debug, PartialEq, Eq)]
-#[serde(deny_unknown_fields, default)]
-pub struct FileListConfig {
-    /// The extensions the file list shows, lowercase and without the dot.
-    #[serde(deserialize_with = "extensions")]
-    pub extensions: Vec<String>,
-}
-
-impl Default for FileListConfig {
-    fn default() -> Self {
-        FileListConfig { extensions: vec!["md".into(), "markdown".into()] }
-    }
-}
-
-impl FileListConfig {
-    pub fn shows(&self, p: &Path) -> bool {
-        p.extension().and_then(|e| e.to_str()).is_some_and(|e| self.extensions.iter().any(|x| e.eq_ignore_ascii_case(x)))
-    }
-
-    /// The extensions for a sentence: ".md or .markdown".
-    pub fn names(&self) -> String {
-        let e: Vec<String> = self.extensions.iter().map(|x| format!(".{x}")).collect();
-        match &e[..] {
-            [] => String::new(),
-            [one] => one.clone(),
-            [rest @ .., last] if rest.len() == 1 => format!("{} or {last}", rest[0]),
-            [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
-        }
-    }
-}
-
-fn extensions<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
-    use serde::de::Error;
-    let list = Vec::<String>::deserialize(d)?;
-    if list.is_empty() {
-        return Err(D::Error::custom("needs at least one extension, such as \"md\""));
-    }
-    for e in &list {
-        if e.is_empty() || e.contains('.') {
-            return Err(D::Error::custom(format!("{e:?} is not an extension. Write each one without the dot, such as \"md\"")));
-        }
-    }
-    Ok(list.iter().map(|e| e.to_ascii_lowercase()).collect())
-}
-
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 pub fn get() -> &'static Config {
@@ -218,14 +165,13 @@ pub fn theme() -> &'static Theme {
     }
 }
 
-/// Whether text is drawn with font smoothing: the config's choice, else the macOS setting at startup.
+/// Whether text is drawn with font smoothing, from macOS's `AppleFontSmoothing` at startup: 0 turns it off, and
+/// unset or 1 to 3 leave it on. CoreGraphics bitmap contexts ignore the setting, so mddog reads it itself.
 pub fn font_smoothing() -> bool {
     static SYSTEM: OnceLock<bool> = OnceLock::new();
-    get().font_smoothing.unwrap_or_else(|| *SYSTEM.get_or_init(system_smoothing))
+    *SYSTEM.get_or_init(system_smoothing)
 }
 
-/// macOS's `AppleFontSmoothing`: 0 turns smoothing off, and unset or 1 to 3 leave it on. CoreGraphics
-/// bitmap contexts ignore it, so mddog reads it itself.
 fn system_smoothing() -> bool {
     use objc2_foundation::{NSString, NSUserDefaults};
     let d = NSUserDefaults::standardUserDefaults();
@@ -259,26 +205,10 @@ mod tests {
 
     #[test]
     fn full() {
-        let c = parse("theme = \"github-dark\"\nlive_reload = false\nsmooth_scroll = false\nglide_ms_per_page = 100\ncopy_on_select = true\n").unwrap();
+        let c = parse("theme = \"github-dark\"\ncopy_on_select = true\n").unwrap();
         assert_eq!(c.theme, ThemeSpec::One(Source::Builtin(theme::builtin("github-dark").unwrap())));
         assert_eq!((c.themes.light.name.as_str(), c.themes.dark), ("github-dark", None));
-        assert!(!c.live_reload);
-        assert!(!c.smooth_scroll);
         assert!(c.copy_on_select);
-        assert_eq!(c.glide_ms_per_page, 100);
-        assert_eq!(parse("font_smoothing = true\n").unwrap().font_smoothing, Some(true));
-        assert_eq!(parse("font_smoothing = false\n").unwrap().font_smoothing, Some(false));
-    }
-
-    #[test]
-    fn file_list_extensions() {
-        let f = parse("[file_list]\nextensions = [\"MD\", \"txt\"]\n").unwrap().file_list;
-        assert_eq!(f.extensions, ["md", "txt"]);
-        assert!(f.shows(Path::new("a/b.Txt")) && f.shows(Path::new("b.md")));
-        assert!(!f.shows(Path::new("b.markdown")) && !f.shows(Path::new("txt")) && !f.shows(Path::new("a.txt.bak")));
-        assert_eq!(f.names(), ".md or .txt");
-        assert_eq!(FileListConfig { extensions: vec!["md".into()] }.names(), ".md");
-        assert_eq!(FileListConfig { extensions: vec!["md".into(), "txt".into(), "rst".into()] }.names(), ".md, .txt, or .rst");
     }
 
     #[test]
@@ -289,14 +219,14 @@ mod tests {
         let c = super::parse("theme = \"dark:mine.css, light:github-dark\"\n", &dir).unwrap();
         let dark = c.themes.dark.unwrap();
         assert_eq!(dark.name, dir.join("mine.css").display().to_string());
-        assert_eq!(dark.palette.bg, (16, 16, 16));
+        assert_eq!(dark.palette.bg, 0x101010);
         assert_eq!(dark.palette.fg, theme::builtin("github-dark").unwrap().palette.fg);
         assert!(c.themes.light.dark);
         let abs = dir.join("mine.css").display().to_string();
         assert!(parse(&format!("theme = {abs:?}\n")).unwrap().themes.light.dark);
         // A bad token stops mddog with the config line, the file and the token.
         std::fs::write(dir.join("bad.css"), ":root{color-scheme:dark;--mddog-tint:#101010}").unwrap();
-        let e = super::parse("live_reload = true\ntheme = \"bad.css\"\n", &dir).unwrap_err();
+        let e = super::parse("copy_on_select = false\ntheme = \"bad.css\"\n", &dir).unwrap_err();
         assert_eq!(e, format!("line 2: theme: {}: --mddog-tint: unknown token. A theme sets color-scheme and the --mddog-* tokens that docs/themes.md lists", dir.join("bad.css").display()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -311,21 +241,17 @@ mod tests {
         };
         let e = one_line("[background]\ndark = \"terminal\"\n");
         assert!(e.starts_with("line 1: background: "), "{e}");
-        let e = one_line("live_reload = \"yes\"\n");
-        assert!(e.starts_with("line 1: live_reload: "), "{e}");
-        let e = one_line("font_smoothing = 2\n");
-        assert!(e.starts_with("line 1: font_smoothing: "), "{e}");
+        let e = one_line("copy_on_select = \"yes\"\n");
+        assert!(e.starts_with("line 1: copy_on_select: "), "{e}");
         // Removed keys get the unknown-key error like any other.
         let e = one_line("prewarm = false\n");
         assert!(e.starts_with("line 1: prewarm: "), "{e}");
         let e = one_line("[mermaid]\nengine = \"pele\"\n");
         assert!(e.starts_with("line 1: mermaid: "), "{e}");
-        let e = one_line("[file_list]\nextensions = [\".md\"]\n");
-        assert!(e.starts_with("line 2: file_list.extensions: \".md\" is not an extension"), "{e}");
-        let e = one_line("[file_list]\nextensions = [\"md\", \"\"]\n");
-        assert!(e.starts_with("line 2: file_list.extensions: \"\" is not an extension"), "{e}");
-        let e = one_line("[file_list]\nextensions = []\n");
-        assert!(e.starts_with("line 2: file_list.extensions: needs at least one"), "{e}");
+        let e = one_line("smooth_scroll = false\n");
+        assert!(e.starts_with("line 1: smooth_scroll: "), "{e}");
+        let e = one_line("[file_list]\nextensions = [\"md\"]\n");
+        assert!(e.starts_with("line 1: file_list: "), "{e}");
         let e = one_line("[colours]\n");
         assert!(e.starts_with("line 1: colours: "), "{e}");
         let e = one_line("theme = \"dark\n");
@@ -334,7 +260,7 @@ mod tests {
         assert!(e.starts_with("line 1: theme: unknown theme \"dark\". Built-in themes: github-light, github-dark"), "{e}");
         let e = one_line("theme = \"light:github-light\"\n");
         assert!(e.starts_with("line 1: theme: expected one theme, or \"light:THEME,dark:THEME\""), "{e}");
-        let e = one_line("live_reload = true\ntheme = \"light:github-light,dark:missing.css\"\n");
+        let e = one_line("copy_on_select = false\ntheme = \"light:github-light,dark:missing.css\"\n");
         assert!(e.starts_with("line 2: theme: /nonexistent/missing.css: "), "{e}");
     }
 

@@ -56,7 +56,7 @@ pub fn confined_media(url: &str, dir: &Path) -> Option<PathBuf> {
 }
 
 /// None when the bytes aren't UTF-8, since the path checked must be the one a browser would open.
-fn percent_decode(s: &str) -> Option<String> {
+pub(crate) fn percent_decode(s: &str) -> Option<String> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

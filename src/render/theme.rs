@@ -3,7 +3,7 @@
 use crate::render::doc::Alert;
 use crate::render::highlight::Tok;
 
-pub type Rgb = u32;
+pub use crate::theme::Rgb;
 
 /// Which reading view the page copies. Most of the difference is in the fields of `Theme`; layout asks this
 /// only where the two draw a part with different shapes.
@@ -140,10 +140,7 @@ pub struct Theme {
 
 impl Theme {
     pub fn new(t: &crate::theme::Theme) -> Theme {
-        let c = |name: &str| {
-            let (r, g, b) = t.color(name);
-            u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
-        };
+        let c = |name: &str| t.color(name);
         let look = if t.choice("layout") == "obsidian" { Look::Obsidian } else { Look::Github };
         let obs = look == Look::Obsidian;
         let (text, bg, muted) = (c("text"), c("bg"), c("text-muted"));

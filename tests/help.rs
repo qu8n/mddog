@@ -281,29 +281,8 @@ fn a_save_during_startup_is_shown() {
 }
 
 #[test]
-fn contents_toggle_keeps_the_loaded_version_without_live_reload() {
-    let dir = scratch("nolive");
-    std::fs::write(dir.join("mddog/config.toml"), "live_reload = false\n").unwrap();
-    let file = dir.join("a.md");
-    std::fs::write(&file, "# Alpha\n\ntext\n\n## Alpha two\n").unwrap();
-    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 100, &[("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
-    wait_for(&out, 0, b"a=p,");
-    std::fs::write(&file, "# Beta\n\ntext\n\n## Beta two\n").unwrap();
-    std::thread::sleep(Duration::from_millis(300));
-    let before = out.lock().unwrap().len();
-    tty.write_all(b"t").unwrap();
-    wait_for(&out, before, b"Alpha two");
-    let beta = find(&out.lock().unwrap()[before..], b"Beta").is_some();
-    tty.write_all(b"q").unwrap();
-    let _ = exits_within(&mut child, LIMIT);
-    let _ = std::fs::remove_dir_all(&dir);
-    assert!(!beta, "t read the file from disk with live_reload off");
-}
-
-#[test]
 fn an_image_that_never_loads_does_not_stall_the_page() {
     let dir = scratch("noload");
-    std::fs::write(dir.join("mddog/config.toml"), "live_reload = false\n").unwrap();
     // A FIFO with no writer never finishes a read, so an image read that waits on it would hang the page.
     let fifo = std::ffi::CString::new(dir.join("stall.png").to_str().unwrap()).unwrap();
     // SAFETY: fifo is a NUL-terminated path that outlives the call.
@@ -325,13 +304,19 @@ fn an_image_that_never_loads_does_not_stall_the_page() {
     assert!(kept, "the table of contents lost the headings after the image");
 }
 
-/// The last `top=` the viewer traced after the line that contains `after`, once one is there.
+/// The last `top=` the viewer traced after the line that contains `after`, once one is there and no glide is under way.
 fn top_after(trace: &std::path::Path, after: &str) -> String {
     let end = Instant::now() + LIMIT;
+    // A view line is still gliding while the drawn `px` differs from where `scroll` and `phase` put the view.
+    let field = |l: &str, k: &str| -> Option<String> { Some(l.split_once(&format!(" {k}="))?.1.split(' ').next()?.to_string()) };
+    let num = |l: &str, k: &str| field(l, k)?.parse::<u32>().ok();
+    let settled = |l: &str| Some(num(l, "px")? == num(l, "scroll")? * field(l, "cell")?.split_once('x')?.1.parse::<u32>().ok()? + num(l, "phase")?);
     loop {
         let log = std::fs::read_to_string(trace).unwrap_or_default();
         if let Some(i) = log.rfind(after)
-            && let Some(top) = log[i..].lines().rev().find_map(|l| l.split_once(" top=").map(|t| t.1))
+            && let Some(last) = log[i..].lines().rev().find(|l| l.contains(" top="))
+            && settled(last) == Some(true)
+            && let Some(top) = last.split_once(" top=").map(|t| t.1)
         {
             return top.split('@').next().unwrap_or_default().to_string();
         }
@@ -344,7 +329,6 @@ fn top_after(trace: &std::path::Path, after: &str) -> String {
 fn backspace_after_a_resize_returns_to_the_same_text() {
     let dir = scratch("backwrap");
     let trace = dir.join("trace.log");
-    std::fs::write(dir.join("mddog/config.toml"), "smooth_scroll = false\n").unwrap();
     let Viewer { mut child, mut tty, out } = open(GFM, 100, &[("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())]);
     wait_for(&out, 0, b"a=p,");
     tty.write_all(&b"j".repeat(60)).unwrap();
@@ -389,7 +373,6 @@ fn the_page_zooms_with_the_terminal_font() {
     let trace = dir.join("trace.log");
     let tiles = dir.join("tiles");
     std::fs::create_dir_all(&tiles).unwrap();
-    std::fs::write(dir.join("mddog/config.toml"), "smooth_scroll = false\n").unwrap();
     let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("MDDOG_SCALE", "2"), ("MDDOG_DUMP_TILES", tiles.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
     let Viewer { mut child, mut tty, out } = open(GFM, 100, &env);
     wait_for(&out, 0, b"a=p,");
@@ -671,23 +654,6 @@ fn bare_mdd_lists_files_and_opens_one() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(list < probe, "the list waited for the terminal probe");
     assert_eq!(quit, Some(true));
-}
-
-#[test]
-fn the_list_shows_the_configured_extensions() {
-    let dir = scratch("listext");
-    std::fs::create_dir_all(dir.join("cfg/mddog")).unwrap();
-    std::fs::write(dir.join("cfg/mddog/config.toml"), "[file_list]\nextensions = [\"TXT\"]\n").unwrap();
-    std::fs::write(dir.join("alpha.md"), "# Alpha title\n").unwrap();
-    std::fs::write(dir.join("notes.txt"), "# Notes title\n").unwrap();
-    let cfg = dir.join("cfg");
-    let Viewer { mut child, tty: _tty, out } = start(&[dir.to_str().unwrap()], None, 80, &[("XDG_CONFIG_HOME", cfg.to_str().unwrap())], false);
-    wait_for(&out, 0, b"Notes title");
-    std::thread::sleep(Duration::from_millis(300));
-    let shown = String::from_utf8_lossy(&out.lock().unwrap()).into_owned();
-    let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&dir);
-    assert!(!shown.contains("Alpha title"), "the list showed a .md file");
 }
 
 #[test]
@@ -1016,5 +982,175 @@ fn buttons_show_the_hand() {
     let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(quit, Some(true));
+}
+
+#[test]
+fn back_to_a_file_does_not_bring_back_its_old_notice() {
+    let dir = scratch("back-notice");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::write(dir.join("a.md"), "first\n").unwrap();
+    std::fs::write(dir.join("b.md"), "second\n").unwrap();
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir), 80, &[], false);
+    let probe = wait_for(&out, 0, b"\x1b[c");
+    wait_for(&out, probe, b"b.md");
+    std::thread::sleep(Duration::from_millis(300));
+    tty.write_all(b"a\r").unwrap();
+    let a = wait_for(&out, probe, b" a.md ");
+    tty.write_all(b"t").unwrap();
+    wait_for(&out, a, b"This file has no headings");
+    // Ctrl-p keeps the last filter, and Ctrl-u clears it.
+    tty.write_all(b"\x10\x15").unwrap();
+    let list = wait_for(&out, a, b"b.md");
+    std::thread::sleep(Duration::from_millis(300));
+    tty.write_all(b"b\r").unwrap();
+    wait_for(&out, list, b" b.md ");
+    // The notice's timer runs out while b.md shows.
+    std::thread::sleep(Duration::from_millis(3500));
+    let before = out.lock().unwrap().len();
+    tty.write_all(b"\x7f").unwrap();
+    // With the notice, the status row shows it in place of the file name.
+    wait_for(&out, before, b"a=p,");
+    std::thread::sleep(Duration::from_millis(500));
+    let came_back = find(&out.lock().unwrap()[before..], b"no headings").is_some();
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!came_back, "the old notice came back with a.md");
+    assert_eq!(quit, Some(true));
+}
+
+/// Waits until `mark` is in the trace `n` times.
+fn wait_count(trace: &std::path::Path, mark: &str, n: usize) {
+    let end = Instant::now() + LIMIT;
+    while std::fs::read_to_string(trace).unwrap_or_default().matches(mark).count() < n {
+        assert!(Instant::now() < end, "fewer than {n} {mark:?} in the trace");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn backspace_after_a_file_switch_and_resize_returns_to_the_same_text() {
+    let dir = scratch("backswitch");
+    let trace = dir.join("trace.log");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::copy(GFM, dir.join("gfm.md")).unwrap();
+    std::fs::write(dir.join("zulu.md"), "second\n").unwrap();
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir), 100, &env, false);
+    let probe = wait_for(&out, 0, b"\x1b[c");
+    wait_for(&out, probe, b"zulu.md");
+    std::thread::sleep(Duration::from_millis(300));
+    tty.write_all(b"gfm\r").unwrap();
+    wait_for(&out, probe, b"a=p,");
+    tty.write_all(&b"j".repeat(60)).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let before = top_after(&trace, "key Char('j')");
+    tty.write_all(b"5").unwrap();
+    top_after(&trace, "key Char('5')");
+    tty.write_all(b"\x10\x15").unwrap();
+    let list = wait_for(&out, probe, b"zulu.md");
+    std::thread::sleep(Duration::from_millis(300));
+    tty.write_all(b"zulu\r").unwrap();
+    wait_for(&out, list, b" zulu.md ");
+    // A narrower terminal wraps gfm.md onto more rows when it comes back.
+    let size = libc::winsize { ws_row: 40, ws_col: 60, ws_xpixel: 60 * 18, ws_ypixel: 40 * 38 };
+    resize(&tty, size);
+    top_after(&trace, "mark resize");
+    std::thread::sleep(Duration::from_millis(500));
+    // The first Backspace goes back to gfm.md, the second undoes the jump made there.
+    tty.write_all(b"\x7f").unwrap();
+    wait_count(&trace, "file opened", 3);
+    std::thread::sleep(Duration::from_millis(500));
+    tty.write_all(b"\x7f").unwrap();
+    wait_count(&trace, "key Backspace", 2);
+    std::thread::sleep(Duration::from_millis(300));
+    let back = top_after(&trace, "key Backspace");
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!before.is_empty());
+    assert_eq!(back, before, "Backspace went to another place after a file switch and a resize");
+}
+
+#[test]
+fn a_link_to_the_page_itself_jumps_without_reloading() {
+    let dir = scratch("selflink");
+    let trace = dir.join("trace.log");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    let words = "link text ".repeat(30);
+    std::fs::write(dir.join("a.md"), format!("[{words}](./a.md#caf%C3%A9)\n\n{f}## Café\n\n[{words}](?raw=1)\n\n{f}", f = "filler\n\n".repeat(200))).unwrap();
+    let a = dir.join("a.md");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = open(a.to_str().unwrap(), 80, &env);
+    let shown = wait_for(&out, 0, b"a=p,");
+    wait_count(&trace, "page loaded", 1);
+    tty.write_all(b"\x1b[<0;20;3M\x1b[<0;20;3m").unwrap();
+    wait_for(&out, shown, b"Backspace or a click here goes back");
+    // The last view line that starts with `top`, once there is one after `from` bytes of the trace.
+    let view_at = |from: usize, top: &str| {
+        let end = Instant::now() + LIMIT;
+        loop {
+            let log = std::fs::read_to_string(&trace).unwrap_or_default();
+            if log[from..].lines().any(|l| l.contains(&format!(" top=\"{top}"))) {
+                return log.len();
+            }
+            assert!(Instant::now() < end, "the view never showed {top:?} at the top");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let landed = view_at(0, "Café");
+    // Below the heading, a query alone names this page too, and goes to its top.
+    tty.write_all(b"\x1b[<0;20;5M\x1b[<0;20;5m").unwrap();
+    view_at(landed, "link text");
+    let loads = std::fs::read_to_string(&trace).unwrap().matches("page loaded").count();
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(loads, 1, "the link reloaded its own page");
+    assert_eq!(quit, Some(true));
+}
+
+#[test]
+fn a_relative_link_opens_the_file_at_its_heading_and_backspace_returns() {
+    let dir = scratch("locallink");
+    let trace = dir.join("trace.log");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::create_dir_all(dir.join("docs")).unwrap();
+    let words = "link text ".repeat(30);
+    std::fs::write(dir.join("a.md"), format!("[{words}](docs/b.md#deep)\n\n[{words}](nope.md)\n\n[{words}](setup.command)\n\n[{words}](docs/)\n")).unwrap();
+    std::fs::write(dir.join("docs/ReadMe.md"), "# Docs home\n").unwrap();
+    std::fs::write(dir.join("setup.command"), "#!/bin/sh\n").unwrap();
+    std::fs::write(dir.join("docs/b.md"), format!("# Top\n\n{f}## Deep\n\n{f}", f = "filler\n\n".repeat(200))).unwrap();
+    let a = dir.join("a.md");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = open(a.to_str().unwrap(), 80, &env);
+    let shown = wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"\x1b[<0;20;3M\x1b[<0;20;3m").unwrap();
+    let opened = wait_for(&out, shown, b" b.md ");
+    wait_count(&trace, "page loaded", 2);
+    let landed = top_after(&trace, "page loaded");
+    std::thread::sleep(Duration::from_millis(500));
+    tty.write_all(b"\x7f").unwrap();
+    let back = wait_for(&out, opened, b" a.md ");
+    std::thread::sleep(Duration::from_millis(500));
+    // The second link, below the first, names no file.
+    tty.write_all(b"\x1b[<0;20;8M\x1b[<0;20;8m").unwrap();
+    let missing = wait_for(&out, back, b"Can't open nope.md: no such file");
+    std::thread::sleep(Duration::from_millis(500));
+    // The third link names a script, which must not run.
+    tty.write_all(b"\x1b[<0;20;13M\x1b[<0;20;13m").unwrap();
+    let refused = wait_for(&out, missing, b"Not a Markdown file: setup.command");
+    std::thread::sleep(Duration::from_millis(500));
+    // The fourth link names a folder, which opens its README.
+    tty.write_all(b"\x1b[<0;20;18M\x1b[<0;20;18m").unwrap();
+    wait_for(&out, refused, b" ReadMe.md ");
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(landed.starts_with("\"Deep"), "b.md opened at {landed}, not at its heading");
     assert_eq!(quit, Some(true));
 }

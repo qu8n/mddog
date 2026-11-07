@@ -1,5 +1,5 @@
 #!/bin/sh
 set -e
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked

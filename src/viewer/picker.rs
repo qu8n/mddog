@@ -62,9 +62,15 @@ pub fn scope(start: &Path, cwd: &Path) -> PathBuf {
     start.ancestors().find(|d| d.join(".git").exists()).map_or_else(|| cwd.to_path_buf(), Path::to_path_buf)
 }
 
-/// Whether the file list shows `p`, by the config's `file_list.extensions`.
+/// The extensions the file list shows, lowercase.
+const EXTENSIONS: [&str; 2] = ["md", "markdown"];
+
+/// The extensions for a sentence.
+pub const EXTENSION_NAMES: &str = ".md or .markdown";
+
+/// Whether the file list shows `p`: a `.md` or `.markdown` file, in any case.
 pub fn listed(p: &Path) -> bool {
-    crate::config::get().file_list.shows(p)
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 /// The text of the first ATX heading, outside front matter and code fences.

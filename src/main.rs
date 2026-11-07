@@ -140,7 +140,7 @@ fn check_file(path: &Path) -> Result<(), String> {
         let readme = std::fs::read_dir(path).ok().and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("readme.md"))));
         return Err(match readme {
             Some(r) => format!("{shown} is a folder. Did you mean {}?", term::printable(&r.display().to_string())),
-            None => format!("{shown} is a folder, not a file. Give a {} file", config::get().file_list.names()),
+            None => format!("{shown} is a folder, not a file. Give a {} file", viewer::picker::EXTENSION_NAMES),
         });
     }
     let mut head = Vec::new();
@@ -160,7 +160,7 @@ fn near_match(path: &Path) -> Option<PathBuf> {
     let mut best: Option<(usize, PathBuf)> = None;
     for e in std::fs::read_dir(dir).ok()?.flatten() {
         let cand = e.file_name().to_string_lossy().to_lowercase();
-        if !config::get().file_list.shows(Path::new(&cand)) {
+        if !viewer::picker::listed(Path::new(&cand)) {
             continue;
         }
         let d = if stem(&cand) == stem(&name) { 0 } else { distance(&cand, &name) };

@@ -199,8 +199,49 @@ fn opening_details_fetches_its_remote_images() {
 }
 
 #[test]
+fn a_failed_remote_image_keeps_its_alt_text() {
+    // Loading and failed draw the same alt text, so a failure needs no new layout and leaves nothing loading.
+    let e = engine("![a cat](https://example.invalid/cat.png)\n");
+    assert_eq!(e.pending_images(), 1);
+    assert_eq!(e.search("a cat", None).len(), 1);
+    e.wait_images(std::time::Duration::from_secs(10));
+    assert_eq!(e.pending_images(), 0);
+    assert_eq!(e.search("a cat", None).len(), 1);
+}
+
+#[test]
 fn a_stray_link_ends_with_its_paragraph() {
     // GitHub closes an <a> left open in a paragraph; a stray <b> it carries on, so that stays.
     let text = format!("{:?}", mddog::render::doc::parse("intro <a href=\"https://a.b\">stray\n\nlater text\n").blocks);
     assert!(text.contains("\"later text\"") && text.ends_with("link: 0 })])]"), "{text}");
+}
+
+#[test]
+fn a_huge_svg_draws_scaled_down() {
+    // A declared height of 2,000,000,000 panicked in tiny-skia, and 200,000 drew a page that tall.
+    let dir = std::env::temp_dir().join(format!("mddog-huge-svg-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
+    for (name, h) in [("huge", 2_000_000_000u64), ("tall", 200_000)] {
+        let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="{h}"><rect width="10" height="{h}"/></svg>"#);
+        std::fs::write(dir.join(format!("{name}.svg")), svg).unwrap_or_else(|e| panic!("{e}"));
+        let e = Engine::new(640.0, 2.0, false);
+        e.load(&format!("![{name}]({name}.svg)\n"), &dir, false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
+        let height = e.layout().height;
+        assert!(height < 20_000.0, "{name}: page is {height} px tall");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_svg_whose_rounded_size_is_too_big_still_draws() {
+    // 2399.5 by 13983.5 fits under 2^25 pixels, but 2400 by 13984 does not, and the image vanished.
+    let dir = std::env::temp_dir().join(format!("mddog-round-svg-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="2399.5" height="13983.5"><rect width="10" height="10"/></svg>"#;
+    std::fs::write(dir.join("big.svg"), svg).unwrap_or_else(|e| panic!("{e}"));
+    let e = Engine::new(3000.0, 1.0, false);
+    e.load("![big picture](big.svg)\n", &dir, false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
+    let height = e.layout().height;
+    assert!(height > 13_000.0, "page is {height} px tall");
+    let _ = std::fs::remove_dir_all(&dir);
 }

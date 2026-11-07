@@ -27,6 +27,8 @@ mddog fetches the Markdown (pun intended), lays it out and draws it with macOS's
 - Search, a table of contents, and a fuzzy file list
 - Keyboard-first navigation with vim-like key bindings
 - Mouse support for scrolling, clicking links, and selecting text
+- Follow links to other local Markdown files, and go back with `Backspace`
+- Zoom the page with your terminal's font size (`Cmd-+` and `Cmd--`)
 - Automatically reload when the file changes
 
 ## Prerequisites
@@ -82,11 +84,11 @@ To update, run the mddog install script again, then:
 claude plugin marketplace update mddog && claude plugin update mddog@mddog
 ```
 
-Then start a new session or run `/reload-plugins`. Always update `mdd` and the plugin together: an older `mdd` can't draw the pane in the desktop app.
+Then start a new session or run `/reload-plugins`. Always update `mdd` and the plugin together: an older `mdd` can't draw the pane outside the terminal.
 
 ### Usage
 
-- Inside a Claude Code session, open a file with `/mddog @<file.md>` or `/mddog <file.md>`, or ask Claude to show you one. The pane works in the terminal and in the Claude Code desktop app.
+- Inside a Claude Code session, open a file with `/mddog @<file.md>` or `/mddog <file.md>`, or ask Claude to show you one. The pane works in the terminal, the Claude Code desktop app, and the VS Code extension.
 - Scroll with the mouse wheel, or click the pane and use the arrow and page keys.
 - The pane refreshes when the file changes.
 - If Claude opens the pane and it doesn't appear, the terminal is too narrow. Zoom out, or run `/mddog <file.md>` yourself.
@@ -99,9 +101,9 @@ Note: Claude Code only shows images in the terminals it knows, like Ghostty, kit
 
 Configure your mddog at `~/.config/mddog/config.toml`, or `$XDG_CONFIG_HOME/mddog/config.toml` when that is set. See [`config.example.toml`](config.example.toml) for every option.
 
-Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`. By default mddog uses the GitHub pair and follows the macOS appearance. The Obsidian themes restyle the whole page like Obsidian's reading view. A theme is a token file that sets colors, fonts and sizes. `style.css` and themes written in arbitrary CSS are no longer read. To write your own theme, see [docs/themes.md](docs/themes.md).
+Four themes are provided: `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`. By default mddog uses the GitHub pair and follows the macOS appearance. The Obsidian themes restyle the whole page like Obsidian's reading view. A theme is a token file that sets colors, fonts and sizes. To write your own theme, see [docs/themes.md](docs/themes.md).
 
-mddog draws text with font smoothing when macOS does, which it reads from `defaults -g AppleFontSmoothing` at startup (0 turns it off). Set `font_smoothing = true` or `false` to choose for mddog alone.
+mddog draws text with font smoothing when macOS does, which it reads from `defaults -g AppleFontSmoothing` at startup (0 turns it off).
 
 ## Limitations
 
@@ -109,4 +111,4 @@ mddog draws text with font smoothing when macOS does, which it reads from `defau
 - mddog refuses to run in Warp and zellij, whose bugs garble scrolling ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424), [zellij#5573](https://github.com/zellij-org/zellij/issues/5573)). In a multiplexer running inside Warp, mddog can't tell and runs anyway, with the same garbling.
 - No tmux support as it can't show images yet ([tmux#5445](https://github.com/tmux/tmux/pull/5445)).
 - In herdr, scrolling lags in most terminals except for Ghostty ([herdr#5512](https://github.com/herdrdev/herdr/issues/5512)). Starting herdr with `TERM_PROGRAM=ghostty herdr` fixes it, but then herdr also treats the terminal as Ghostty for notifications and focus.
-- In the Claude Code desktop app, the plugin's pane can't click links or select text.
+- In the Claude Code desktop app and VS Code extension, the plugin's pane can't click links or select text.

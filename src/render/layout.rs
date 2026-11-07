@@ -5,7 +5,7 @@ use crate::render::icons::{self, Icon};
 use crate::render::images::{Images, Img, Status};
 use crate::render::math::{self, MItem};
 use crate::render::page::*;
-use crate::render::svg::{render_svg, render_view};
+use crate::render::svg::{self, render_svg, render_view};
 use crate::render::text::{BOLD, FKey, Fonts, ITALIC, MONO, SEMIBOLD, TABULAR, WEIGHT_MASK, weight};
 use crate::render::theme::{Look, Rgb, Theme, mix};
 use std::collections::HashSet;
@@ -691,7 +691,7 @@ impl<'a> Layouter<'a> {
             }
             ZoomBar { frame, item: bar, right: frame.0 + frame.2, buttons, scale: s }
         });
-        self.page.diagrams.push(Diagram { tree: Rc::new(tree), item, rect: (dx, top, dw, dh), bmp, fit, zoom });
+        self.page.diagrams.push(Diagram { tree, item, rect: (dx, top, dw, dh), bmp, fit, zoom });
         place_bar(&mut self.page, di, None);
         *y = top + dh + if zooms { 32.0 * s } else { 0.0 } + pad;
     }
@@ -901,7 +901,7 @@ impl<'a> Layouter<'a> {
                 }
                 Inl::Img { src, alt, w, link } => {
                     let wanted = &mut self.page.wanted;
-                    match self.images.get(src, wanted) {
+                    let drawn = match self.images.get(src, wanted) {
                         Status::Ready(img) => {
                             let (nw, nh) = img.size();
                             let s = self.s;
@@ -912,23 +912,27 @@ impl<'a> Layouter<'a> {
                                 dh *= maxw / dw;
                                 dw = maxw;
                             }
+                            if matches!(img, Img::Svg(_)) {
+                                (dw, dh) = svg::fit(dw, dh);
+                            }
                             let bmp = match &img {
-                                Img::Raster(b) => b.clone(),
-                                Img::Svg(t) => match render_svg(t, dw.round() as u32, dh.round() as u32) {
-                                    Some(b) => Rc::new(b),
-                                    None => continue,
-                                },
+                                Img::Raster(b) => Some(b.clone()),
+                                Img::Svg(t) => render_svg(t, dw.round() as u32, dh.round() as u32).map(Rc::new),
                             };
-                            let f = FKey::new(tc.size, tc.bits);
-                            out.push(Atom { k: AK::Img(bmp), w: dw, f, color: tc.color, under: false, strike: false, link: *link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: dh, down: 0.0 });
+                            bmp.map(|b| (b, dw, dh))
                         }
-                        Status::Pending | Status::Failed => {
-                            let t = if alt.is_empty() { "[image]".to_string() } else { alt.clone() };
-                            let sty = Sty { italic: true, link: *link, ..Sty::default() };
-                            let mut t2 = tc.clone();
-                            t2.color = th.fg_muted;
-                            self.text_atoms(&t, &sty, &t2, &mut out);
-                        }
+                        Status::Pending | Status::Failed => None,
+                    };
+                    if let Some((bmp, dw, dh)) = drawn {
+                        let f = FKey::new(tc.size, tc.bits);
+                        out.push(Atom { k: AK::Img(bmp), w: dw, f, color: tc.color, under: false, strike: false, link: *link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: dh, down: 0.0 });
+                    } else {
+                        // Loading, failed, or an SVG that would not draw: the alt text in its place.
+                        let t = if alt.is_empty() { "[image]".to_string() } else { alt.clone() };
+                        let sty = Sty { italic: true, link: *link, ..Sty::default() };
+                        let mut t2 = tc.clone();
+                        t2.color = th.fg_muted;
+                        self.text_atoms(&t, &sty, &t2, &mut out);
                     }
                 }
             }

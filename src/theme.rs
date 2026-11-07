@@ -14,7 +14,18 @@ const BUILTIN: &[(&str, &str)] = &[
     ("obsidian-dark", include_str!("../assets/themes/obsidian-dark.css")),
 ];
 
-pub type Rgb = (u8, u8, u8);
+/// A color as 0xRRGGBB.
+pub type Rgb = u32;
+
+/// The red, green and blue bytes of `c`.
+pub fn channels(c: Rgb) -> [u8; 3] {
+    let [_, r, g, b] = c.to_be_bytes();
+    [r, g, b]
+}
+
+pub fn pack([r, g, b]: [u8; 3]) -> Rgb {
+    u32::from_be_bytes([0, r, g, b])
+}
 
 /// The colors the terminal chrome draws with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,11 +55,13 @@ impl Palette {
     }
 }
 
-pub fn fg((r, g, b): Rgb) -> String {
+pub fn fg(c: Rgb) -> String {
+    let [r, g, b] = channels(c);
     format!("\x1b[38;2;{r};{g};{b}m")
 }
 
-pub fn bg((r, g, b): Rgb) -> String {
+pub fn bg(c: Rgb) -> String {
+    let [r, g, b] = channels(c);
     format!("\x1b[48;2;{r};{g};{b}m")
 }
 
@@ -63,7 +76,7 @@ pub fn rgb(s: &str) -> Option<Rgb> {
         6 | 8 => (0..3).map(|i| u8::from_str_radix(h.get(i * 2..i * 2 + 2)?, 16).ok()).collect::<Option<_>>()?,
         _ => return None,
     };
-    Some((v[0], v[1], v[2]))
+    Some(pack([v[0], v[1], v[2]]))
 }
 
 /// What a token holds.
@@ -402,8 +415,8 @@ mod tests {
     fn missing_tokens_come_from_github() {
         let t = parse("x.css", ":root { color-scheme: light; --mddog-bg: #fafafa; /* --mddog-fg: #fff; */ --mddog-fg: #123 }").unwrap();
         let light = builtin("github-light").unwrap();
-        assert_eq!(t.palette.bg, (250, 250, 250));
-        assert_eq!(t.palette.fg, (17, 34, 51));
+        assert_eq!(t.palette.bg, 0xfafafa);
+        assert_eq!(t.palette.fg, 0x112233);
         assert_eq!(t.palette.fg_muted, light.palette.fg_muted);
         assert_eq!(t.color("pl-keyword"), light.color("pl-keyword"));
         assert_eq!(t.fonts("font-code"), light.fonts("font-code"));
@@ -459,12 +472,12 @@ mod tests {
     #[test]
     fn quotes_hide_braces_and_comments() {
         let bg = |css: &str| parse("x.css", css).map(|t| (t.dark, t.palette.bg));
-        assert_eq!(bg(":root{ color-scheme:dark; /* } { ; */ --mddog-bg:#ff0000; }"), Ok((true, (255, 0, 0))));
+        assert_eq!(bg(":root{ color-scheme:dark; /* } { ; */ --mddog-bg:#ff0000; }"), Ok((true, 0xff0000)));
         // A brace in quotes is the value's, so the error is about the value.
         assert!(bg(":root{ color-scheme:dark; --mddog-font-body:\"}{;\"; }").unwrap_err().starts_with("x.css: --mddog-font-body: expected"));
-        assert_eq!(bg("/* :root{color-scheme:light} */:root{color-scheme:dark;--mddog-bg:#ff0000}/* } */"), Ok((true, (255, 0, 0))));
+        assert_eq!(bg("/* :root{color-scheme:light} */:root{color-scheme:dark;--mddog-bg:#ff0000}/* } */"), Ok((true, 0xff0000)));
         // The last declaration wins, as in the cascade.
-        assert_eq!(bg(":root{color-scheme:dark;--mddog-bg:#fff}:root{--mddog-bg:#ff0000}"), Ok((true, (255, 0, 0))));
+        assert_eq!(bg(":root{color-scheme:dark;--mddog-bg:#fff}:root{--mddog-bg:#ff0000}"), Ok((true, 0xff0000)));
     }
 
     #[test]
@@ -472,7 +485,7 @@ mod tests {
         let obsidian = builtin("obsidian-dark").unwrap();
         let t = parse("x.css", ":root { --mddog-base: obsidian-dark; --mddog-bg: #202a44; }").unwrap();
         assert!(t.dark);
-        assert_eq!(t.palette, Palette { bg: (32, 42, 68), ..obsidian.palette });
+        assert_eq!(t.palette, Palette { bg: 0x202a44, ..obsidian.palette });
         assert_eq!(t.heading_scale(), obsidian.heading_scale());
         assert_eq!(t.color("link"), obsidian.color("link"));
         let e = parse("x.css", ":root{--mddog-base:obsidian-dark;color-scheme:light}").unwrap_err();
@@ -489,7 +502,7 @@ mod tests {
         std::fs::write(dir.join("sub/b.css"), ":root{--mddog-base:obsidian-light;--mddog-bg:#fefefe}").unwrap();
         let a = file(&dir.join("a.css")).unwrap();
         assert!(!a.dark);
-        assert_eq!((a.palette.bg, a.palette.fg, a.palette.border), ((254, 254, 254), (1, 2, 3), builtin("obsidian-light").unwrap().palette.border));
+        assert_eq!((a.palette.bg, a.palette.fg, a.palette.border), (0xfefefe, 0x010203, builtin("obsidian-light").unwrap().palette.border));
         std::fs::write(dir.join("sub/b.css"), ":root{--mddog-base:../a.css}").unwrap();
         let e = file(&dir.join("a.css")).unwrap_err();
         let (a, b) = (dir.join("a.css").display().to_string(), dir.join("sub/b.css").display().to_string());
@@ -512,13 +525,14 @@ mod tests {
 
     #[test]
     fn rgb_reads_hex() {
-        assert_eq!(rgb("#0d1117"), Some((13, 17, 23)));
-        assert_eq!(rgb("#fff8"), Some((255, 255, 255)));
+        assert_eq!(rgb("#0d1117"), Some(0x0d1117));
+        assert_eq!(rgb("#fff8"), Some(0xffffff));
         assert_eq!(rgb("#+1+1+1"), None);
         assert_eq!(rgb("var(--bgColor-default)"), None);
     }
 
-    fn luminance((r, g, b): Rgb) -> f64 {
+    fn luminance(c: Rgb) -> f64 {
+        let [r, g, b] = channels(c);
         let l = |c: u8| {
             let c = f64::from(c) / 255.0;
             if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }

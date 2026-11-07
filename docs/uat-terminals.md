@@ -49,7 +49,7 @@ Run these in each cell, from the repo root. Note anything odd, even if the check
 
 - Alone and herdr: all checks work. `G` settles in about 0.4 s, so the slow `G` seen in Ghostty doesn't happen here.
 - tmux: refuses with the clear message. `allow-passthrough` makes no difference.
-- zellij: ❌ the same garbling as in Ghostty. A code block is drawn about 5 times after Space 3 times in `fixtures/gfm.md`, and it stays. `smooth_scroll = false` fixes that short repro, but heavy scrolling still garbles.
+- zellij: ❌ the same garbling as in Ghostty. A code block is drawn about 5 times after Space 3 times in `fixtures/gfm.md`, and it stays. Turning glides off (a config key at the time) fixed that short repro, but heavy scrolling still garbles.
 - The relative link to the MDX fixture shows "Links to local files don't open in the preview", as designed. The Ghostty "missed click" was probably this notice.
 
 ### WezTerm

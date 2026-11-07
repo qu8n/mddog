@@ -10,25 +10,5 @@
 # and ~/ is your home. To write one, see docs/themes.md.
 theme = "light:github-light,dark:github-dark"
 
-# Reload the preview when the file changes.
-live_reload = true
-
-# Let d/u, f/b, Space, g/G and the other jump keys glide to the new position
-# instead of jumping. j/k, the mouse wheel and search always move at once.
-smooth_scroll = true
-
-# How long a glide over one screen takes, in milliseconds. Half a screen takes half as long.
-# A jump key pressed within 100 ms of the last one glides in 50 ms, so a held key keeps up.
-glide_ms_per_page = 200
-
 # Copy the text you select with a mouse drag or a double-click, as soon as you let go.
 copy_on_select = false
-
-# Font smoothing makes text a little heavier. Unset, mddog follows the macOS setting (defaults -g AppleFontSmoothing).
-# font_smoothing = true
-
-[file_list]
-# The file extensions the file list (mdd, mdd FOLDER, Ctrl-p) shows, and that
-# "Did you mean" picks from. This is the full list. Write each one without the dot.
-# mdd FILE opens any text file, whatever its extension.
-extensions = ["md", "markdown"]
