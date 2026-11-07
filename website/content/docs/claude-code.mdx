@@ -1,0 +1,56 @@
+---
+title: Claude Code plugin
+description: Preview Markdown files in a pane beside the Claude Code chat.
+---
+
+The mddog plugin for [Claude Code](https://claude.com/claude-code) shows a Markdown file in a pane beside the chat. You can open a file yourself, or ask Claude to show you one. The pane works in the terminal, the Claude Code desktop app, and the VS Code extension.
+
+## Install
+
+[Install mddog](/docs/install) first. Then run:
+
+```sh
+claude plugin marketplace add qu8n/mddog && claude plugin install mddog@mddog
+```
+
+## Update
+
+Update `mdd` and the plugin together. An older `mdd` can't draw the pane outside the terminal.
+
+1. Run the [install script](/docs/install) again.
+2. Update the plugin:
+
+   ```sh
+   claude plugin marketplace update mddog && claude plugin update mddog@mddog
+   ```
+
+3. Start a new Claude Code session, or run `/reload-plugins`.
+
+## Usage
+
+- Open a file with `/mddog <file.md>` or `/mddog @<file.md>`.
+- Ask Claude to show you a file, for example "show me the plan in mddog". Claude opens it with the plugin's `open` tool.
+- Scroll with the mouse wheel. Or click the pane and use the arrow and page keys.
+- The pane reloads when the file changes, so you see Claude's edits as it makes them.
+
+If Claude opens the pane and you don't see it, the terminal is too narrow. Zoom out, or run `/mddog <file.md>` yourself.
+
+## Use another mdd
+
+The plugin runs `mdd` from your `PATH`. To run a different binary, set `MDDOG_BIN` before you start Claude Code:
+
+```sh
+MDDOG_BIN=~/src/mddog/target/release/mdd claude
+```
+
+## Notes
+
+**Images.** Claude Code shows images only in terminals it knows, such as Ghostty, kitty, iTerm2 and WezTerm. In other terminals, start it like this:
+
+```sh
+CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 claude
+```
+
+**"/mddog isn't a command here".** If `/mddog` is the first message of a new session, the app shows this note, but the command still runs. The app checks the first message before the plugin has registered `/mddog`. Later calls don't show it.
+
+**Desktop app and VS Code.** In these, the pane can't click links or select text.

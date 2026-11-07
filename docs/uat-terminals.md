@@ -2,99 +2,102 @@
 
 Manual tests of mddog in each terminal, alone and inside a multiplexer. The results feed the Limitations section of the README.
 
-Build under test: `3cbe73e`. Fixes from this round: `33d2779` (stale TOC and status text, iTerm2) and `7773209` (Warp cell size). Run `cargo install --path .` before each session so `mdd` is current.
+Build under test: `7699b95`, run as `target/release/mdd` from a worktree, first on `PATH`. Tested on 2026-11-07 on a Retina Mac with macOS 27.2. Agents drove the terminals with AppleScript keys and CoreGraphics mouse events, and checked screenshots.
 
 ## Matrix
 
-Status: ⬜ not run, ✅ works, ⚠️ works with a limitation, ❌ broken, ➖ skipped.
+Status: ✅ works, ⚠️ works with a limitation, ❌ broken, 🚫 mddog refuses with a clear message and exits cleanly, ➖ skipped.
 
 | Terminal | Version | Alone | herdr 0.9.5 | tmux 3.8 | zellij 0.45.1 |
 | --- | --- | --- | --- | --- | --- |
-| Ghostty | 22391ed64 | ✅ | ✅ | ✅ | ❌ |
-| kitty | 0.49.2 | ✅ | ✅ | ✅ | ❌ |
-| WezTerm | 0.1.0 | ⚠️ | ⚠️ | ✅ | ❌ |
-| iTerm2 | 3.7 nightly 2026-10-22 | ⚠️ | ⚠️ | ✅ | ❌ |
-| Warp | 0.2026.10.21 | ❌ | ⚠️ | ✅ | ⚠️ |
+| Ghostty | 1.3.2-main+22391ed64 | ✅ | ✅ | 🚫 | 🚫 |
+| kitty | 0.49.2 | ✅ | ✅ | 🚫 | 🚫 |
+| WezTerm | 20240203-110809-5046fc22 | ⚠️ | ⚠️ | 🚫 | 🚫 |
+| iTerm2 | 3.7.20261106-nightly | ⚠️ | ⚠️ | 🚫 | 🚫 |
+| Warp | 0.2026.11.04.08.17.01 | 🚫 | ❌ | 🚫 | 🚫 |
+| Rex | Beta 0.1.0 (1853) | ✅ | ➖ | ➖ | ➖ |
 
-mddog expects tmux to fail with a clear message ("this terminal can't show images"), so for tmux the first check is that message, and whether `set -g allow-passthrough on` changes anything.
+The last round marked tmux ✅ because the refusal was the expected result. tmux isn't supported, so this round marks it 🚫. Every 🚫 cell under tmux also leaks mddog's graphics probe into the tmux pane title (see [Bugs](#bugs)).
 
 ## Checks
 
-Run these in each cell, from the repo root. Note anything odd, even if the check passes.
+Run these in each cell, from the repo root. Note anything odd, even if the check passes. Checks 7, 8 and 11 are new in this round, because the build added local links, zoom with the terminal font, and a clear message for `mdd -`. Check 3 now covers the relative SVG image, and check 6 checks the clipboard with `pbpaste`.
 
 1. **File list.** `mdd`. The list draws, typing filters it, Enter opens a file.
 2. **First paint.** `mdd README.md`. Fonts, tables, and code colors look right. The page paints in under a second.
-3. **Rich content.** `mdd fixtures/gfm.md`. Math, Mermaid, and alerts draw.
-4. **Scroll.** `j` `k`, `Space` `b`, `g` `G`, and the mouse wheel, many times down and then many times up. Scrolling up matters: in herdr on iTerm2 it once turned the page blank. No blank or stale tiles, no tearing, no lag.
-5. **Overlays.** `?` help, `t` table of contents, `/` search with `n` `N`. Each opens and closes cleanly.
-6. **Mouse.** Click a link and a heading anchor. Drag to select, then `Cmd-c`. Paste somewhere to check the clipboard.
-7. **Resize.** Resize the window (and the pane, in a multiplexer). The page lays out again at the new width.
-8. **Edit and reload.** `e`, change a line, save, quit the editor. The preview shows the change. Edit the file from another pane too, to check live reload.
-9. **Quit.** `q`. The shell comes back clean, with no leftover images.
-10. **Panes and tabs** (multiplexer only). Split the pane, switch tabs, and zoom. Images stay in mddog's pane and come back when you return.
+3. **Rich content.** `mdd fixtures/gfm.md`. Math, Mermaid, alerts, and the relative image `diagram.svg` draw.
+4. **Scroll.** `j` `k`, `Space` `b`, `g` `G`, and the mouse wheel, many times down and then many times up, paced and in a fast burst. No blank or stale tiles, no tearing, no lag.
+5. **Overlays.** `?` help, `t` table of contents (also `t` twice fast), `/` search with `n` `N`. Each opens and closes cleanly.
+6. **Mouse.** Click a heading link. Drag to select, then `Cmd-c`. Check the clipboard with `pbpaste`. With `copy_on_select = true`, the drag alone copies.
+7. **Local links.** In `README.md`, click the `docs/themes.md` link. The doc opens, and `Backspace` returns to the same place. A link to a non-Markdown file shows "Not a Markdown file".
+8. **Zoom.** `Cmd-+` twice, then `Cmd--` twice. The page lays out again at each font size, with no stale tiles.
+9. **Resize.** Resize the window (and the pane, in a multiplexer). The page lays out again at the new width, with no leftover TOC or status bar.
+10. **Edit and reload.** `e`, change a line, save, quit the editor. The preview shows the change. Append to the file from another shell too, to check live reload.
+11. **Standard input.** `cat README.md | mdd` paints the page. `mdd -` says it waits for typed input. `Ctrl-D` on empty input exits 2 with usage, and `Ctrl-C` exits 130.
+12. **Quit.** `q`. The shell comes back clean, with no leftover images.
+13. **Panes and tabs** (multiplexer only). Split the pane, switch tabs, and zoom. Images stay in mddog's pane and come back when you return.
+
+In a 🚫 cell, run `mdd README.md`, `mdd`, and `cat README.md | mdd`. Each must print the refusal and exit 1, and leave the shell clean. In tmux, also try `set -g allow-passthrough on`.
+
+The refusal messages:
+
+- tmux: "mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use Ghostty, Kitty, WezTerm, or iTerm2. Terminal.app, tmux, and screen don't support it."
+- zellij: "mdd: zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648). So mddog can't show the preview here. Use Ghostty, Kitty, WezTerm, or iTerm2."
+- Warp: "mdd: Warp can't crop images, and mddog crops images to scroll them. So mddog can't show the preview here. Use Ghostty, Kitty, WezTerm, or iTerm2."
 
 ## Results
 
-<!-- One section per terminal, filled in as we go. -->
-
 ### Ghostty
 
-- Alone: all 9 checks work, including scrolling up and the mouse wheel.
-- herdr: scrolling up is clean with no lag. Split, zoom, and tabs work.
-- tmux: mddog exits 1 with the "can't show images" message, as expected. `allow-passthrough on` or `all` makes no difference.
-- zellij: ❌ scrolling garbles the page. Code blocks are drawn twice and offset, and rows smear after scrolling back to the top. Repro: in `zellij`, `mdd fixtures/gfm.md`, then press Space 3 times.
-- Every cell: the first `G` on a 628-line file takes 2 to 3 s to settle.
+- Alone: all 12 checks pass. README paints in about 0.3 s, and `G` settles in about 0.5 s. The slow first `G` from the last round (2 to 3 s) is gone.
+- herdr: all 13 checks pass. README paints in steps: the large image is cut off at 0.5 s and complete by 1.2 s. A tab switch repaints in under 0.4 s.
+- tmux and zellij: refuse as expected. `allow-passthrough` doesn't change anything.
 
 ### kitty
 
-- Alone and herdr: all checks work. `G` settles in about 0.4 s, so the slow `G` seen in Ghostty doesn't happen here.
-- tmux: refuses with the clear message. `allow-passthrough` makes no difference.
-- zellij: ❌ the same garbling as in Ghostty. A code block is drawn about 5 times after Space 3 times in `fixtures/gfm.md`, and it stays. Turning glides off (a config key at the time) fixed that short repro, but heavy scrolling still garbles.
-- The relative link to the MDX fixture shows "Links to local files don't open in the preview", as designed. The Ghostty "missed click" was probably this notice.
+- Alone: all 12 checks pass. README paints in about 0.4 s, and `G` settles in about 0.4 s. `Backspace` after a local link returns a frame identical to the one before the click.
+- herdr: all 13 checks pass. README is complete by 1 s, and `G` settles in about 0.2 s.
+- tmux and zellij: refuse as expected.
 
 ### WezTerm
 
-- Alone: ⚠️ only for `Cmd-c`, which copies nothing with the default config, as the README says. `c` (copy source) works. The wheel works, scrolling up is clean, and `G` settles in about 0.3 s.
-- herdr: ⚠️ for the same `Cmd-c` reason. Heavy scrolling up, by keys, wheel, and fast bursts, never went blank or stale. A pixel timeline puts the page full about 0.4 s after each step, and the lag wasn't visible by eye. That is milder than the README's herdr note suggests.
-- tmux: refuses with the clear message.
-- zellij: ❌ the known garbling, and then WezTerm itself crashes, 5 times out of 5. Repro: in `zellij`, `mdd fixtures/gfm.md`, then Space 1 to 3 times. WezTerm logs "Failed to allocate ~11M quads" and panics at `draw.rs:258`. The zellij session survives. Checks 6 to 10 weren't run.
+- Alone: ⚠️ `Cmd-c` empties the clipboard. WezTerm's default `Cmd-c` binding takes the key and copies its own empty selection, so it overwrites what mddog copied on release. The README's fix (`enable_kitty_keyboard = true`, and remove the `Cmd-c` binding) wasn't tested. Everything else passes, and `G` settles in about 1 s.
+- herdr: ⚠️ the same `Cmd-c` problem. Scrolling is clean, `G` settles in about 0.5 s, and one wheel step fills within 0.2 s. The 0.4 s late fill from the last round didn't come back.
+- tmux and zellij: refuse as expected. WezTerm no longer crashes, because mddog refuses zellij before it draws.
 
 ### iTerm2
 
-- Alone: ⚠️ `Cmd-c` doesn't reach mddog, as the README says. iTerm2 shows its "mouse reporting has prevented making a selection" banner over the top of the page. The wheel works. `G` settles in about 0.4 s.
-- herdr: ⚠️ for the same `Cmd-c` reason. Over 3 rounds of scrolling down and up, with paced keys, bursts, and the wheel, checked on 60 fps video, the page never went blank and always recovered. One step fills in 0.1 to 0.3 s. `G` and `g` take 1.2 to 1.5 s. A burst of 25 Space then 25 `b` took about 20 s to settle.
-- tmux: refuses with the clear message.
-- zellij: ❌ the known garbling. iTerm2 didn't crash.
-- Possible mddog bug: after `t` then Esc, "TABLE OF CONTENTS" and its entries stay drawn over the page in herdr and zellij. Alone it closed cleanly, except once on a fast `t` `t`.
-- Possible mddog bug: after a resize, zoom, tab switch, or split, copies of the status bar stay at old row positions over the page until the next key. Seen alone and in herdr.
+- Alone: ⚠️ `Cmd-c` doesn't reach mddog, as the README says, so it copies nothing. Drag with `copy_on_select = true` works. The rest passes, `G` settles in under 0.5 s, and `t` then Esc, `t` twice, and a resize don't leave anything behind. Synthetic wheel events reached iTerm2 in this round, and scrolling with them was clean.
+- herdr: ⚠️ slow, and `Cmd-c` shows iTerm2's "mouse reporting has prevented making a selection" banner, which stays up. README takes about 3.5 s to paint, `G` takes 1.5 to 2 s, and returning from a local link takes 3.5 to 5.5 s. This is herdr sending iTerm2 every image as inline base64 ([herdr#5512](https://github.com/herdrdev/herdr/issues/5512)). Panes, tabs, and zoom work.
+- tmux and zellij: refuse as expected.
 
 ### Warp
 
-- Alone: ❌ the page is squashed, and scrolling is broken. Space, `j`, `b`, and the wheel change the percent but not the picture, and `k` leaves it garbled until `g` or `G`. Likely cause, not confirmed: Warp ignores `CSI 16t`, and its `TIOCGWINSZ` pixel size is in points (8x16 per cell, where the real cell is 16x32).
-- herdr: ⚠️ only for `Cmd-c`, which doesn't reach mddog. Warp shows an OSC 52 "Allow clipboard writes" banner. `c` works. Each step fills in within 0.25 s, and `G` takes 0.2 s.
-- tmux: refuses with the clear message.
-- zellij: ⚠️ short run. It didn't garble or crash, unlike every other terminal. Splitting a pane drew the page offset and cut off.
-- The TOC and status-bar leftovers seen in iTerm2 don't happen in Warp.
+- Alone: refuses as expected. No onboarding or sign-in was needed.
+- herdr: ❌ herdr hides Warp's name, so mddog runs, and scrolling is broken. `j`, `Space`, and the wheel change the percent but not the picture. `G` draws the end of the file squashed into the top third, with "The fixture ends here." three times. The page is also stretched sideways from the first paint, and a pane split lays it out squashed. The file list, overlays, `q`, and pane zoom work. The other checks weren't run after scrolling failed.
+- tmux and zellij: refuse as expected.
 
-Cause of the zellij bug: zellij 0.45 re-encodes kitty images itself. It caches crops by cell size only, so different crops collide ([zellij#5573](https://github.com/zellij-org/zellij/issues/5573), fixed on main by [#5623](https://github.com/zellij-org/zellij/pull/5623), unreleased), and it leaves the old copy on screen when it replaces one ([#5648](https://github.com/zellij-org/zellij/pull/5648), open).
+### Rex
 
-## Fixes after the first pass
+New in this round. Rex reports `TERM_PROGRAM=rex` and speaks the kitty graphics protocol. Rex has its own panes and session persistence, so herdr, tmux and zellij were skipped there.
 
-- `33d2779` clears the screen when the size or the sidebar width changes. In iTerm2, alone and in herdr, the TOC text after Esc and the status-bar copies after a resize are gone. Ghostty and kitty show no extra blank frames.
-- `7773209` scales the cell size when the terminal reports its window in points. Warp now lays the page out at the right size. Scrolling in Warp is still broken: a hand-written kitty test shows Warp ignores the source rect on `a=p`, so it draws the whole tile and doesn't move it. That's Warp's bug.
-- A recheck of Warp + herdr garbled when scrolling with both the old and new binary, which contradicts the first Warp + herdr run.
+- Alone: all 12 checks pass, including `Cmd-c`. `G` settles in under 1 s.
+- Rex's own panes and tabs: a split lays mddog out again at the narrower width, with the image inside its pane. A new tab doesn't show any image from mddog's tab. Zoom Pane couldn't be tested. Rex's pane focus moved to the other pane after a tab closed, which is a Rex quirk.
 
-- `a94e824` makes mddog refuse zellij (the `ZELLIJ` variable) and Warp (`TERM_PROGRAM=WarpTerminal`) with a message, as it does for tmux. A multiplexer inside Warp hides Warp's name, so mddog still runs there and garbles.
+## Bugs
+
+1. **The graphics probe leaks into the tmux pane title.** In every terminal, after `mdd` refuses in tmux, the status bar shows `"Gi=4003,s=1,v=1,a=q,t...` until something else sets the title. tmux takes the probe's APC sequence (`ESC _ G...`) as a pane title, and mddog sends the probe before it refuses. Repro: `tmux new`, `mdd README.md`, then `tmux display -p '#{pane_title}'`. `allow-passthrough on` doesn't change it.
+2. **Warp inside herdr isn't refused.** Inside herdr, `TERM_PROGRAM` is `herdr`, so the Warp check misses it, and the page garbles as described under Warp. Repro: in Warp, `herdr`, then `mdd fixtures/gfm.md` and `G`.
+3. **The tmux message blames the terminal.** It says "this terminal can't show images" in Ghostty and kitty, which can. tmux is named only in the last sentence.
+
+## Known causes
+
+- zellij 0.45 re-encodes kitty images itself. It caches crops by cell size only, so different crops collide ([zellij#5573](https://github.com/zellij-org/zellij/issues/5573), fixed on main by [#5623](https://github.com/zellij-org/zellij/pull/5623), unreleased), and it leaves the old copy on screen when it replaces one ([#5648](https://github.com/zellij-org/zellij/pull/5648), open). Before mddog refused zellij, this garbled every terminal and crashed WezTerm ("Failed to allocate ~11M quads").
+- Warp ignores the source rectangle on a kitty `a=p` placement, so it draws the whole tile and never moves it. mddog scrolls by cropping tiles, so the page can't scroll there.
+- herdr sends images to the outer terminal as temp files only for Ghostty. Every other terminal gets inline base64, about 11 MB per tile, which iTerm2 takes about 700 ms to decode ([herdr#5512](https://github.com/herdrdev/herdr/issues/5512)).
 
 ## Needs a manual check
 
-1. Trackpad inertia scrolling in herdr + iTerm2.
-2. Lag by feel in herdr + WezTerm and herdr + iTerm2. Agents measured it, but only you can say if it bothers you.
-3. The TOC and status-bar fix with your own iTerm2 profile, since the agents used the default one.
-
-## Manual check results (2026-10-24)
-
-1. herdr + iTerm2: trackpad scrolling feels odd. Outside herdr, iTerm2 scrolling feels good.
-2. herdr + WezTerm feels less laggy than herdr + iTerm2.
-3. `t` pressed twice left the TOC on screen. That run used `mdd` from `3cbe73e`, before the fix in `33d2779`. A retest with the current build passed: `t` twice, `t` then Esc, and a resize all leave the page clean.
-
+1. Trackpad inertia scrolling in herdr + iTerm2. In the last round you found it odd there and fine in iTerm2 alone.
+2. Lag by feel in herdr + iTerm2 on this build.
+3. WezTerm with `enable_kitty_keyboard = true` and its `Cmd-c` binding removed, to confirm the README's fix.

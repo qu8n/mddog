@@ -2,7 +2,9 @@ name: check
 
 on:
   push:
+    paths-ignore: [website/**]
   pull_request:
+    paths-ignore: [website/**]
 
 concurrency:
   group: check-${{ github.ref }}

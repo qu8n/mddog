@@ -1,0 +1,49 @@
+---
+title: Configuration
+description: The config file and every key in it.
+---
+
+mddog works without a config file. To change a setting, create `~/.config/mddog/config.toml`. If `XDG_CONFIG_HOME` is set, the file is `$XDG_CONFIG_HOME/mddog/config.toml` instead.
+
+Here is a config with every key at its default value. You only need the keys you change.
+
+```toml title="~/.config/mddog/config.toml"
+theme = "light:github-light,dark:github-dark"
+copy_on_select = false
+```
+
+mddog reads the config at startup, so restart it to see a change. An unknown key or a bad value stops mddog with an error that names the key.
+
+## `theme`
+
+The theme that sets the page's colors and fonts. The default is `"light:github-light,dark:github-dark"`.
+
+The value is one theme, or a pair with one theme for each macOS appearance:
+
+```toml
+theme = "github-dark"                                # always dark
+theme = "light:obsidian-light,dark:obsidian-dark"     # follow macOS, in Obsidian's style
+```
+
+With a pair, mddog follows the macOS appearance: light mode uses the `light` theme, and dark mode uses the `dark` theme.
+
+Each theme is a built-in name or a path to a theme file:
+
+- Built-in themes: `github-light`, `github-dark`, `obsidian-light`, `obsidian-dark`.
+- A theme file is any value that ends in `.css` or has a `/` in it. A relative path starts from the config folder, and `~/` is your home folder.
+
+See [Themes](/docs/themes) to see the built-in themes and to write your own.
+
+## `copy_on_select`
+
+When `true`, mddog copies the text you select with a drag or a double-click as soon as you let go. The default is `false`: the selection is only highlighted, and `Cmd-c` copies it.
+
+Turn this on in a terminal that keeps `Cmd-c` for itself, such as iTerm2. See [Limitations](/docs/limitations).
+
+```toml
+copy_on_select = true
+```
+
+## Font smoothing
+
+mddog draws text with font smoothing when macOS does. It reads the setting at startup, from `defaults -g AppleFontSmoothing`. A value of `0` turns smoothing off. This isn't a config key.

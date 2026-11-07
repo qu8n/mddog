@@ -1,0 +1,36 @@
+---
+title: Terminals
+description: Which terminals mddog runs in.
+---
+
+mddog sends the page to the terminal as images, over the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/). So it needs a terminal that supports that protocol.
+
+## Supported
+
+| Terminal | Notes |
+|---|---|
+| [Ghostty](https://ghostty.org) | Everything works |
+| [kitty](https://sw.kovidgoyal.net/kitty/) | Everything works |
+| [WezTerm](https://wezterm.org) `Cmd-c` needs a setting, and without it empties the clipboard. The mouse pointer doesn't change shape over links |
+| [iTerm2](https://iterm2.com) | `Cmd-c` doesn't reach mddog. Use `copy_on_select` instead |
+| Rex | Everything works. Tested alone only, not inside a multiplexer |
+
+See [Limitations](/docs/limitations) for the details and workarounds.
+
+## Not supported
+
+In a terminal that can't show images, mddog stops with an error. This includes:
+
+- Terminal.app and screen.
+- tmux, which can't show images yet ([tmux#5445](https://github.com/tmux/tmux/pull/5445)).
+
+mddog also refuses to run in these two, which it detects by name:
+
+- Warp can't crop images, and mddog crops images to scroll them ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424)).
+- zellij garbles scrolled images ([zellij#5573](https://github.com/zellij-org/zellij/issues/5573)).
+
+## Multiplexers
+
+mddog works inside herdr. With a terminal other than Ghostty, images arrive late, most of all in iTerm2. See [Limitations](/docs/limitations#herdr).
+
+Rex has its own panes and tabs, and mddog works in them.

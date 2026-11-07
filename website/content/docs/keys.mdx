@@ -1,0 +1,80 @@
+---
+title: Key bindings
+description: Every key and mouse action in the preview.
+---
+
+Press `?` in the preview to see this list. The bottom row also shows hints for the keys that fit what you're doing, and you can click a hint to run its key.
+
+## Scroll
+
+| Key | Does |
+|---|---|
+| `j` `k`, `Down` `Up`, `Ctrl-e` `Ctrl-y` | Scroll down or up one row |
+| `d` `u`, `Ctrl-d` `Ctrl-u` | Scroll down or up half a screen |
+| `Space` `f`, `PageDown` | Scroll down a full screen |
+| `b`, `Ctrl-b`, `PageUp` | Scroll up a full screen |
+| `g` or `gg`, `Home` | Go to the top |
+| `G`, `End` | Go to the bottom |
+| `h` `l`, `Left` `Right` | Scroll the wide code blocks and tables on screen left or right |
+| Mouse wheel | Scroll 3 rows |
+| `Shift` + wheel | Scroll the code block or table under the pointer sideways |
+| `Backspace`, `Ctrl-o` | Go back to where you were before a jump, or to the file before |
+
+## Mouse
+
+| Action | Does |
+|---|---|
+| Click a link | Open it in the browser. A `#` link scrolls to its heading |
+| Click a button | Copy a code block, open or close a `<details>`, or zoom or expand a diagram |
+| Drag, double-click | Select text, select a word |
+| `Cmd-c` | Copy the selected text |
+| Drag a scroll bar | Scroll that code block or table sideways |
+| Click the bottom row | Run the key named where you click |
+
+## Search
+
+| Key | Does |
+|---|---|
+| `/`, `Ctrl-f` | Open the search prompt. `Enter` searches. `Esc`, or `Backspace` in an empty prompt, cancels |
+| `n` `N`, `Enter` | Go to the next or previous match |
+| `Esc` | Clear the search, or close the contents panel |
+| `Ctrl-u` `Ctrl-w` | In the prompt: clear the text, or delete the last word |
+
+A query in all lowercase ignores case. A query with any uppercase letter matches case exactly.
+
+## Contents
+
+| Key | Does |
+|---|---|
+| `t` | Show or hide the contents panel |
+| `1` to `9` | Jump to the Nth section. Press the same digit again to step through its subsections |
+| `0` | Make the next repeated digit step backward through subsections |
+| `J` `K`, `]]` `[[` | Go to the next or previous section |
+| `D` `U`, wheel over the panel | Scroll the list in the contents panel. You can also drag its scroll bar |
+| Click an entry | Jump to that section |
+
+## Other
+
+| Key | Does |
+|---|---|
+| `w` | Wrap or unwrap long lines in code blocks |
+| `e`, `v` | Open the file in `$EDITOR` (`vi` if it's not set), then reload it |
+| `c` | Copy the file's Markdown source |
+| `?` | Show the key list. Press `?` or `Esc` to go back to the page |
+| `Ctrl-p` | Open the file list for the file's repo, or the current folder |
+| `Ctrl-z` | Pause mddog and go back to the shell. Run `fg` to come back |
+| `q`, `Q`, `Ctrl-c` | Quit |
+
+## File list
+
+| Key | Does |
+|---|---|
+| Type | Filter the list |
+| `Up` `Down`, `Ctrl-p` `Ctrl-n` | Move the selection |
+| `PageUp` `PageDown`, `Home` `End`, wheel | Move the selection further |
+| `Enter`, click a row | Open the file |
+| `Backspace`, `Ctrl-u`, `Ctrl-w` | Delete a letter, clear the filter, delete a word |
+| `Esc` | Go back to the file you had open, or quit if `mdd` started with the list |
+| `Ctrl-c` | Quit |
+
+In the file list, `q` is text you type in the filter, not quit.

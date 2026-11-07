@@ -1,0 +1,35 @@
+---
+title: Getting started
+description: Install mddog and preview your first file.
+---
+
+mddog previews Markdown in your terminal the way a browser renders it. It lays out the page with macOS's own text and graphics engines, in GitHub's style, and sends the result to the terminal as images. You get real fonts, Mermaid diagrams, math, tables and images, and you can scroll, search, click links and select text as you would in a browser.
+
+## Before you start
+
+- macOS
+- A terminal that supports the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/): Ghostty, kitty, WezTerm, or iTerm2. See [Terminals](/docs/terminals).
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
+```
+
+This puts `mdd` in `~/.local/bin`. See [Install and update](/docs/install) for what the script does, other folders, and building from source.
+
+## Preview a file
+
+```sh
+mdd README.md
+```
+
+Press `?` to see every key, and `q` to quit. Run `mdd` with no file to pick from the Markdown files in the current repo.
+
+## Next steps
+
+- [Usage](/docs/usage): every way to start `mdd`.
+- [Key bindings](/docs/keys): the full key list.
+- [Features](/docs/features): search, contents, the file list, links and more.
+- [Claude Code plugin](/docs/claude-code): preview files in a pane beside the chat.
+- [Configuration](/docs/config) and [Themes](/docs/themes): change how the page looks.

@@ -1,0 +1,16 @@
+{
+  "pages": [
+    "index",
+    "install",
+    "usage",
+    "keys",
+    "features",
+    "claude-code",
+    "---Customize---",
+    "config",
+    "themes",
+    "---Reference---",
+    "terminals",
+    "limitations"
+  ]
+}
