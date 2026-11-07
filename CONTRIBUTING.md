@@ -11,6 +11,7 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 - `python3 reference/keymap-check.py` checks that every test named in `docs/behavior.md` ran and passed.
 - `claude plugin test plugins/claude-code` runs the plugin's tests in `plugins/claude-code/tests/`. `./check.sh` and CI don't run them. `tsc -p plugins/claude-code` type-checks them once a live load has written `.claude-plugin/types/` (gitignored). The tracked `plugins/claude-code/types/` is a different folder: it types the plugin's own `open` tool.
 - The docs site has its own gate: `cd website && pnpm install && pnpm types:check && pnpm build`.
+- `.github/workflows/website.yml` deploys the site to Cloudflare Pages (https://mddog.pages.dev) on every push to `main` that changes `website/`. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. To deploy by hand, run `pnpm run deploy` in `website/`. Plain `pnpm deploy` is a different, built-in pnpm command, and it fails.
 
 ## Tests
 

@@ -1109,7 +1109,7 @@ fn a_link_to_the_page_itself_jumps_without_reloading() {
     let words = "link text ".repeat(30);
     std::fs::write(dir.join("a.md"), format!("[{words}](./a.md#caf%C3%A9)\n\n{f}## Café\n\n[{words}](?raw=1)\n\n{f}", f = "filler\n\n".repeat(200))).unwrap();
     let a = dir.join("a.md");
-    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap()), RETINA];
     let Viewer { mut child, mut tty, out } = open(a.to_str().unwrap(), 80, &env);
     let shown = wait_for(&out, 0, b"a=p,");
     wait_count(&trace, "page loaded", 1);
@@ -1152,7 +1152,7 @@ fn a_relative_link_opens_the_file_at_its_heading_and_backspace_returns() {
     std::fs::write(dir.join("setup.command"), "#!/bin/sh\n").unwrap();
     std::fs::write(dir.join("docs/b.md"), format!("# Top\n\n{f}## Deep\n\n{f}", f = "filler\n\n".repeat(200))).unwrap();
     let a = dir.join("a.md");
-    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap()), RETINA];
     let Viewer { mut child, mut tty, out } = open(a.to_str().unwrap(), 80, &env);
     let shown = wait_for(&out, 0, b"a=p,");
     tty.write_all(b"\x1b[<0;20;3M\x1b[<0;20;3m").unwrap();
