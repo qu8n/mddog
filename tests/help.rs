@@ -102,6 +102,9 @@ fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::
     }
     cmd.args(args)
         .env("TERM_PROGRAM", "herdr")
+        // The terminal running the tests may be one the viewer refuses.
+        .env_remove("TMUX")
+        .env_remove("ZELLIJ")
         .env("MDDOG_CACHE_DIR", test_cache())
         .envs(env.iter().copied())
         .stdin(Stdio::from(slave.try_clone().unwrap()))
@@ -213,15 +216,39 @@ fn exits_within(child: &mut std::process::Child, limit: Duration) -> Option<bool
 }
 
 #[test]
-fn zellij_and_warp_are_refused() {
-    for (env, why) in [(("ZELLIJ", "0"), "zellij"), (("TERM_PROGRAM", "WarpTerminal"), "Warp")] {
+fn tmux_zellij_and_warp_are_refused_before_any_escape() {
+    for (env, why) in [(("TMUX", "/tmp/tmux-1/default,1,0"), "tmux"), (("ZELLIJ", "0"), "zellij"), (("TERM_PROGRAM", "WarpTerminal"), "Warp")] {
         let Viewer { mut child, out, .. } = open(GFM, 80, &[env]);
         wait_for(&out, 0, why.as_bytes());
         let exit = exits_within(&mut child, LIMIT);
         let _ = child.kill();
         assert_eq!(exit, Some(false), "{why} wasn't refused");
-        assert!(find(&out.lock().unwrap(), b"a=p,").is_none(), "{why} got a page");
+        // tmux takes the probe's graphics query as the pane title, so nothing may go out before the refusal.
+        assert!(find(&out.lock().unwrap(), b"\x1b").is_none(), "{why} got an escape sequence");
     }
+}
+
+#[test]
+fn piped_markdown_opens() {
+    let shell = "printf '# Piped\\n' | \"$MDD\" -";
+    let Viewer { mut child, mut tty, out } = start_exe("/bin/sh".as_ref(), &["-c", shell], None, 80, (18, 38), &[("MDD", env!("CARGO_BIN_EXE_mdd"))], false);
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    assert_eq!(quit, Some(true));
+}
+
+#[test]
+fn typed_markdown_opens_after_ctrl_d() {
+    let Viewer { mut child, mut tty, out } = open("-", 80, &[]);
+    wait_for(&out, 0, b"Ctrl-D");
+    tty.write_all(b"# Typed\n\x04").unwrap();
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    assert_eq!(quit, Some(true));
 }
 
 #[test]

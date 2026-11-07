@@ -73,6 +73,10 @@ fn main() {
         check_file(Path::new(&file)).unwrap_or_else(|e| fail(&e));
         std::process::exit(headless::run(PathBuf::from(file), cols, webp));
     }
+    if let Some(why) = preview::refusal() {
+        eprintln!("{}", fit(&why));
+        std::process::exit(1);
+    }
     if file.is_empty() || (file != "-" && Path::new(&file).is_dir()) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let root = if file.is_empty() { viewer::picker::scope(&cwd, &cwd) } else { std::fs::canonicalize(&file).unwrap_or_else(|_| PathBuf::from(&file)) };

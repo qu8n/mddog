@@ -39,7 +39,7 @@ The **theme** decides how the page looks. It is one file of tokens: colors, font
 
 ### `src/main.rs`
 
-The command line. It parses the options, checks the file before it takes the terminal (so a typo or a binary file gets a plain error), loads the config, and starts one of the three modes. For the viewer, standard input is copied to a private temp file first, so the viewer always reads a real file. Headless mode refuses standard input.
+The command line. It parses the options, checks the file before it takes the terminal (so a typo or a binary file gets a plain error), loads the config, refuses tmux, zellij, and Warp by their environment variables before it sends the terminal anything, and starts one of the three modes. For the viewer, standard input is copied to a private temp file first, so the viewer always reads a real file. Headless mode refuses standard input.
 
 ### `src/config.rs`, `src/theme.rs`
 
@@ -102,7 +102,7 @@ The interactive viewer and the file list.
 
 The terminal layer. `term/mod.rs` sets raw mode on `/dev/tty`, probes the terminal at startup (`Tty::probe`), and parses keys and mouse reports. `kitty.rs` sends, places, and frees Kitty images, and holds the tile size limits and the storage limit. `screen.rs` reads the display's backing scale.
 
-**Architecture invariant:** the viewer refuses to start when the terminal can't do what it needs: one that answers the probe without Kitty graphics, or one known to garble scrolled images (Warp, zellij). It never falls back to drawing the page as text.
+**Architecture invariant:** the viewer refuses to start when the terminal can't do what it needs: one that answers the probe without Kitty graphics, or a place it can't show images or scroll them: tmux, zellij, and Warp. Those three are found from the environment in `main.rs`, before the probe, because tmux takes the probe's graphics query as the pane's title. It never falls back to drawing the page as text.
 
 ### `src/headless.rs`
 

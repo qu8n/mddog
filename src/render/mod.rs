@@ -16,5 +16,6 @@ pub mod svg;
 pub mod text;
 pub mod theme;
 
-/// The stack size of the render threads: the viewer's file reader, and the highlighter's.
+/// The stack size of the render threads: the viewer's file reader, the highlighter, and the Mermaid and image
+/// prefetch workers.
 pub const STACK: usize = 64 << 20;

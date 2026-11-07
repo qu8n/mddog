@@ -13,13 +13,11 @@ description: Known problems in some terminals, and how to work around them.
 
 ## Warp and zellij
 
-mddog refuses to run in Warp and zellij, because their bugs garble scrolling ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424), [zellij#5573](https://github.com/zellij-org/zellij/issues/5573)). In a multiplexer that runs inside Warp, such as herdr, mddog can't tell and runs anyway. There, scrolling doesn't move the page, and `G` draws it squashed.
+mddog refuses to run in Warp and zellij, because their bugs garble scrolling ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424), [zellij#5573](https://github.com/zellij-org/zellij/issues/5573)). In a multiplexer that runs inside Warp, such as herdr, mddog can't tell and runs anyway. Warp's own environment variables don't help, because a herdr session keeps the ones from the terminal it first started in. There, scrolling doesn't move the page, and `G` draws it squashed.
 
 ## tmux
 
 tmux can't show images yet, so mddog doesn't run in it ([tmux#5445](https://github.com/tmux/tmux/pull/5445)).
-
-After mddog stops in tmux, the pane title can show text like `Gi=4003,s=1,v=1,a=q`. That's mddog's check for image support, which tmux takes as a title. It goes away when a program sets a new title.
 
 ## herdr
 

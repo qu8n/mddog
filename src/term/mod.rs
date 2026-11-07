@@ -54,12 +54,25 @@ pub fn herdr_by_env() -> bool {
     std::env::var("TERM_PROGRAM").as_deref() == Ok("herdr")
 }
 
-/// A terminal that shows Kitty images but garbles a scrolled page, with the reason.
-pub fn garbles_scrolling() -> Option<&'static str> {
-    if std::env::var_os("ZELLIJ").is_some() {
-        Some("zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648)")
-    } else if std::env::var("TERM_PROGRAM").as_deref() == Ok("WarpTerminal") {
-        Some("Warp can't crop images, and mddog crops images to scroll them")
+/// A place mddog refuses to run, known from the environment alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refused {
+    Tmux,
+    Zellij,
+    Warp,
+}
+
+/// Where mddog can't show the preview, found before anything goes to the terminal: tmux takes the probe's
+/// graphics query as the pane's title. `var` looks up an environment variable.
+pub fn refused_by_env(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<Refused> {
+    if var("TMUX").is_some() {
+        Some(Refused::Tmux)
+    } else if var("ZELLIJ").is_some() {
+        Some(Refused::Zellij)
+    } else if var("TERM_PROGRAM").is_some_and(|t| t == "WarpTerminal") {
+        // Not Warp's own `WARP_*` variables: a herdr server keeps the ones from the terminal it started in, so
+        // they would refuse Ghostty attached to a herdr first started in Warp.
+        Some(Refused::Warp)
     } else {
         None
     }
@@ -613,6 +626,15 @@ mod tests {
     fn medium_prefers_shared_memory() {
         let p = |kitty_shm, kitty_temp| Probe { kitty_shm, kitty_temp, kitty_direct: true, ..Probe::default() }.medium();
         assert_eq!((p(true, true), p(false, true), p(false, false)), (kitty::Medium::Shm, kitty::Medium::Temp, kitty::Medium::Direct));
+    }
+
+    #[test]
+    fn refuses_by_the_environment() {
+        let env = |vars: &'static [(&str, &str)]| refused_by_env(|k| vars.iter().find(|v| v.0 == k).map(|v| v.1.into()));
+        assert_eq!(env(&[("TMUX", "/tmp/tmux-1/default,1,0"), ("TERM_PROGRAM", "tmux")]), Some(Refused::Tmux));
+        assert_eq!(env(&[("ZELLIJ", "0")]), Some(Refused::Zellij));
+        assert_eq!(env(&[("TERM_PROGRAM", "WarpTerminal")]), Some(Refused::Warp));
+        assert_eq!(env(&[("TERM_PROGRAM", "ghostty")]), None);
     }
 
     #[test]

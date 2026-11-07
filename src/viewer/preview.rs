@@ -32,7 +32,16 @@ const GLIDE_FRAME: Duration = Duration::from_millis(8);
 const FOLD_IDLE: Duration = Duration::from_secs(1);
 /// The X11 name for the arrow, sent with OSC 22 off text, links and buttons.
 const DEFAULT_POINTER: &str = "left_ptr";
-const SUPPORTED: &str = "Ghostty, Kitty, WezTerm, or iTerm2";
+const SUPPORTED: &str = "Ghostty, Kitty, WezTerm, iTerm2, or Rex";
+
+/// Why mddog won't run here, when the environment alone tells. Checked before anything goes to the terminal.
+pub fn refusal() -> Option<String> {
+    Some(match term::refused_by_env(|k| std::env::var_os(k))? {
+        term::Refused::Tmux => "mdd: mddog doesn't support tmux yet, because tmux doesn't pass its images through. Run mdd outside tmux.".to_string(),
+        term::Refused::Zellij => "mdd: mddog doesn't support zellij yet, because zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648). Run mdd outside zellij.".to_string(),
+        term::Refused::Warp => format!("mdd: mddog doesn't support Warp, because Warp can't crop images, and mddog crops images to scroll them. Use {SUPPORTED}."),
+    })
+}
 /// The longest the input thread waits before it checks `paused` again.
 const INPUT_POLL: Duration = Duration::from_millis(50);
 
@@ -290,12 +299,9 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         tty.write(term::PIXEL_MOUSE_ON.as_bytes());
     }
     trace::mark("terminal probed");
-    let refusal = if probe.no_graphics() {
-        Some(format!("mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use {SUPPORTED}. Terminal.app, tmux, and screen don't support it."))
-    } else {
-        term::garbles_scrolling().map(|why| format!("mdd: {why}. So mddog can't show the preview here. Use {SUPPORTED}."))
-    };
-    if let Some(refusal) = refusal {
+    if probe.no_graphics() {
+        let refusal =
+            format!("mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use {SUPPORTED}. Terminal.app and screen don't support it.");
         drop(loader);
         drop(picker);
         tty.write(term::leave().as_bytes());

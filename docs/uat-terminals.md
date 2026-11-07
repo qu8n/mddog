@@ -17,7 +17,7 @@ Status: ✅ works, ⚠️ works with a limitation, ❌ broken, 🚫 mddog refuse
 | Warp | 0.2026.11.04.08.17.01 | 🚫 | ❌ | 🚫 | 🚫 |
 | Rex | Beta 0.1.0 (1853) | ✅ | ➖ | ➖ | ➖ |
 
-The last round marked tmux ✅ because the refusal was the expected result. tmux isn't supported, so this round marks it 🚫. Every 🚫 cell under tmux also leaks mddog's graphics probe into the tmux pane title (see [Bugs](#bugs)).
+The last round marked tmux ✅ because the refusal was the expected result. tmux isn't supported, so this round marks it 🚫.
 
 ## Checks
 
@@ -39,11 +39,13 @@ Run these in each cell, from the repo root. Note anything odd, even if the check
 
 In a 🚫 cell, run `mdd README.md`, `mdd`, and `cat README.md | mdd`. Each must print the refusal and exit 1, and leave the shell clean. In tmux, also try `set -g allow-passthrough on`.
 
-The refusal messages:
+The refusal messages (reworded after this round, see [Bugs](#bugs)):
 
-- tmux: "mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use Ghostty, Kitty, WezTerm, or iTerm2. Terminal.app, tmux, and screen don't support it."
-- zellij: "mdd: zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648). So mddog can't show the preview here. Use Ghostty, Kitty, WezTerm, or iTerm2."
-- Warp: "mdd: Warp can't crop images, and mddog crops images to scroll them. So mddog can't show the preview here. Use Ghostty, Kitty, WezTerm, or iTerm2."
+- tmux: "mdd: mddog doesn't support tmux yet, because tmux doesn't pass its images through. Run mdd outside tmux."
+- zellij: "mdd: mddog doesn't support zellij yet, because zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648). Run mdd outside zellij."
+- Warp: "mdd: mddog doesn't support Warp, because Warp can't crop images, and mddog crops images to scroll them. Use Ghostty, Kitty, WezTerm, iTerm2, or Rex."
+
+In tmux, also check that `tmux display -p '#{pane_title}'` doesn't show `Gi=`.
 
 ## Results
 
@@ -86,9 +88,9 @@ New in this round. Rex reports `TERM_PROGRAM=rex` and speaks the kitty graphics 
 
 ## Bugs
 
-1. **The graphics probe leaks into the tmux pane title.** In every terminal, after `mdd` refuses in tmux, the status bar shows `"Gi=4003,s=1,v=1,a=q,t...` until something else sets the title. tmux takes the probe's APC sequence (`ESC _ G...`) as a pane title, and mddog sends the probe before it refuses. Repro: `tmux new`, `mdd README.md`, then `tmux display -p '#{pane_title}'`. `allow-passthrough on` doesn't change it.
-2. **Warp inside herdr isn't refused.** Inside herdr, `TERM_PROGRAM` is `herdr`, so the Warp check misses it, and the page garbles as described under Warp. Repro: in Warp, `herdr`, then `mdd fixtures/gfm.md` and `G`.
-3. **The tmux message blames the terminal.** It says "this terminal can't show images" in Ghostty and kitty, which can. tmux is named only in the last sentence.
+1. **Fixed after this round.** **The graphics probe leaks into the tmux pane title.** In every terminal, after `mdd` refuses in tmux, the status bar shows `"Gi=4003,s=1,v=1,a=q,t...` until something else sets the title. tmux takes the probe's APC sequence (`ESC _ G...`) as a pane title, and mddog sends the probe before it refuses. Repro: `tmux new`, `mdd README.md`, then `tmux display -p '#{pane_title}'`. `allow-passthrough on` doesn't change it.
+2. **Warp inside herdr isn't refused.** Inside herdr, `TERM_PROGRAM` is `herdr`, so the Warp check misses it, and the page garbles as described under Warp. Repro: in Warp, `herdr`, then `mdd fixtures/gfm.md` and `G`. Not fixable from the environment: a herdr session keeps the `WARP_*` variables of the terminal it first started in, even in panes opened later from another terminal.
+3. **Fixed after this round.** **The tmux message blames the terminal.** It says "this terminal can't show images" in Ghostty and kitty, which can. tmux is named only in the last sentence.
 
 ## Known causes
 
