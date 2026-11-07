@@ -5,7 +5,7 @@ use std::collections::HashMap;
 mod dollars;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct Sty {
+pub struct Marks {
     pub bold: bool,
     pub italic: bool,
     pub strike: bool,
@@ -20,12 +20,12 @@ pub struct Sty {
 }
 
 #[derive(Clone, Debug)]
-pub enum Inl {
-    Text(String, Sty),
+pub enum Inline {
+    Text(String, Marks),
     Soft,
     Hard,
     Img { src: String, alt: String, w: Option<f32>, link: u32 },
-    Math(String, Sty),
+    Math(String, Marks),
     FootRef(usize, String),
 }
 
@@ -64,17 +64,17 @@ pub enum Align {
 }
 
 #[derive(Clone, Debug)]
-pub struct LItem {
+pub struct ListItem {
     pub task: Option<bool>,
     pub blocks: Vec<Block>,
 }
 
 #[derive(Clone, Debug)]
 pub enum Block {
-    Para(Vec<Inl>),
+    Para(Vec<Inline>),
     /// Text that sits in a raw HTML block outside any `<p>`. HTML draws it as a line box with no margin, so no gap follows it.
-    Text(Vec<Inl>),
-    Heading(u8, Vec<Inl>, String),
+    Text(Vec<Inline>),
+    Heading(u8, Vec<Inline>, String),
     Code {
         lang: String,
         text: String,
@@ -83,19 +83,19 @@ pub enum Block {
     Alert(Alert, Vec<Block>),
     List {
         start: Option<u64>,
-        items: Vec<LItem>,
+        items: Vec<ListItem>,
         tight: bool,
     },
     Table {
         aligns: Vec<Align>,
-        head: Vec<Vec<Inl>>,
-        rows: Vec<Vec<Vec<Inl>>>,
+        head: Vec<Vec<Inline>>,
+        rows: Vec<Vec<Vec<Inline>>>,
     },
     Rule,
     Math(String),
     Mermaid(String),
     Details {
-        summary: Vec<Inl>,
+        summary: Vec<Inline>,
         open: bool,
         body: Vec<Block>,
         id: usize,
@@ -125,7 +125,7 @@ pub struct Doc {
     pub lines: Vec<Option<(u32, u32)>>,
 }
 
-enum Fk {
+enum FrameKind {
     Root,
     Quote(Option<BlockQuoteKind>),
     Item,
@@ -137,23 +137,23 @@ enum Fk {
 }
 
 struct Frame {
-    kind: Fk,
+    kind: FrameKind,
     blocks: Vec<Block>,
-    summary: Vec<Inl>,
+    summary: Vec<Inline>,
     task: Option<bool>,
     loose: bool,
-    items: Vec<LItem>,
+    items: Vec<ListItem>,
 }
 
-fn frame(kind: Fk) -> Frame {
+fn frame(kind: FrameKind) -> Frame {
     Frame { kind, blocks: vec![], summary: vec![], task: None, loose: false, items: vec![] }
 }
 
-struct TableB {
+struct TableBuilder {
     aligns: Vec<Align>,
-    head: Vec<Vec<Inl>>,
-    rows: Vec<Vec<Vec<Inl>>>,
-    row: Vec<Vec<Inl>>,
+    head: Vec<Vec<Inline>>,
+    rows: Vec<Vec<Vec<Inline>>>,
+    row: Vec<Vec<Inline>>,
 }
 
 #[derive(Default)]
@@ -169,32 +169,32 @@ struct Counts {
     mark: u32,
 }
 
-struct B {
+struct Builder {
     stack: Vec<Frame>,
-    inl: Vec<Inl>,
+    inl: Vec<Inline>,
     cnt: Counts,
     link: Vec<u32>,
     /// The link depth a paragraph started at: GitHub closes an `<a>` left open inside it at its end.
     para_links: usize,
     links: Vec<String>,
     code: Option<(String, String)>,
-    table: Option<TableB>,
+    table: Option<TableBuilder>,
     foot_order: Vec<String>,
     foots: HashMap<String, Vec<Block>>,
     skip: Option<String>,
     in_summary: bool,
     anchors: HashMap<String, usize>,
     details_n: usize,
-    in_image: Option<(String, String, Vec<Inl>)>,
+    in_image: Option<(String, String, Vec<Inline>)>,
     html_buf: String,
     /// Set while a raw HTML block is read, so its loose text becomes `Block::Text`.
     raw: bool,
 }
 
-impl B {
-    fn sty(&self) -> Sty {
+impl Builder {
+    fn sty(&self) -> Marks {
         let c = &self.cnt;
-        Sty {
+        Marks {
             bold: c.bold > 0,
             italic: c.italic > 0,
             strike: c.strike > 0,
@@ -216,7 +216,7 @@ impl B {
         if self.in_image.is_some() {
             return;
         }
-        self.inl.push(Inl::Text(s.to_string(), st));
+        self.inl.push(Inline::Text(s.to_string(), st));
     }
 
     fn top(&mut self) -> &mut Frame {
@@ -234,8 +234,8 @@ impl B {
         }
         let v = std::mem::take(&mut self.inl);
         let v = finish_inlines(v, &mut self.links);
-        if v.iter().any(|i| !matches!(i, Inl::Text(t, _) if t.trim().is_empty()) && !matches!(i, Inl::Soft)) {
-            let in_p = matches!(self.stack.last().map(|f| &f.kind), Some(Fk::Align(_, n)) if n == "p");
+        if v.iter().any(|i| !matches!(i, Inline::Text(t, _) if t.trim().is_empty()) && !matches!(i, Inline::Soft)) {
+            let in_p = matches!(self.stack.last().map(|f| &f.kind), Some(FrameKind::Align(_, n)) if n == "p");
             self.push_block(if self.raw && !in_p { Block::Text(v) } else { Block::Para(v) });
         }
     }
@@ -246,13 +246,13 @@ impl B {
 
     fn end_html_container(&mut self, name: &str) {
         let pos = self.stack.iter().rposition(|f| match &f.kind {
-            Fk::Align(_, n) => *n == name,
-            Fk::Details { .. } => name == "details",
-            Fk::Heading(..) => name.len() == 2 && name.starts_with('h'),
+            FrameKind::Align(_, n) => *n == name,
+            FrameKind::Details { .. } => name == "details",
+            FrameKind::Heading(..) => name.len() == 2 && name.starts_with('h'),
             _ => false,
         });
         let Some(pos) = pos else { return };
-        if !matches!(self.stack[pos].kind, Fk::Heading(..)) {
+        if !matches!(self.stack[pos].kind, FrameKind::Heading(..)) {
             self.flush();
         }
         while self.stack.len() > pos + 1 {
@@ -263,7 +263,7 @@ impl B {
 
     /// Close html frames (details, align) left open inside a markdown container.
     fn close_html_frames(&mut self) {
-        while self.stack.len() > 1 && matches!(self.stack.last().map(|f| &f.kind), Some(Fk::Align(..) | Fk::Details { .. })) {
+        while self.stack.len() > 1 && matches!(self.stack.last().map(|f| &f.kind), Some(FrameKind::Align(..) | FrameKind::Details { .. })) {
             self.flush();
             self.close_frame();
         }
@@ -273,20 +273,20 @@ impl B {
         self.in_summary = false;
         let v = std::mem::take(&mut self.inl);
         let v = finish_inlines(v, &mut self.links);
-        if let Some(f) = self.stack.iter_mut().rev().find(|f| matches!(f.kind, Fk::Details { .. })) {
+        if let Some(f) = self.stack.iter_mut().rev().find(|f| matches!(f.kind, FrameKind::Details { .. })) {
             f.summary = v;
         }
     }
 
     fn close_frame(&mut self) {
         // A <summary> its <details> outlived: keep its text, or flush() drops everything after it.
-        if self.in_summary && matches!(self.top().kind, Fk::Details { .. }) {
+        if self.in_summary && matches!(self.top().kind, FrameKind::Details { .. }) {
             self.end_summary();
         }
         let f = self.pop_frame();
         let blocks = f.blocks;
         let b = match f.kind {
-            Fk::Align(a, _) => {
+            FrameKind::Align(a, _) => {
                 if a == Align::Left {
                     for b in blocks {
                         self.push_block(b);
@@ -295,8 +295,8 @@ impl B {
                 }
                 Block::Align(a, blocks)
             }
-            Fk::Details { open, id } => Block::Details { summary: f.summary, open, body: blocks, id },
-            Fk::Quote(k) => match k {
+            FrameKind::Details { open, id } => Block::Details { summary: f.summary, open, body: blocks, id },
+            FrameKind::Quote(k) => match k {
                 None => Block::Quote(blocks),
                 Some(k) => Block::Alert(
                     match k {
@@ -309,7 +309,7 @@ impl B {
                     blocks,
                 ),
             },
-            Fk::Heading(l, id) => {
+            FrameKind::Heading(l, id) => {
                 let v = std::mem::take(&mut self.inl);
                 let v = finish_inlines(v, &mut self.links);
                 let id = if id.is_empty() { slug(&plain(&v)) } else { id };
@@ -327,12 +327,12 @@ impl B {
 
     fn html(&mut self, h: &str) {
         // Inline HTML splits the text around it, so `$x<y>z$` is not math (GitHub drops `<y>`).
-        if matches!(self.inl.last(), Some(Inl::Text(..))) {
+        if matches!(self.inl.last(), Some(Inline::Text(..))) {
             self.text(&HTML_BREAK.to_string());
         }
         for t in tokenize(&tagfilter(h)) {
             match t {
-                Tok::Text(s) => {
+                HtmlToken::Text(s) => {
                     if self.skip.is_some() {
                         continue;
                     }
@@ -341,8 +341,8 @@ impl B {
                         self.text(&s);
                     }
                 }
-                Tok::Open(name, attrs) => self.open_tag(&name, &attrs),
-                Tok::Close(name) => self.close_tag(&name),
+                HtmlToken::Open(name, attrs) => self.open_tag(&name, &attrs),
+                HtmlToken::Close(name) => self.close_tag(&name),
             }
         }
     }
@@ -360,7 +360,7 @@ impl B {
                 self.flush();
                 self.details_n += 1;
                 let id = self.details_n;
-                self.stack.push(frame(Fk::Details { open: attr("open").is_some(), id }));
+                self.stack.push(frame(FrameKind::Details { open: attr("open").is_some(), id }));
             }
             "summary" => {
                 self.flush();
@@ -374,14 +374,14 @@ impl B {
                     (_, Some("right")) => Align::Right,
                     _ => Align::Left,
                 };
-                self.stack.push(frame(Fk::Align(a, name.to_string())));
+                self.stack.push(frame(FrameKind::Align(a, name.to_string())));
             }
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush();
                 let l = name[1..].parse().unwrap_or(1);
-                self.stack.push(frame(Fk::Heading(l, String::new())));
+                self.stack.push(frame(FrameKind::Heading(l, String::new())));
             }
-            "br" => self.inl.push(Inl::Hard),
+            "br" => self.inl.push(Inline::Hard),
             "hr" => {
                 self.flush();
                 self.push_block(Block::Rule);
@@ -392,7 +392,7 @@ impl B {
                 let w = attr("width").and_then(|w| w.trim_end_matches("px").parse::<f32>().ok());
                 let link = self.link.last().copied().unwrap_or(0);
                 if self.in_image.is_none() {
-                    self.inl.push(Inl::Img { src, alt, w, link });
+                    self.inl.push(Inline::Img { src, alt, w, link });
                 }
             }
             "a" => {
@@ -411,7 +411,7 @@ impl B {
             "mark" => self.cnt.mark += 1,
             "tr" | "li" | "ul" | "ol" | "table" | "blockquote" => {
                 if !self.inl.is_empty() {
-                    self.inl.push(Inl::Hard);
+                    self.inl.push(Inline::Hard);
                 }
             }
             "td" | "th" if !self.inl.is_empty() => {
@@ -459,11 +459,11 @@ impl B {
 /// Marks where inline HTML sat in merged text. Math never spans it, and it is dropped before layout.
 const HTML_BREAK: char = '\u{e025}';
 
-pub fn finish_inlines(v: Vec<Inl>, links: &mut Vec<String>) -> Vec<Inl> {
-    let mut m: Vec<Inl> = Vec::with_capacity(v.len());
+pub fn finish_inlines(v: Vec<Inline>, links: &mut Vec<String>) -> Vec<Inline> {
+    let mut m: Vec<Inline> = Vec::with_capacity(v.len());
     for i in v {
-        if let Inl::Text(s, st) = &i
-            && let Some(Inl::Text(ps, pst)) = m.last_mut()
+        if let Inline::Text(s, st) = &i
+            && let Some(Inline::Text(ps, pst)) = m.last_mut()
             && pst == st
         {
             ps.push_str(s);
@@ -474,16 +474,16 @@ pub fn finish_inlines(v: Vec<Inl>, links: &mut Vec<String>) -> Vec<Inl> {
     // `$`x`$`: math written with a code span.
     let mut i = 0;
     while i + 2 < m.len() {
-        let spanned = matches!((&m[i], &m[i + 1], &m[i + 2]), (Inl::Text(a, sa), Inl::Text(_, c), Inl::Text(z, _)) if !sa.code && c.code && a.ends_with('$') && z.starts_with('$'));
+        let spanned = matches!((&m[i], &m[i + 1], &m[i + 2]), (Inline::Text(a, sa), Inline::Text(_, c), Inline::Text(z, _)) if !sa.code && c.code && a.ends_with('$') && z.starts_with('$'));
         if spanned {
-            let Inl::Text(code, cst) = m[i + 1].clone() else { unreachable!() };
-            if let Inl::Text(a, _) = &mut m[i] {
+            let Inline::Text(code, cst) = m[i + 1].clone() else { unreachable!() };
+            if let Inline::Text(a, _) = &mut m[i] {
                 a.pop();
             }
-            if let Inl::Text(z, _) = &mut m[i + 2] {
+            if let Inline::Text(z, _) = &mut m[i + 2] {
                 z.remove(0);
             }
-            m[i + 1] = Inl::Math(format!("${code}$"), Sty { code: false, ..cst });
+            m[i + 1] = Inline::Math(format!("${code}$"), Marks { code: false, ..cst });
         }
         i += 1;
     }
@@ -491,23 +491,23 @@ pub fn finish_inlines(v: Vec<Inl>, links: &mut Vec<String>) -> Vec<Inl> {
     let mut out = Vec::with_capacity(m.len());
     for i in m {
         match i {
-            Inl::Text(s, st) if st.link == 0 && !st.code => {
+            Inline::Text(s, st) if st.link == 0 && !st.code => {
                 let n = out.len();
                 for piece in s.split(HTML_BREAK).filter(|p| !p.is_empty()) {
                     split_math(piece, st, &mut out, links);
                 }
                 for o in &mut out[n..] {
-                    if let Inl::Text(t, _) = o
+                    if let Inline::Text(t, _) = o
                         && t.contains(held)
                     {
                         *t = t.replace(held, "$");
                     }
                 }
             }
-            Inl::Text(s, st) if s.contains(held) || s.contains(HTML_BREAK) => {
+            Inline::Text(s, st) if s.contains(held) || s.contains(HTML_BREAK) => {
                 let s = s.replace(HTML_BREAK, "").replace(held, if st.code { "\\$" } else { "$" });
                 if !s.is_empty() {
-                    out.push(Inl::Text(s, st));
+                    out.push(Inline::Text(s, st));
                 }
             }
             o => out.push(o),
@@ -516,7 +516,7 @@ pub fn finish_inlines(v: Vec<Inl>, links: &mut Vec<String>) -> Vec<Inl> {
     out
 }
 
-fn autolink(s: &str, st: Sty, links: &mut Vec<String>, out: &mut Vec<Inl>) {
+fn autolink(s: &str, st: Marks, links: &mut Vec<String>, out: &mut Vec<Inline>) {
     let b = s.as_bytes();
     let mut last = 0;
     let mut i = 0;
@@ -545,13 +545,13 @@ fn autolink(s: &str, st: Sty, links: &mut Vec<String>, out: &mut Vec<Inl>) {
             if st_i < i && dom.contains('.') && !dom.starts_with('.') {
                 let e = i + 1 + dom.len();
                 if st_i > last {
-                    out.push(Inl::Text(s[last..st_i].to_string(), st));
+                    out.push(Inline::Text(s[last..st_i].to_string(), st));
                 }
                 let id = {
                     links.push(format!("mailto:{}", &s[st_i..e]));
                     links.len() as u32
                 };
-                out.push(Inl::Text(s[st_i..e].to_string(), Sty { link: id, ..st }));
+                out.push(Inline::Text(s[st_i..e].to_string(), Marks { link: id, ..st }));
                 last = e;
                 i = e;
                 continue;
@@ -559,11 +559,11 @@ fn autolink(s: &str, st: Sty, links: &mut Vec<String>, out: &mut Vec<Inl>) {
         }
         if let Some(e) = end {
             if i > last {
-                out.push(Inl::Text(s[last..i].to_string(), st));
+                out.push(Inline::Text(s[last..i].to_string(), st));
             }
             links.push(url);
             let id = links.len() as u32;
-            out.push(Inl::Text(s[i..e].to_string(), Sty { link: id, ..st }));
+            out.push(Inline::Text(s[i..e].to_string(), Marks { link: id, ..st }));
             last = e;
             i = e;
         } else {
@@ -571,7 +571,7 @@ fn autolink(s: &str, st: Sty, links: &mut Vec<String>, out: &mut Vec<Inl>) {
         }
     }
     if last < s.len() {
-        out.push(Inl::Text(s[last..].to_string(), st));
+        out.push(Inline::Text(s[last..].to_string(), st));
     }
 }
 
@@ -619,7 +619,7 @@ fn tagfilter(h: &str) -> std::borrow::Cow<'_, str> {
     out.into()
 }
 
-enum Tok {
+enum HtmlToken {
     Text(String),
     Open(String, Vec<(String, String)>),
     Close(String),
@@ -667,13 +667,13 @@ fn decode_entities(s: &str) -> String {
     out
 }
 
-fn tokenize(h: &str) -> Vec<Tok> {
+fn tokenize(h: &str) -> Vec<HtmlToken> {
     let mut out = vec![];
     let mut rest = h;
     while !rest.is_empty() {
         if let Some(p) = rest.find('<') {
             if p > 0 {
-                out.push(Tok::Text(decode_entities(&rest[..p])));
+                out.push(HtmlToken::Text(decode_entities(&rest[..p])));
             }
             rest = &rest[p..];
             if rest.starts_with("<!--") {
@@ -685,24 +685,24 @@ fn tokenize(h: &str) -> Vec<Tok> {
             }
             let nc = rest[1..].chars().next().unwrap_or(' ');
             let Some(e) = rest.find('>').filter(|_| nc.is_ascii_alphabetic() || nc == '/') else {
-                out.push(Tok::Text("<".to_string()));
+                out.push(HtmlToken::Text("<".to_string()));
                 rest = &rest[1..];
                 continue;
             };
             let inner = &rest[1..e];
             rest = &rest[e + 1..];
             if let Some(name) = inner.strip_prefix('/') {
-                out.push(Tok::Close(name.trim().to_ascii_lowercase()));
+                out.push(HtmlToken::Close(name.trim().to_ascii_lowercase()));
             } else {
                 let inner = inner.trim_end_matches('/');
                 let (name, attrs) = match inner.find(char::is_whitespace) {
                     Some(sp) => (&inner[..sp], &inner[sp..]),
                     None => (inner, ""),
                 };
-                out.push(Tok::Open(name.to_ascii_lowercase(), parse_attrs(attrs)));
+                out.push(HtmlToken::Open(name.to_ascii_lowercase(), parse_attrs(attrs)));
             }
         } else {
-            out.push(Tok::Text(decode_entities(rest)));
+            out.push(HtmlToken::Text(decode_entities(rest)));
             break;
         }
     }
@@ -773,15 +773,15 @@ fn collapse_ws(s: &str) -> String {
     out
 }
 
-pub fn plain(v: &[Inl]) -> String {
+pub fn plain(v: &[Inline]) -> String {
     let mut s = String::new();
     for i in v {
         match i {
-            Inl::Text(t, _) => s.push_str(t),
-            Inl::Soft | Inl::Hard => s.push(' '),
-            Inl::Math(t, _) => s.push_str(t),
-            Inl::Img { alt, .. } => s.push_str(alt),
-            Inl::FootRef(..) => {}
+            Inline::Text(t, _) => s.push_str(t),
+            Inline::Soft | Inline::Hard => s.push(' '),
+            Inline::Math(t, _) => s.push_str(t),
+            Inline::Img { alt, .. } => s.push_str(alt),
+            Inline::FootRef(..) => {}
         }
     }
     s.trim().to_string()
@@ -812,8 +812,8 @@ pub fn parse(src: &str) -> Doc {
     o.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
     o.insert(Options::ENABLE_GFM);
     // Not ENABLE_MATH: `protect_math` finds math by GitHub's rules, and `split_math` reads it from the text.
-    let mut b = B {
-        stack: vec![frame(Fk::Root)],
+    let mut b = Builder {
+        stack: vec![frame(FrameKind::Root)],
         inl: vec![],
         cnt: Counts::default(),
         link: vec![],
@@ -880,8 +880,8 @@ fn display_paras(bs: &mut [Block]) {
         match b {
             Block::Para(v) => {
                 let plain = v.iter().all(|i| match i {
-                    Inl::Text(_, st) | Inl::Math(_, st) => *st == Sty::default(),
-                    Inl::Soft | Inl::Hard => true,
+                    Inline::Text(_, st) | Inline::Math(_, st) => *st == Marks::default(),
+                    Inline::Soft | Inline::Hard => true,
                     _ => false,
                 });
                 if !plain {
@@ -890,7 +890,7 @@ fn display_paras(bs: &mut [Block]) {
                 let s: String = v
                     .iter()
                     .map(|i| match i {
-                        Inl::Text(t, _) | Inl::Math(t, _) => t.as_str(),
+                        Inline::Text(t, _) | Inline::Math(t, _) => t.as_str(),
                         _ => "\n",
                     })
                     .collect();
@@ -911,13 +911,13 @@ fn display_paras(bs: &mut [Block]) {
 }
 
 /// Splits text into text and math by mddog's `inline_math` (GitHub's rules). Math keeps its delimiters.
-fn split_math(s: &str, st: Sty, out: &mut Vec<Inl>, links: &mut Vec<String>) {
+fn split_math(s: &str, st: Marks, out: &mut Vec<Inline>, links: &mut Vec<String>) {
     let mut last = 0;
     for (a, e) in dollars::inline_math(s, false).into_iter().filter(|&(a, e)| !s[a..e].contains("://") && !s[a..e].contains("www.")) {
         if a > last {
             autolink(&s[last..a], st, links, out);
         }
-        out.push(Inl::Math(s[a..e].to_string(), st));
+        out.push(Inline::Math(s[a..e].to_string(), st));
         last = e;
     }
     if last < s.len() {
@@ -925,7 +925,7 @@ fn split_math(s: &str, st: Sty, out: &mut Vec<Inl>, links: &mut Vec<String>) {
     }
 }
 
-impl B {
+impl Builder {
     fn event(&mut self, ev: Event, meta: &mut Option<String>) {
         let b = self;
         if let Some(yaml) = meta {
@@ -933,8 +933,8 @@ impl B {
                 Event::Text(t) => yaml.push_str(&t),
                 // GitHub shows front matter as a table of its top-level keys.
                 Event::End(TagEnd::MetadataBlock(_)) => {
-                    let rows: Vec<Vec<Vec<Inl>>> =
-                        front_matter_rows(yaml).into_iter().map(|(k, v)| vec![vec![Inl::Text(k, Sty { bold: true, ..Sty::default() })], vec![Inl::Text(v, Sty::default())]]).collect();
+                    let rows: Vec<Vec<Vec<Inline>>> =
+                        front_matter_rows(yaml).into_iter().map(|(k, v)| vec![vec![Inline::Text(k, Marks { bold: true, ..Marks::default() })], vec![Inline::Text(v, Marks::default())]]).collect();
                     *meta = None;
                     if !rows.is_empty() {
                         // Its keys are `th` cells, which browsers center.
@@ -951,17 +951,17 @@ impl B {
                 Tag::Paragraph => {
                     b.flush();
                     b.para_links = b.link.len();
-                    if matches!(b.stack.last().map(|f| &f.kind), Some(Fk::Item)) {
+                    if matches!(b.stack.last().map(|f| &f.kind), Some(FrameKind::Item)) {
                         b.top().loose = true;
                     }
                 }
                 Tag::Heading { level, .. } => {
                     b.flush();
-                    b.stack.push(frame(Fk::Heading(heading_level(level), String::new())));
+                    b.stack.push(frame(FrameKind::Heading(heading_level(level), String::new())));
                 }
                 Tag::BlockQuote(k) => {
                     b.flush();
-                    b.stack.push(frame(Fk::Quote(k)));
+                    b.stack.push(frame(FrameKind::Quote(k)));
                 }
                 Tag::CodeBlock(k) => {
                     b.flush();
@@ -976,15 +976,15 @@ impl B {
                 }
                 Tag::List(s) => {
                     b.flush();
-                    b.stack.push(frame(Fk::List(s)));
+                    b.stack.push(frame(FrameKind::List(s)));
                 }
                 Tag::Item => {
                     b.flush();
-                    b.stack.push(frame(Fk::Item));
+                    b.stack.push(frame(FrameKind::Item));
                 }
                 Tag::FootnoteDefinition(l) => {
                     b.flush();
-                    b.stack.push(frame(Fk::Foot(l.to_string())));
+                    b.stack.push(frame(FrameKind::Foot(l.to_string())));
                 }
                 Tag::Table(al) => {
                     b.flush();
@@ -996,7 +996,7 @@ impl B {
                             _ => Align::Left,
                         })
                         .collect();
-                    b.table = Some(TableB { aligns: a, head: vec![], rows: vec![], row: vec![] });
+                    b.table = Some(TableBuilder { aligns: a, head: vec![], rows: vec![], row: vec![] });
                 }
                 Tag::TableHead | Tag::TableRow => {}
                 Tag::TableCell => b.inl.clear(),
@@ -1022,7 +1022,7 @@ impl B {
                     let n = b.anchors.entry(base.clone()).or_insert(0);
                     let id = if *n > 0 { format!("{base}-{n}") } else { base };
                     *n += 1;
-                    if let Some(Frame { kind: Fk::Heading(_, i), .. }) = b.stack.last_mut() {
+                    if let Some(Frame { kind: FrameKind::Heading(_, i), .. }) = b.stack.last_mut() {
                         *i = id;
                     }
                     b.close_frame();
@@ -1057,7 +1057,7 @@ impl B {
                     b.flush();
                     b.close_html_frames();
                     let f = b.pop_frame();
-                    let start = if let Fk::List(s) = f.kind { s } else { None };
+                    let start = if let FrameKind::List(s) = f.kind { s } else { None };
                     b.push_block(Block::List { start, items: f.items, tight: !f.loose });
                 }
                 TagEnd::Item => {
@@ -1065,7 +1065,7 @@ impl B {
                     b.close_html_frames();
                     let f = b.pop_frame();
                     let loose = f.loose;
-                    let item = LItem { task: f.task, blocks: f.blocks };
+                    let item = ListItem { task: f.task, blocks: f.blocks };
                     let l = b.top();
                     l.items.push(item);
                     l.loose |= loose;
@@ -1074,7 +1074,7 @@ impl B {
                     b.flush();
                     b.close_html_frames();
                     let f = b.pop_frame();
-                    if let Fk::Foot(l) = f.kind {
+                    if let FrameKind::Foot(l) = f.kind {
                         b.foots.insert(l, f.blocks);
                     }
                 }
@@ -1110,7 +1110,7 @@ impl B {
                 TagEnd::Image => {
                     if let Some((src, alt, _)) = b.in_image.take() {
                         let link = b.link.last().copied().unwrap_or(0);
-                        b.inl.push(Inl::Img { src, alt, w: None, link });
+                        b.inl.push(Inline::Img { src, alt, w: None, link });
                     }
                 }
                 _ => {}
@@ -1130,7 +1130,7 @@ impl B {
                 } else {
                     let mut st = b.sty();
                     st.code = true;
-                    b.inl.push(Inl::Text(s.to_string(), st));
+                    b.inl.push(Inline::Text(s.to_string(), st));
                 }
             }
             // The parser runs without ENABLE_MATH, so it sends neither.
@@ -1146,14 +1146,14 @@ impl B {
                         b.foot_order.len()
                     }
                 };
-                b.inl.push(Inl::FootRef(n, l));
+                b.inl.push(Inline::FootRef(n, l));
             }
             Event::SoftBreak => {
                 if b.in_image.is_none() {
-                    b.inl.push(Inl::Soft);
+                    b.inl.push(Inline::Soft);
                 }
             }
-            Event::HardBreak => b.inl.push(Inl::Hard),
+            Event::HardBreak => b.inl.push(Inline::Hard),
             Event::Rule => {
                 b.flush();
                 b.push_block(Block::Rule);

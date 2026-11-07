@@ -13,7 +13,7 @@ const THEME: &[u8] = br##"{"name":"none","type":"dark","colors":{"editor.foregro
 /// A page pays only for its own languages: a fence's grammar and the grammars it can include are inflated on
 /// first use, and the highlighter is built again over them. Building reads only each grammar's header; a
 /// grammar is parsed when tokenizing first reaches it.
-struct Tm {
+struct TextMate {
     highlighter: RefCell<Highlighter>,
     json: RefCell<BTreeMap<String, Arc<[u8]>>>,
     aliases: HashMap<String, String>,
@@ -21,10 +21,10 @@ struct Tm {
 }
 
 thread_local! {
-    static TM: OnceCell<Option<Tm>> = const { OnceCell::new() };
+    static TM: OnceCell<Option<TextMate>> = const { OnceCell::new() };
 }
 
-fn load() -> Option<Tm> {
+fn load() -> Option<TextMate> {
     let by_scope: BTreeMap<String, Vec<String>> = serde_json::from_slice(ALIASES).ok()?;
     let mut aliases = HashMap::new();
     for (scope, names) in by_scope {
@@ -34,7 +34,7 @@ fn load() -> Option<Tm> {
         }
     }
     let highlighter = build(&BTreeMap::new())?;
-    Some(Tm { highlighter: RefCell::new(highlighter), json: RefCell::default(), aliases, classes: serde_json::from_slice(SCOPES).ok()? })
+    Some(TextMate { highlighter: RefCell::new(highlighter), json: RefCell::default(), aliases, classes: serde_json::from_slice(SCOPES).ok()? })
 }
 
 fn build(json: &BTreeMap<String, Arc<[u8]>>) -> Option<Highlighter> {
@@ -62,7 +62,7 @@ fn includes(json: &[u8]) -> Vec<String> {
         .collect()
 }
 
-impl Tm {
+impl TextMate {
     /// The grammar scope for a fence's language name, made ready to tokenize.
     fn scope(&self, lang: &str) -> Option<String> {
         let scope = if deflated(lang).is_some() { lang } else { self.aliases.get(lang)? };

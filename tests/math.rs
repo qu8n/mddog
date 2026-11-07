@@ -4,34 +4,34 @@
 //! holds math or a `$`, inline math as `⟨…⟩`, display math as `⟦…⟧`, code spans in backticks. Run with
 //! `UPDATE_GOLDEN=1` to write the golden after a parser change, then read its diff.
 
-use mddog::render::doc::{self, Block, Inl};
+use mddog::render::doc::{self, Block, Inline};
 
-fn inl(v: &[Inl], out: &mut String, dollar: &mut bool, math: &mut bool) {
+fn inl(v: &[Inline], out: &mut String, dollar: &mut bool, math: &mut bool) {
     for i in v {
         match i {
-            Inl::Text(t, st) if st.code => {
+            Inline::Text(t, st) if st.code => {
                 out.push('`');
                 out.push_str(t);
                 out.push('`');
             }
-            Inl::Text(t, _) => {
+            Inline::Text(t, _) => {
                 *dollar |= t.contains('$');
                 out.push_str(t);
             }
-            Inl::Math(t, _) => {
+            Inline::Math(t, _) => {
                 *math = true;
                 out.push('⟨');
                 out.push_str(t);
                 out.push('⟩');
             }
-            Inl::FootRef(n, _) => out.push_str(&n.to_string()),
-            Inl::Soft | Inl::Hard => out.push(' '),
-            Inl::Img { .. } => {}
+            Inline::FootRef(n, _) => out.push_str(&n.to_string()),
+            Inline::Soft | Inline::Hard => out.push(' '),
+            Inline::Img { .. } => {}
         }
     }
 }
 
-fn line(v: &[Inl], out: &mut String) {
+fn line(v: &[Inline], out: &mut String) {
     let (mut s, mut dollar, mut math) = (String::new(), false, false);
     inl(v, &mut s, &mut dollar, &mut math);
     if dollar || math {
@@ -90,9 +90,9 @@ fn native_math_against_golden() {
 fn inline_html_splits_math() {
     let d = doc::parse("Inline: $a<b$ and $x<y>z$ end.\n");
     let Block::Para(v) = &d.blocks[0] else { panic!("not a paragraph") };
-    let math: Vec<_> = v.iter().filter_map(|i| if let Inl::Math(t, _) = i { Some(t.as_str()) } else { None }).collect();
+    let math: Vec<_> = v.iter().filter_map(|i| if let Inline::Math(t, _) = i { Some(t.as_str()) } else { None }).collect();
     assert_eq!(math, ["$a<b$"]);
-    let text: String = v.iter().filter_map(|i| if let Inl::Text(t, _) = i { Some(t.as_str()) } else { None }).collect();
+    let text: String = v.iter().filter_map(|i| if let Inline::Text(t, _) = i { Some(t.as_str()) } else { None }).collect();
     assert_eq!(text, "Inline:  and $xz$ end.");
 }
 

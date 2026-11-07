@@ -1,7 +1,7 @@
 //! The theme's tokens as the renderer draws with them.
 
 use crate::render::doc::Alert;
-use crate::render::highlight::Tok;
+use crate::render::highlight::TokenKind;
 
 pub use crate::theme::Rgb;
 
@@ -17,7 +17,7 @@ pub enum Look {
 
 /// Syntax colors, one per highlight class.
 #[derive(Clone, Debug)]
-pub struct Pl {
+pub struct SyntaxColors {
     pub comment: Rgb,
     pub keyword: Rgb,
     pub string: Rgb,
@@ -57,7 +57,7 @@ pub struct Theme {
     pub copied: Rgb,
     pub diff_add_bg: Rgb,
     pub diff_del_bg: Rgb,
-    pub pl: Pl,
+    pub pl: SyntaxColors,
     pub font_body: Vec<String>,
     pub font_code: Vec<String>,
     pub heading_scale: [f32; 6],
@@ -168,7 +168,7 @@ impl Theme {
             alerts: Alert::ALL.map(|a| c(&format!("alert-{}", a.title().to_lowercase()))),
             diff_add_bg: c("diff-add-bg"),
             diff_del_bg: c("diff-del-bg"),
-            pl: Pl {
+            pl: SyntaxColors {
                 comment: c("pl-comment"),
                 keyword: c("pl-keyword"),
                 string: c("pl-string"),
@@ -256,24 +256,24 @@ impl Theme {
 }
 
 impl Theme {
-    pub fn tok_color(&self, t: Tok) -> Rgb {
+    pub fn tok_color(&self, t: TokenKind) -> Rgb {
         let pl = &self.pl;
         let obs = self.look == Look::Obsidian;
         match t {
-            Tok::Plain => self.text,
+            TokenKind::Plain => self.text,
             // Obsidian's theme colored GitHub's classes its own way: plain names, types and operators in the
             // text color, variables and tags in their own colors, escapes as the string around them.
-            Tok::Ident | Tok::Import if obs => self.text,
-            Tok::Var if obs => pl.variable,
-            Tok::Tag if obs => pl.tag,
-            Tok::Escape if obs => pl.string,
-            Tok::Keyword | Tok::Tag => pl.keyword,
-            Tok::Str | Tok::Ident => pl.string,
-            Tok::Escape | Tok::Var | Tok::Import | Tok::Number | Tok::Meta => pl.constant,
-            Tok::Comment => pl.comment,
-            Tok::Func => pl.entity,
-            Tok::Added => pl.inserted,
-            Tok::Removed => pl.deleted,
+            TokenKind::Ident | TokenKind::Import if obs => self.text,
+            TokenKind::Var if obs => pl.variable,
+            TokenKind::Tag if obs => pl.tag,
+            TokenKind::Escape if obs => pl.string,
+            TokenKind::Keyword | TokenKind::Tag => pl.keyword,
+            TokenKind::Str | TokenKind::Ident => pl.string,
+            TokenKind::Escape | TokenKind::Var | TokenKind::Import | TokenKind::Number | TokenKind::Meta => pl.constant,
+            TokenKind::Comment => pl.comment,
+            TokenKind::Func => pl.entity,
+            TokenKind::Added => pl.inserted,
+            TokenKind::Removed => pl.deleted,
         }
     }
 }

@@ -1,5 +1,5 @@
 //! Image loading: local files at once, remote files on `remote`'s worker threads.
-use crate::render::doc::{Block, Inl};
+use crate::render::doc::{Block, Inline};
 use crate::render::media::is_remote;
 use crate::render::page::Bitmap;
 use resvg::usvg;
@@ -11,16 +11,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 #[derive(Clone)]
-pub enum Img {
+pub enum Image {
     Raster(Rc<Bitmap>),
     Svg(Rc<usvg::Tree>),
 }
 
-impl Img {
+impl Image {
     pub fn size(&self) -> (f32, f32) {
         match self {
-            Img::Raster(b) => (b.w as f32, b.h as f32),
-            Img::Svg(t) => (t.size().width(), t.size().height()),
+            Image::Raster(b) => (b.w as f32, b.h as f32),
+            Image::Svg(t) => (t.size().width(), t.size().height()),
         }
     }
 }
@@ -28,18 +28,18 @@ impl Img {
 pub enum Status {
     Pending,
     Failed,
-    Ready(Img),
+    Ready(Image),
 }
 
-enum St {
+enum LoadState {
     Loading,
     Failed,
-    Ready(Img),
+    Ready(Image),
 }
 
 pub struct Images {
     pub dir: PathBuf,
-    map: HashMap<String, St>,
+    map: HashMap<String, LoadState>,
     tx: Sender<(String, Option<Arc<Vec<u8>>>)>,
     rx: Receiver<(String, Option<Arc<Vec<u8>>>)>,
     /// Stops this page's queued and running fetches when a reload replaces it.
@@ -60,17 +60,17 @@ enum Decoded {
     Svg(Box<usvg::Tree>),
 }
 
-impl From<Decoded> for Img {
-    fn from(d: Decoded) -> Img {
+impl From<Decoded> for Image {
+    fn from(d: Decoded) -> Image {
         match d {
-            Decoded::Raster(b) => Img::Raster(Rc::new(b)),
-            Decoded::Svg(t) => Img::Svg(Rc::from(t)),
+            Decoded::Raster(b) => Image::Raster(Rc::new(b)),
+            Decoded::Svg(t) => Image::Svg(Rc::from(t)),
         }
     }
 }
 
-pub fn decode(data: &[u8]) -> Option<Img> {
-    decoded(data).map(Img::from)
+pub fn decode(data: &[u8]) -> Option<Image> {
+    decoded(data).map(Image::from)
 }
 
 fn decoded(data: &[u8]) -> Option<Decoded> {
@@ -99,7 +99,7 @@ fn local(dir: &Path, src: &str) -> Option<Decoded> {
 
 /// The image sources layout will ask for: all but those in closed `<details>`, which it lays out only once opened.
 pub fn sources(blocks: &[Block], out: &mut Vec<String>) {
-    let mut inls = |is: &[Inl]| out.extend(is.iter().filter_map(|i| if let Inl::Img { src, .. } = i { Some(src.clone()) } else { None }));
+    let mut inls = |is: &[Inline]| out.extend(is.iter().filter_map(|i| if let Inline::Img { src, .. } = i { Some(src.clone()) } else { None }));
     crate::render::doc::walk_shown(blocks, &mut |b| match b {
         Block::Para(is) | Block::Text(is) | Block::Heading(_, is, _) | Block::Details { summary: is, .. } => inls(is),
         Block::Table { head, rows, .. } => head.iter().chain(rows.iter().flatten()).for_each(|c| inls(c)),
@@ -116,23 +116,23 @@ impl Images {
     pub fn get(&mut self, src: &str, wanted: &mut Vec<String>) -> Status {
         if let Some(s) = self.map.get(src) {
             return match s {
-                St::Loading => Status::Pending,
-                St::Failed => Status::Failed,
-                St::Ready(i) => Status::Ready(i.clone()),
+                LoadState::Loading => Status::Pending,
+                LoadState::Failed => Status::Failed,
+                LoadState::Ready(i) => Status::Ready(i.clone()),
             };
         }
         if is_remote(src) {
-            self.map.insert(src.to_string(), St::Loading);
+            self.map.insert(src.to_string(), LoadState::Loading);
             wanted.push(src.to_string());
             return Status::Pending;
         }
-        match local(&self.dir, src).map(Img::from) {
+        match local(&self.dir, src).map(Image::from) {
             Some(i) => {
-                self.map.insert(src.to_string(), St::Ready(i.clone()));
+                self.map.insert(src.to_string(), LoadState::Ready(i.clone()));
                 Status::Ready(i)
             }
             None => {
-                self.map.insert(src.to_string(), St::Failed);
+                self.map.insert(src.to_string(), LoadState::Failed);
                 Status::Failed
             }
         }
@@ -164,7 +164,7 @@ impl Images {
             handles.into_iter().flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
         });
         for (i, d) in done {
-            self.map.insert(srcs[i].clone(), d.map_or(St::Failed, |d| St::Ready(d.into())));
+            self.map.insert(srcs[i].clone(), d.map_or(LoadState::Failed, |d| LoadState::Ready(d.into())));
         }
     }
 
@@ -188,7 +188,7 @@ impl Images {
 
     /// How many remote images are still loading.
     pub fn loading(&self) -> usize {
-        self.map.values().filter(|s| matches!(s, St::Loading)).count()
+        self.map.values().filter(|s| matches!(s, LoadState::Loading)).count()
     }
 
     /// Take finished fetches. True when any image changed.
@@ -198,11 +198,11 @@ impl Images {
             // a failed fetch looks the same as a pending one: no relayout
             match d.and_then(|d| decode(&d)) {
                 Some(i) => {
-                    self.map.insert(u, St::Ready(i));
+                    self.map.insert(u, LoadState::Ready(i));
                     any = true;
                 }
                 None => {
-                    self.map.insert(u, St::Failed);
+                    self.map.insert(u, LoadState::Failed);
                 }
             }
         }
@@ -230,8 +230,8 @@ mod tests {
         let mut images = super::Images::new(dir.clone());
         images.prefetch(srcs);
         // Ready or failed before layout asks, and the remote one is left to `fetch`.
-        assert!(matches!(images.map.get("c.svg"), Some(super::St::Ready(i)) if i.size() == (4.0, 2.0)));
-        assert!(matches!(images.map.get("a.png"), Some(super::St::Failed)));
+        assert!(matches!(images.map.get("c.svg"), Some(super::LoadState::Ready(i)) if i.size() == (4.0, 2.0)));
+        assert!(matches!(images.map.get("a.png"), Some(super::LoadState::Failed)));
         assert!(!images.map.contains_key("https://x.test/r.png"));
         std::fs::remove_dir_all(&dir).unwrap();
     }

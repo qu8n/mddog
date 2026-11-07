@@ -29,7 +29,7 @@ pub const fn weight(w: u16) -> u16 {
 pub const SEMIBOLD: u16 = weight(600);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct FKey {
+pub struct FontKey {
     /// Size in 1/16 px.
     pub size: u32,
     pub style: u16,
@@ -37,13 +37,13 @@ pub struct FKey {
     pub track: i16,
 }
 
-impl FKey {
-    pub fn new(size: f32, style: u16) -> FKey {
-        FKey { size: (size * 16.0).round() as u32, style, track: 0 }
+impl FontKey {
+    pub fn new(size: f32, style: u16) -> FontKey {
+        FontKey { size: (size * 16.0).round() as u32, style, track: 0 }
     }
     /// The same font with `em` of letter spacing.
-    pub fn tracked(self, em: f32) -> FKey {
-        FKey { track: (em * 1000.0).round() as i16, ..self }
+    pub fn tracked(self, em: f32) -> FontKey {
+        FontKey { track: (em * 1000.0).round() as i16, ..self }
     }
     /// The underline's and the strike line's offsets from the baseline, and their thickness, in px.
     pub fn lines(&self) -> (f32, f32, f32) {
@@ -57,8 +57,8 @@ impl FKey {
 }
 
 pub struct Fonts {
-    fonts: HashMap<FKey, CTFont>,
-    lines: HashMap<(FKey, String), (CTLine, f32)>,
+    fonts: HashMap<FontKey, CTFont>,
+    lines: HashMap<(FontKey, String), (CTLine, f32)>,
     /// The theme's body and code font lists, first choice first.
     body: Vec<String>,
     code: Vec<String>,
@@ -89,18 +89,18 @@ impl Fonts {
         }
     }
 
-    pub fn font(&mut self, k: FKey) -> &CTFont {
-        let k = FKey { track: 0, ..k };
+    pub fn font(&mut self, k: FontKey) -> &CTFont {
+        let k = FontKey { track: 0, ..k };
         let (body, code, scale) = (&self.body, &self.code, self.scale);
         self.fonts.entry(k).or_insert_with(|| at_scale(make_font(k.px() / scale, k.style, if k.style & MONO != 0 { code } else { body }), scale))
     }
 
-    pub fn ascent_descent(&mut self, k: FKey) -> (f32, f32) {
+    pub fn ascent_descent(&mut self, k: FontKey) -> (f32, f32) {
         let f = self.font(k);
         (f.ascent() as f32, f.descent() as f32)
     }
 
-    fn line(&mut self, k: FKey, s: &str) -> &(CTLine, f32) {
+    fn line(&mut self, k: FontKey, s: &str) -> &(CTLine, f32) {
         if self.lines.len() > 20000 {
             self.lines.clear();
         }
@@ -125,12 +125,12 @@ impl Fonts {
         &self.lines[&(k, s.to_string())]
     }
 
-    pub fn measure(&mut self, k: FKey, s: &str) -> f32 {
+    pub fn measure(&mut self, k: FontKey, s: &str) -> f32 {
         self.line(k, s).1
     }
 
     /// x offset of the char at `idx` (in chars) from the start of the string.
-    pub fn char_x(&mut self, k: FKey, s: &str, idx: usize) -> f32 {
+    pub fn char_x(&mut self, k: FontKey, s: &str, idx: usize) -> f32 {
         let total = s.chars().count();
         if idx == 0 {
             return 0.0;
@@ -142,7 +142,7 @@ impl Fonts {
         self.line(k, s).0.get_string_offset_for_string_index(u16idx as isize) as f32
     }
 
-    pub fn draw(&mut self, ctx: &CGContext, k: FKey, s: &str, x: f32, y: f32) {
+    pub fn draw(&mut self, ctx: &CGContext, k: FontKey, s: &str, x: f32, y: f32) {
         let l = self.line(k, s).0.clone();
         ctx.set_text_matrix(&CGAffineTransform::new(1.0, 0.0, 0.0, -1.0, x as f64, y as f64));
         l.draw(ctx);

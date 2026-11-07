@@ -1,10 +1,10 @@
 //! TeX math: a small parser and box layout. Draws with STIX glyphs and rules.
-use crate::render::text::{BOLD, FKey, Fonts, ITALIC, MATH};
+use crate::render::text::{BOLD, FontKey, Fonts, ITALIC, MATH};
 
 pub enum MItem {
     Text {
         s: String,
-        f: FKey,
+        f: FontKey,
         x: f32,
         y: f32,
     },
@@ -30,7 +30,7 @@ pub struct MBox {
 
 /// TeX's atom classes, which set the space between neighbours.
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Cls {
+enum AtomClass {
     Ord,
     Op,
     Bin,
@@ -43,14 +43,14 @@ enum Cls {
 
 /// Where a big operator puts its scripts: beside, above and below in display style, or always above and below.
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Lim {
+enum Limits {
     Side,
     Display,
     Always,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Acc {
+enum Accent {
     Hat,
     WideHat,
     Tilde,
@@ -68,51 +68,51 @@ enum Acc {
 }
 
 #[derive(Debug, Clone)]
-enum N {
-    Sym(String, Cls, bool),
-    Group(Vec<N>),
+enum Node {
+    Sym(String, AtomClass, bool),
+    Group(Vec<Node>),
     /// `style`: `Some(true)` for `\dfrac`, `Some(false)` for `\tfrac`. `bar` is false for `\binom`.
     Frac {
-        num: Box<N>,
-        den: Box<N>,
+        num: Box<Node>,
+        den: Box<Node>,
         style: Option<bool>,
         bar: bool,
     },
-    Sqrt(Option<Box<N>>, Box<N>),
+    Sqrt(Option<Box<Node>>, Box<Node>),
     Script {
-        base: Box<N>,
-        sup: Option<Box<N>>,
-        sub: Option<Box<N>>,
+        base: Box<Node>,
+        sup: Option<Box<Node>>,
+        sub: Option<Box<Node>>,
     },
     Text(String),
-    Font(u8, Vec<N>),
+    Font(u8, Vec<Node>),
     /// `\displaystyle` (true) or `\textstyle` (false) for the rest of the group.
-    Style(bool, Vec<N>),
+    Style(bool, Vec<Node>),
     /// `\mathrel{…}` and its kin.
-    Class(Cls, Box<N>),
-    Delim(String, String, Vec<N>),
+    Class(AtomClass, Box<Node>),
+    Delim(String, String, Vec<Node>),
     /// Environment, column spec, rows of cells.
-    Matrix(String, String, Vec<Vec<Vec<N>>>),
+    Matrix(String, String, Vec<Vec<Vec<Node>>>),
     Space(f32),
-    Accent(Acc, Box<N>),
-    BigOp(String, Lim),
-    Name(String, Lim),
+    Accent(Accent, Box<Node>),
+    BigOp(String, Limits),
+    Name(String, Limits),
     /// `\overset`, `\underset`, `\stackrel`.
     Stack {
-        base: Box<N>,
-        over: Option<Box<N>>,
-        under: Option<Box<N>>,
+        base: Box<Node>,
+        over: Option<Box<Node>>,
+        under: Option<Box<Node>>,
     },
     /// `\xrightarrow[under]{over}`, or leftwards.
     XArrow {
         left: bool,
-        over: Box<N>,
-        under: Option<Box<N>>,
+        over: Box<Node>,
+        under: Option<Box<Node>>,
     },
     Logo(&'static str),
 }
 
-struct P {
+struct Parser {
     c: Vec<char>,
     i: usize,
 }
@@ -163,92 +163,92 @@ fn greek(n: &str) -> Option<&'static str> {
     })
 }
 
-fn symbol(n: &str) -> Option<(&'static str, Cls)> {
+fn symbol(n: &str) -> Option<(&'static str, AtomClass)> {
     Some(match n {
-        "le" | "leq" => ("≤", Cls::Rel),
-        "ge" | "geq" => ("≥", Cls::Rel),
-        "ne" | "neq" => ("≠", Cls::Rel),
-        "approx" => ("≈", Cls::Rel),
-        "equiv" => ("≡", Cls::Rel),
-        "sim" => ("∼", Cls::Rel),
-        "simeq" => ("≃", Cls::Rel),
-        "propto" => ("∝", Cls::Rel),
-        "ll" => ("≪", Cls::Rel),
-        "gg" => ("≫", Cls::Rel),
-        "to" | "rightarrow" => ("→", Cls::Rel),
-        "leftarrow" | "gets" => ("←", Cls::Rel),
-        "leftrightarrow" => ("↔", Cls::Rel),
-        "Rightarrow" | "implies" => ("⇒", Cls::Rel),
-        "Leftarrow" => ("⇐", Cls::Rel),
-        "Leftrightarrow" | "iff" => ("⇔", Cls::Rel),
-        "mapsto" => ("↦", Cls::Rel),
-        "in" => ("∈", Cls::Rel),
-        "notin" => ("∉", Cls::Rel),
-        "ni" => ("∋", Cls::Rel),
-        "subset" => ("⊂", Cls::Rel),
-        "supset" => ("⊃", Cls::Rel),
-        "subseteq" => ("⊆", Cls::Rel),
-        "supseteq" => ("⊇", Cls::Rel),
-        "pm" => ("±", Cls::Bin),
-        "mp" => ("∓", Cls::Bin),
-        "times" => ("×", Cls::Bin),
-        "div" => ("÷", Cls::Bin),
-        "cdot" => ("⋅", Cls::Bin),
-        "ast" => ("∗", Cls::Bin),
-        "star" => ("⋆", Cls::Bin),
-        "circ" => ("∘", Cls::Bin),
-        "cup" => ("∪", Cls::Bin),
-        "cap" => ("∩", Cls::Bin),
-        "wedge" | "land" => ("∧", Cls::Bin),
-        "vee" | "lor" => ("∨", Cls::Bin),
-        "oplus" => ("⊕", Cls::Bin),
-        "otimes" => ("⊗", Cls::Bin),
-        "setminus" => ("∖", Cls::Bin),
-        "infty" => ("∞", Cls::Ord),
-        "partial" => ("∂", Cls::Ord),
-        "nabla" => ("∇", Cls::Ord),
-        "forall" => ("∀", Cls::Ord),
-        "exists" => ("∃", Cls::Ord),
-        "emptyset" | "varnothing" => ("∅", Cls::Ord),
-        "neg" | "lnot" => ("¬", Cls::Ord),
-        "ell" => ("ℓ", Cls::Ord),
-        "hbar" => ("ℏ", Cls::Ord),
-        "Re" => ("ℜ", Cls::Ord),
-        "Im" => ("ℑ", Cls::Ord),
-        "aleph" => ("ℵ", Cls::Ord),
-        "angle" => ("∠", Cls::Ord),
-        "prime" => ("′", Cls::Ord),
-        "ldots" | "dots" | "cdots" => ("…", Cls::Ord),
-        "vdots" => ("⋮", Cls::Ord),
-        "ddots" => ("⋱", Cls::Ord),
-        "langle" => ("⟨", Cls::Open),
-        "rangle" => ("⟩", Cls::Close),
-        "lbrace" => ("{", Cls::Open),
-        "rbrace" => ("}", Cls::Close),
-        "lfloor" => ("⌊", Cls::Open),
-        "rfloor" => ("⌋", Cls::Close),
-        "lceil" => ("⌈", Cls::Open),
-        "rceil" => ("⌉", Cls::Close),
-        "vert" => ("|", Cls::Ord),
-        "mid" => ("|", Cls::Rel),
-        "Vert" | "lVert" | "rVert" => ("‖", Cls::Ord),
-        "lvert" | "rvert" => ("|", Cls::Ord),
-        "top" => ("⊤", Cls::Ord),
-        "perp" => ("⊥", Cls::Rel),
-        "odot" => ("⊙", Cls::Bin),
-        "dagger" => ("†", Cls::Bin),
-        "ddagger" => ("‡", Cls::Bin),
-        "sqcup" => ("⊔", Cls::Bin),
-        "longrightarrow" => ("⟶", Cls::Rel),
-        "longleftarrow" => ("⟵", Cls::Rel),
-        "Longrightarrow" => ("⟹", Cls::Rel),
-        "triangleq" => ("≜", Cls::Rel),
-        "gtrsim" => ("≳", Cls::Rel),
-        "lesssim" => ("≲", Cls::Rel),
-        "bigvee" => ("⋁", Cls::Op),
-        "bigwedge" => ("⋀", Cls::Op),
-        "backslash" => ("\\", Cls::Ord),
-        "degree" => ("°", Cls::Ord),
+        "le" | "leq" => ("≤", AtomClass::Rel),
+        "ge" | "geq" => ("≥", AtomClass::Rel),
+        "ne" | "neq" => ("≠", AtomClass::Rel),
+        "approx" => ("≈", AtomClass::Rel),
+        "equiv" => ("≡", AtomClass::Rel),
+        "sim" => ("∼", AtomClass::Rel),
+        "simeq" => ("≃", AtomClass::Rel),
+        "propto" => ("∝", AtomClass::Rel),
+        "ll" => ("≪", AtomClass::Rel),
+        "gg" => ("≫", AtomClass::Rel),
+        "to" | "rightarrow" => ("→", AtomClass::Rel),
+        "leftarrow" | "gets" => ("←", AtomClass::Rel),
+        "leftrightarrow" => ("↔", AtomClass::Rel),
+        "Rightarrow" | "implies" => ("⇒", AtomClass::Rel),
+        "Leftarrow" => ("⇐", AtomClass::Rel),
+        "Leftrightarrow" | "iff" => ("⇔", AtomClass::Rel),
+        "mapsto" => ("↦", AtomClass::Rel),
+        "in" => ("∈", AtomClass::Rel),
+        "notin" => ("∉", AtomClass::Rel),
+        "ni" => ("∋", AtomClass::Rel),
+        "subset" => ("⊂", AtomClass::Rel),
+        "supset" => ("⊃", AtomClass::Rel),
+        "subseteq" => ("⊆", AtomClass::Rel),
+        "supseteq" => ("⊇", AtomClass::Rel),
+        "pm" => ("±", AtomClass::Bin),
+        "mp" => ("∓", AtomClass::Bin),
+        "times" => ("×", AtomClass::Bin),
+        "div" => ("÷", AtomClass::Bin),
+        "cdot" => ("⋅", AtomClass::Bin),
+        "ast" => ("∗", AtomClass::Bin),
+        "star" => ("⋆", AtomClass::Bin),
+        "circ" => ("∘", AtomClass::Bin),
+        "cup" => ("∪", AtomClass::Bin),
+        "cap" => ("∩", AtomClass::Bin),
+        "wedge" | "land" => ("∧", AtomClass::Bin),
+        "vee" | "lor" => ("∨", AtomClass::Bin),
+        "oplus" => ("⊕", AtomClass::Bin),
+        "otimes" => ("⊗", AtomClass::Bin),
+        "setminus" => ("∖", AtomClass::Bin),
+        "infty" => ("∞", AtomClass::Ord),
+        "partial" => ("∂", AtomClass::Ord),
+        "nabla" => ("∇", AtomClass::Ord),
+        "forall" => ("∀", AtomClass::Ord),
+        "exists" => ("∃", AtomClass::Ord),
+        "emptyset" | "varnothing" => ("∅", AtomClass::Ord),
+        "neg" | "lnot" => ("¬", AtomClass::Ord),
+        "ell" => ("ℓ", AtomClass::Ord),
+        "hbar" => ("ℏ", AtomClass::Ord),
+        "Re" => ("ℜ", AtomClass::Ord),
+        "Im" => ("ℑ", AtomClass::Ord),
+        "aleph" => ("ℵ", AtomClass::Ord),
+        "angle" => ("∠", AtomClass::Ord),
+        "prime" => ("′", AtomClass::Ord),
+        "ldots" | "dots" | "cdots" => ("…", AtomClass::Ord),
+        "vdots" => ("⋮", AtomClass::Ord),
+        "ddots" => ("⋱", AtomClass::Ord),
+        "langle" => ("⟨", AtomClass::Open),
+        "rangle" => ("⟩", AtomClass::Close),
+        "lbrace" => ("{", AtomClass::Open),
+        "rbrace" => ("}", AtomClass::Close),
+        "lfloor" => ("⌊", AtomClass::Open),
+        "rfloor" => ("⌋", AtomClass::Close),
+        "lceil" => ("⌈", AtomClass::Open),
+        "rceil" => ("⌉", AtomClass::Close),
+        "vert" => ("|", AtomClass::Ord),
+        "mid" => ("|", AtomClass::Rel),
+        "Vert" | "lVert" | "rVert" => ("‖", AtomClass::Ord),
+        "lvert" | "rvert" => ("|", AtomClass::Ord),
+        "top" => ("⊤", AtomClass::Ord),
+        "perp" => ("⊥", AtomClass::Rel),
+        "odot" => ("⊙", AtomClass::Bin),
+        "dagger" => ("†", AtomClass::Bin),
+        "ddagger" => ("‡", AtomClass::Bin),
+        "sqcup" => ("⊔", AtomClass::Bin),
+        "longrightarrow" => ("⟶", AtomClass::Rel),
+        "longleftarrow" => ("⟵", AtomClass::Rel),
+        "Longrightarrow" => ("⟹", AtomClass::Rel),
+        "triangleq" => ("≜", AtomClass::Rel),
+        "gtrsim" => ("≳", AtomClass::Rel),
+        "lesssim" => ("≲", AtomClass::Rel),
+        "bigvee" => ("⋁", AtomClass::Op),
+        "bigwedge" => ("⋀", AtomClass::Op),
+        "backslash" => ("\\", AtomClass::Ord),
+        "degree" => ("°", AtomClass::Ord),
         _ => return None,
     })
 }
@@ -285,8 +285,8 @@ fn negate(s: &str) -> Option<&'static str> {
 }
 
 /// Parses a whole TeX string, skipping stray closers.
-fn parse_all(tex: &str) -> Vec<N> {
-    let mut p = P { c: tex.chars().collect(), i: 0 };
+fn parse_all(tex: &str) -> Vec<Node> {
+    let mut p = Parser { c: tex.chars().collect(), i: 0 };
     let mut nodes = vec![];
     while p.i < p.c.len() {
         let mut v = p.seq(&[]);
@@ -299,10 +299,10 @@ fn parse_all(tex: &str) -> Vec<N> {
 }
 
 /// `\text{…}` content: text, with `$…$` inside it read as math again.
-fn text_node(s: &str) -> N {
+fn text_node(s: &str) -> Node {
     let s = s.replace("\\,", "\u{2009}").replace("\\ ", " ").replace("\\%", "%").replace("\\&", "&").replace("\\_", "_").replace("\\#", "#").replace("\\{", "{").replace("\\}", "}");
     if !s.contains('$') {
-        return N::Text(s.replace("\\$", "$"));
+        return Node::Text(s.replace("\\$", "$"));
     }
     let mut out = vec![];
     let mut cur = String::new();
@@ -314,7 +314,7 @@ fn text_node(s: &str) -> N {
             it.next();
         } else if c == '$' {
             if !cur.is_empty() {
-                out.push(if math { N::Group(parse_all(&cur)) } else { N::Text(std::mem::take(&mut cur)) });
+                out.push(if math { Node::Group(parse_all(&cur)) } else { Node::Text(std::mem::take(&mut cur)) });
                 cur.clear();
             }
             math = !math;
@@ -323,12 +323,12 @@ fn text_node(s: &str) -> N {
         }
     }
     if !cur.is_empty() {
-        out.push(if math { N::Group(parse_all(&cur)) } else { N::Text(cur) });
+        out.push(if math { Node::Group(parse_all(&cur)) } else { Node::Text(cur) });
     }
-    N::Group(out)
+    Node::Group(out)
 }
 
-impl P {
+impl Parser {
     fn peek(&self) -> Option<char> {
         self.c.get(self.i).copied()
     }
@@ -361,7 +361,7 @@ impl P {
         Some(name)
     }
     /// `{...}` group or a single token. A digit argument is one digit, as in `\frac12`.
-    fn arg(&mut self) -> N {
+    fn arg(&mut self) -> Node {
         self.ws();
         match self.peek() {
             Some('{') => {
@@ -370,18 +370,18 @@ impl P {
                 if self.peek() == Some('}') {
                     self.i += 1;
                 }
-                N::Group(v)
+                Node::Group(v)
             }
             Some(c) if c.is_ascii_digit() => {
                 self.i += 1;
-                N::Sym(c.to_string(), Cls::Ord, false)
+                Node::Sym(c.to_string(), AtomClass::Ord, false)
             }
-            Some(_) => self.atom().unwrap_or(N::Group(vec![])),
-            None => N::Group(vec![]),
+            Some(_) => self.atom().unwrap_or(Node::Group(vec![])),
+            None => Node::Group(vec![]),
         }
     }
     /// `[...]` if one comes next.
-    fn opt_arg(&mut self) -> Option<N> {
+    fn opt_arg(&mut self) -> Option<Node> {
         self.ws();
         if self.peek() != Some('[') {
             return None;
@@ -391,7 +391,7 @@ impl P {
         if self.peek() == Some(']') {
             self.i += 1;
         }
-        Some(N::Group(v))
+        Some(Node::Group(v))
     }
     fn raw_arg(&mut self) -> String {
         self.ws();
@@ -423,8 +423,8 @@ impl P {
         }
         s
     }
-    fn seq(&mut self, stop: &[char]) -> Vec<N> {
-        let mut out: Vec<N> = vec![];
+    fn seq(&mut self, stop: &[char]) -> Vec<Node> {
+        let mut out: Vec<Node> = vec![];
         loop {
             self.ws();
             let Some(c) = self.peek() else { break };
@@ -438,11 +438,11 @@ impl P {
                 match name.as_str() {
                     "limits" | "nolimits" => {
                         self.i += 1 + name.len();
-                        let lim = if name == "limits" { Lim::Always } else { Lim::Side };
+                        let lim = if name == "limits" { Limits::Always } else { Limits::Side };
                         match out.last_mut() {
-                            Some(N::BigOp(_, l) | N::Name(_, l)) => *l = lim,
-                            Some(N::Script { base, .. }) => {
-                                if let N::BigOp(_, l) | N::Name(_, l) = &mut **base {
+                            Some(Node::BigOp(_, l) | Node::Name(_, l)) => *l = lim,
+                            Some(Node::Script { base, .. }) => {
+                                if let Node::BigOp(_, l) | Node::Name(_, l) = &mut **base {
                                     *l = lim;
                                 }
                             }
@@ -459,13 +459,13 @@ impl P {
                             "it" => 5,
                             _ => 3,
                         };
-                        out.push(N::Font(f, rest));
+                        out.push(Node::Font(f, rest));
                         continue;
                     }
                     "displaystyle" | "textstyle" => {
                         self.i += 1 + name.len();
                         let rest = self.seq(stop);
-                        out.push(N::Style(name == "displaystyle", rest));
+                        out.push(Node::Style(name == "displaystyle", rest));
                         continue;
                     }
                     _ => {}
@@ -478,11 +478,11 @@ impl P {
                     self.i += 1;
                     primes.push('′');
                 }
-                let p = N::Sym(primes, Cls::Ord, false);
-                let (sup, sub, base) = match out.pop().unwrap_or(N::Group(vec![])) {
-                    N::Script { base, sup, sub } => (
+                let p = Node::Sym(primes, AtomClass::Ord, false);
+                let (sup, sub, base) = match out.pop().unwrap_or(Node::Group(vec![])) {
+                    Node::Script { base, sup, sub } => (
                         Some(Box::new(match sup {
-                            Some(s) => N::Group(vec![*s, p]),
+                            Some(s) => Node::Group(vec![*s, p]),
                             None => p,
                         })),
                         sub,
@@ -490,15 +490,15 @@ impl P {
                     ),
                     b => (Some(Box::new(p)), None, b),
                 };
-                out.push(N::Script { base: Box::new(base), sup, sub });
+                out.push(Node::Script { base: Box::new(base), sup, sub });
                 continue;
             }
             if c == '^' || c == '_' {
                 self.i += 1;
                 let a = self.arg();
-                let base = out.pop().unwrap_or(N::Group(vec![]));
+                let base = out.pop().unwrap_or(Node::Group(vec![]));
                 let (mut sup, mut sub, base) = match base {
-                    N::Script { base, sup, sub } => (sup, sub, *base),
+                    Node::Script { base, sup, sub } => (sup, sub, *base),
                     b => (None, None, b),
                 };
                 if c == '^' {
@@ -506,7 +506,7 @@ impl P {
                 } else {
                     sub = Some(Box::new(a));
                 }
-                out.push(N::Script { base: Box::new(base), sup, sub });
+                out.push(Node::Script { base: Box::new(base), sup, sub });
                 continue;
             }
             match self.atom() {
@@ -516,7 +516,7 @@ impl P {
         }
         out
     }
-    fn atom(&mut self) -> Option<N> {
+    fn atom(&mut self) -> Option<Node> {
         self.ws();
         let c = self.peek()?;
         self.i += 1;
@@ -526,20 +526,20 @@ impl P {
                 if self.peek() == Some('}') {
                     self.i += 1;
                 }
-                N::Group(v)
+                Node::Group(v)
             }
             '\\' => return Some(self.command()),
-            '+' | '-' => N::Sym(if c == '-' { "−".into() } else { "+".into() }, Cls::Bin, false),
-            '*' => N::Sym("∗".into(), Cls::Bin, false),
-            '=' | '<' | '>' => N::Sym(c.to_string(), Cls::Rel, false),
-            ':' => N::Sym(":".into(), Cls::Rel, false),
-            '(' | '[' => N::Sym(c.to_string(), Cls::Open, false),
-            ')' | ']' => N::Sym(c.to_string(), Cls::Close, false),
-            ',' | ';' => N::Sym(c.to_string(), Cls::Punct, false),
-            '!' | '?' | '.' => N::Sym(c.to_string(), Cls::Ord, false),
-            '|' => N::Sym("|".into(), Cls::Ord, false),
-            '\'' => N::Sym("′".into(), Cls::Ord, false),
-            '~' => N::Space(0.33),
+            '+' | '-' => Node::Sym(if c == '-' { "−".into() } else { "+".into() }, AtomClass::Bin, false),
+            '*' => Node::Sym("∗".into(), AtomClass::Bin, false),
+            '=' | '<' | '>' => Node::Sym(c.to_string(), AtomClass::Rel, false),
+            ':' => Node::Sym(":".into(), AtomClass::Rel, false),
+            '(' | '[' => Node::Sym(c.to_string(), AtomClass::Open, false),
+            ')' | ']' => Node::Sym(c.to_string(), AtomClass::Close, false),
+            ',' | ';' => Node::Sym(c.to_string(), AtomClass::Punct, false),
+            '!' | '?' | '.' => Node::Sym(c.to_string(), AtomClass::Ord, false),
+            '|' => Node::Sym("|".into(), AtomClass::Ord, false),
+            '\'' => Node::Sym("′".into(), AtomClass::Ord, false),
+            '~' => Node::Space(0.33),
             '&' | '}' => return None,
             c if c.is_ascii_digit() => {
                 let mut s = c.to_string();
@@ -551,40 +551,40 @@ impl P {
                         break;
                     }
                 }
-                N::Sym(s, Cls::Ord, false)
+                Node::Sym(s, AtomClass::Ord, false)
             }
-            c if c.is_alphabetic() => N::Sym(c.to_string(), Cls::Ord, true),
-            c => N::Sym(c.to_string(), Cls::Ord, false),
+            c if c.is_alphabetic() => Node::Sym(c.to_string(), AtomClass::Ord, true),
+            c => Node::Sym(c.to_string(), AtomClass::Ord, false),
         })
     }
-    fn command(&mut self) -> N {
+    fn command(&mut self) -> Node {
         if let Some(c) = self.peek()
             && !c.is_ascii_alphabetic()
         {
             self.i += 1;
             return match c {
-                '{' => N::Sym("{".into(), Cls::Open, false),
-                '}' => N::Sym("}".into(), Cls::Close, false),
-                '|' => N::Sym("‖".into(), Cls::Ord, false),
-                ',' => N::Space(0.17),
-                ':' | '>' => N::Space(0.22),
-                ';' => N::Space(0.28),
-                '!' => N::Space(-0.17),
-                ' ' => N::Space(0.33),
-                '$' | '%' | '#' | '&' | '_' => N::Sym(c.to_string(), Cls::Ord, false),
-                '\\' => N::Space(0.0),
-                c => N::Sym(c.to_string(), Cls::Ord, false),
+                '{' => Node::Sym("{".into(), AtomClass::Open, false),
+                '}' => Node::Sym("}".into(), AtomClass::Close, false),
+                '|' => Node::Sym("‖".into(), AtomClass::Ord, false),
+                ',' => Node::Space(0.17),
+                ':' | '>' => Node::Space(0.22),
+                ';' => Node::Space(0.28),
+                '!' => Node::Space(-0.17),
+                ' ' => Node::Space(0.33),
+                '$' | '%' | '#' | '&' | '_' => Node::Sym(c.to_string(), AtomClass::Ord, false),
+                '\\' => Node::Space(0.0),
+                c => Node::Sym(c.to_string(), AtomClass::Ord, false),
             };
         }
         let name = self.ident();
         let n = name.as_str();
         if let Some(g) = greek(n) {
-            return N::Sym(g.into(), Cls::Ord, !n.chars().next().is_some_and(char::is_uppercase));
+            return Node::Sym(g.into(), AtomClass::Ord, !n.chars().next().is_some_and(char::is_uppercase));
         }
         if let Some((s, c)) = symbol(n) {
-            return N::Sym(s.into(), c, false);
+            return Node::Sym(s.into(), c, false);
         }
-        let acc = |p: &mut P, a: Acc| N::Accent(a, Box::new(p.arg()));
+        let acc = |p: &mut Parser, a: Accent| Node::Accent(a, Box::new(p.arg()));
         match n {
             "frac" | "dfrac" | "tfrac" | "cfrac" | "binom" | "dbinom" | "tbinom" => {
                 let num = Box::new(self.arg());
@@ -594,18 +594,18 @@ impl P {
                     "tfrac" | "tbinom" => Some(false),
                     _ => None,
                 };
-                let f = N::Frac { num, den, style, bar: !n.ends_with("binom") };
-                if n.ends_with("binom") { N::Delim("(".into(), ")".into(), vec![f]) } else { f }
+                let f = Node::Frac { num, den, style, bar: !n.ends_with("binom") };
+                if n.ends_with("binom") { Node::Delim("(".into(), ")".into(), vec![f]) } else { f }
             }
             "sqrt" => {
                 let idx = self.opt_arg().map(Box::new);
                 let b = self.arg();
-                N::Sqrt(idx, Box::new(b))
+                Node::Sqrt(idx, Box::new(b))
             }
             "text" | "mbox" | "textrm" | "textnormal" | "textup" => text_node(&self.raw_arg()),
             "textit" | "textbf" => {
                 let t = text_node(&self.raw_arg());
-                N::Font(if n == "textbf" { 1 } else { 5 }, vec![t])
+                Node::Font(if n == "textbf" { 1 } else { 5 }, vec![t])
             }
             "operatorname" => {
                 self.ws();
@@ -614,7 +614,7 @@ impl P {
                     self.i += 1;
                 }
                 let s = self.raw_arg().replace("\\,", "\u{2009}").replace("\\!", "").replace('\\', "");
-                N::Name(s, if star { Lim::Display } else { Lim::Side })
+                Node::Name(s, if star { Limits::Display } else { Limits::Side })
             }
             "mathrm" | "mathbf" | "boldsymbol" | "bm" | "mathbb" | "mathcal" | "mathscr" | "mathit" | "mathfrak" | "mathsf" | "mathtt" => {
                 let f = match n {
@@ -628,7 +628,7 @@ impl P {
                     "mathsf" => 7,
                     _ => 8,
                 };
-                N::Font(f, vec![self.arg()])
+                Node::Font(f, vec![self.arg()])
             }
             "left" => {
                 self.ws();
@@ -645,75 +645,75 @@ impl P {
                         self.i = save;
                     }
                 }
-                N::Delim(l, r, body)
+                Node::Delim(l, r, body)
             }
             "begin" => {
                 let env = self.raw_arg();
                 let spec = if matches!(env.as_str(), "array" | "subarray" | "alignedat" | "alignat" | "alignat*") { self.raw_arg() } else { String::new() };
                 let rows = self.matrix_rows();
-                N::Matrix(env, spec, rows)
+                Node::Matrix(env, spec, rows)
             }
-            "hat" => acc(self, Acc::Hat),
-            "widehat" => acc(self, Acc::WideHat),
-            "tilde" => acc(self, Acc::Tilde),
-            "widetilde" => acc(self, Acc::WideTilde),
-            "vec" => acc(self, Acc::Vec),
-            "dot" => acc(self, Acc::Dot),
-            "ddot" => acc(self, Acc::Ddot),
-            "bar" | "overline" => acc(self, Acc::Bar),
-            "underline" => acc(self, Acc::Under),
-            "overrightarrow" => acc(self, Acc::ArrowR),
-            "overleftarrow" => acc(self, Acc::ArrowL),
-            "overleftrightarrow" => acc(self, Acc::ArrowLR),
-            "overbrace" => acc(self, Acc::OverBrace),
-            "underbrace" => acc(self, Acc::UnderBrace),
-            "sum" => N::BigOp("∑".into(), Lim::Display),
-            "prod" => N::BigOp("∏".into(), Lim::Display),
-            "coprod" => N::BigOp("∐".into(), Lim::Display),
-            "bigcup" => N::BigOp("⋃".into(), Lim::Display),
-            "bigcap" => N::BigOp("⋂".into(), Lim::Display),
-            "bigoplus" => N::BigOp("⨁".into(), Lim::Display),
-            "bigotimes" => N::BigOp("⨂".into(), Lim::Display),
-            "int" => N::BigOp("∫".into(), Lim::Side),
-            "iint" => N::BigOp("∬".into(), Lim::Side),
-            "iiint" => N::BigOp("∭".into(), Lim::Side),
-            "oint" => N::BigOp("∮".into(), Lim::Side),
-            "quad" => N::Space(1.0),
-            "qquad" => N::Space(2.0),
+            "hat" => acc(self, Accent::Hat),
+            "widehat" => acc(self, Accent::WideHat),
+            "tilde" => acc(self, Accent::Tilde),
+            "widetilde" => acc(self, Accent::WideTilde),
+            "vec" => acc(self, Accent::Vec),
+            "dot" => acc(self, Accent::Dot),
+            "ddot" => acc(self, Accent::Ddot),
+            "bar" | "overline" => acc(self, Accent::Bar),
+            "underline" => acc(self, Accent::Under),
+            "overrightarrow" => acc(self, Accent::ArrowR),
+            "overleftarrow" => acc(self, Accent::ArrowL),
+            "overleftrightarrow" => acc(self, Accent::ArrowLR),
+            "overbrace" => acc(self, Accent::OverBrace),
+            "underbrace" => acc(self, Accent::UnderBrace),
+            "sum" => Node::BigOp("∑".into(), Limits::Display),
+            "prod" => Node::BigOp("∏".into(), Limits::Display),
+            "coprod" => Node::BigOp("∐".into(), Limits::Display),
+            "bigcup" => Node::BigOp("⋃".into(), Limits::Display),
+            "bigcap" => Node::BigOp("⋂".into(), Limits::Display),
+            "bigoplus" => Node::BigOp("⨁".into(), Limits::Display),
+            "bigotimes" => Node::BigOp("⨂".into(), Limits::Display),
+            "int" => Node::BigOp("∫".into(), Limits::Side),
+            "iint" => Node::BigOp("∬".into(), Limits::Side),
+            "iiint" => Node::BigOp("∭".into(), Limits::Side),
+            "oint" => Node::BigOp("∮".into(), Limits::Side),
+            "quad" => Node::Space(1.0),
+            "qquad" => Node::Space(2.0),
             "scriptstyle" | "big" | "Big" | "bigg" | "Bigg" | "bigl" | "bigr" | "Bigl" | "Bigr" | "biggl" | "biggr" | "Biggl" | "Biggr" | "bigm" | "Bigm" | "hline" | "nonumber" | "notag" => {
-                N::Space(0.0)
+                Node::Space(0.0)
             }
-            "space" => N::Space(0.33),
-            "mathbin" => N::Class(Cls::Bin, Box::new(self.arg())),
-            "mathrel" => N::Class(Cls::Rel, Box::new(self.arg())),
-            "mathord" => N::Class(Cls::Ord, Box::new(self.arg())),
-            "mathop" => N::Class(Cls::Op, Box::new(self.arg())),
-            "mathopen" => N::Class(Cls::Open, Box::new(self.arg())),
-            "mathclose" => N::Class(Cls::Close, Box::new(self.arg())),
-            "mathpunct" => N::Class(Cls::Punct, Box::new(self.arg())),
+            "space" => Node::Space(0.33),
+            "mathbin" => Node::Class(AtomClass::Bin, Box::new(self.arg())),
+            "mathrel" => Node::Class(AtomClass::Rel, Box::new(self.arg())),
+            "mathord" => Node::Class(AtomClass::Ord, Box::new(self.arg())),
+            "mathop" => Node::Class(AtomClass::Op, Box::new(self.arg())),
+            "mathopen" => Node::Class(AtomClass::Open, Box::new(self.arg())),
+            "mathclose" => Node::Class(AtomClass::Close, Box::new(self.arg())),
+            "mathpunct" => Node::Class(AtomClass::Punct, Box::new(self.arg())),
             "overset" | "stackrel" | "underset" => {
                 let a = Box::new(self.arg());
                 let base = Box::new(self.arg());
-                if n == "underset" { N::Stack { base, over: None, under: Some(a) } } else { N::Stack { base, over: Some(a), under: None } }
+                if n == "underset" { Node::Stack { base, over: None, under: Some(a) } } else { Node::Stack { base, over: Some(a), under: None } }
             }
             "xrightarrow" | "xleftarrow" => {
                 let under = self.opt_arg().map(Box::new);
                 let over = Box::new(self.arg());
-                N::XArrow { left: n == "xleftarrow", over, under }
+                Node::XArrow { left: n == "xleftarrow", over, under }
             }
             "not" => match self.atom() {
-                Some(N::Sym(s, c, v)) => match negate(&s) {
-                    Some(neg) => N::Sym(neg.into(), c, v),
-                    None => N::Sym(format!("{s}\u{338}"), c, v),
+                Some(Node::Sym(s, c, v)) => match negate(&s) {
+                    Some(neg) => Node::Sym(neg.into(), c, v),
+                    None => Node::Sym(format!("{s}\u{338}"), c, v),
                 },
                 Some(other) => other,
-                None => N::Sym("/".into(), Cls::Rel, false),
+                None => Node::Sym("/".into(), AtomClass::Rel, false),
             },
-            "TeX" => N::Logo("TeX"),
-            "LaTeX" => N::Logo("LaTeX"),
-            "KaTeX" => N::Logo("KaTeX"),
-            _ if FUNCS.contains(&n) => N::Name(n.to_string(), if LIMIT_FUNCS.contains(&n) { Lim::Display } else { Lim::Side }),
-            _ => N::Text(format!("\\{n}")),
+            "TeX" => Node::Logo("TeX"),
+            "LaTeX" => Node::Logo("LaTeX"),
+            "KaTeX" => Node::Logo("KaTeX"),
+            _ if FUNCS.contains(&n) => Node::Name(n.to_string(), if LIMIT_FUNCS.contains(&n) { Limits::Display } else { Limits::Side }),
+            _ => Node::Text(format!("\\{n}")),
         }
     }
     fn delim_char(&mut self) -> String {
@@ -746,9 +746,9 @@ impl P {
             None => String::new(),
         }
     }
-    fn matrix_rows(&mut self) -> Vec<Vec<Vec<N>>> {
+    fn matrix_rows(&mut self) -> Vec<Vec<Vec<Node>>> {
         let mut rows = vec![];
-        let mut row: Vec<Vec<N>> = vec![];
+        let mut row: Vec<Vec<Node>> = vec![];
         loop {
             let cell = self.seq(&['&']);
             row.push(cell);
@@ -780,12 +780,12 @@ impl P {
     }
 }
 
-struct Lay<'a> {
+struct Layout<'a> {
     fonts: &'a mut Fonts,
 }
 
 #[derive(Clone, Copy)]
-struct St {
+struct MathStyle {
     size: f32,
     display: bool,
     /// Script style: inside a sub- or superscript, a limit or an inline fraction. Drops the wide spaces.
@@ -832,8 +832,8 @@ fn shift(b: &mut MBox, dx: f32, dy: f32) {
 }
 
 /// TeX's space between two atom classes, in em. Script style drops all but the thin spaces around operators.
-fn class_space(l: Cls, r: Cls, script: bool) -> f32 {
-    use Cls::*;
+fn class_space(l: AtomClass, r: AtomClass, script: bool) -> f32 {
+    use AtomClass::*;
     let (thin, med, thick) = (0.167, 0.222, 0.278);
     let (v, always) = match (l, r) {
         (Ord | Close | Op, Op) | (Op, Ord) => (thin, true),
@@ -946,50 +946,50 @@ fn mono(c: char) -> char {
 
 /// Whether a node's letters all lack ascenders (`Some(true)`), or some have one (`Some(false)`). `None` when the
 /// node is not plain letters and its box height has to do.
-fn short(n: &N) -> Option<bool> {
+fn short(n: &Node) -> Option<bool> {
     match n {
-        N::Sym(s, _, _) => Some(s.chars().all(|c| SHORT.contains(c))),
-        N::Font(2 | 3 | 6, _) => Some(false),
-        N::Group(v) | N::Font(_, v) if !v.is_empty() => {
+        Node::Sym(s, _, _) => Some(s.chars().all(|c| SHORT.contains(c))),
+        Node::Font(2 | 3 | 6, _) => Some(false),
+        Node::Group(v) | Node::Font(_, v) if !v.is_empty() => {
             let all: Option<Vec<bool>> = v.iter().map(short).collect();
             all.map(|a| a.iter().all(|&s| s))
         }
-        N::Script { base, .. } => short(base),
+        Node::Script { base, .. } => short(base),
         _ => None,
     }
 }
 
-fn class_of(n: &N) -> Cls {
+fn class_of(n: &Node) -> AtomClass {
     match n {
-        N::Sym(_, c, _) | N::Class(c, _) => *c,
-        N::BigOp(..) | N::Name(..) => Cls::Op,
-        N::Script { base, .. } => class_of(base),
+        Node::Sym(_, c, _) | Node::Class(c, _) => *c,
+        Node::BigOp(..) | Node::Name(..) => AtomClass::Op,
+        Node::Script { base, .. } => class_of(base),
         // amsmath gives `\overset{!}{=}` the class of its base, braces and all
-        N::Stack { base, .. } => match &**base {
-            N::Group(v) if v.len() == 1 => class_of(&v[0]),
+        Node::Stack { base, .. } => match &**base {
+            Node::Group(v) if v.len() == 1 => class_of(&v[0]),
             b => class_of(b),
         },
-        N::XArrow { .. } => Cls::Rel,
-        N::Delim(..) => Cls::Inner,
-        _ => Cls::Ord,
+        Node::XArrow { .. } => AtomClass::Rel,
+        Node::Delim(..) => AtomClass::Inner,
+        _ => AtomClass::Ord,
     }
 }
 
 /// Classes for a list, with TeX's rule that a binary operator with nothing to join is ordinary (`-x`, `(+`).
 /// Spaces are skipped over.
-fn classes(v: &[N]) -> Vec<Cls> {
-    let mut c: Vec<Cls> = v.iter().map(class_of).collect();
-    let idx: Vec<usize> = (0..v.len()).filter(|&i| !matches!(v[i], N::Space(_))).collect();
+fn classes(v: &[Node]) -> Vec<AtomClass> {
+    let mut c: Vec<AtomClass> = v.iter().map(class_of).collect();
+    let idx: Vec<usize> = (0..v.len()).filter(|&i| !matches!(v[i], Node::Space(_))).collect();
     for k in 0..idx.len() {
         let prev = k.checked_sub(1).map(|p| c[idx[p]]);
-        if c[idx[k]] == Cls::Bin && prev.is_none_or(|p| matches!(p, Cls::Bin | Cls::Op | Cls::Rel | Cls::Open | Cls::Punct)) {
-            c[idx[k]] = Cls::Ord;
+        if c[idx[k]] == AtomClass::Bin && prev.is_none_or(|p| matches!(p, AtomClass::Bin | AtomClass::Op | AtomClass::Rel | AtomClass::Open | AtomClass::Punct)) {
+            c[idx[k]] = AtomClass::Ord;
         }
     }
     for k in 0..idx.len() {
         let next = idx.get(k + 1).map(|&j| c[j]);
-        if c[idx[k]] == Cls::Bin && next.is_none_or(|n| matches!(n, Cls::Rel | Cls::Close | Cls::Punct)) {
-            c[idx[k]] = Cls::Ord;
+        if c[idx[k]] == AtomClass::Bin && next.is_none_or(|n| matches!(n, AtomClass::Rel | AtomClass::Close | AtomClass::Punct)) {
+            c[idx[k]] = AtomClass::Ord;
         }
     }
     c
@@ -1031,18 +1031,18 @@ fn arrow(items: &mut Vec<MItem>, x0: f32, x1: f32, y: f32, left: bool, right: bo
     }
 }
 
-impl<'a> Lay<'a> {
-    fn text(&mut self, s: &str, st: St, bold: bool, italic: bool) -> MBox {
-        let f = FKey::new(st.size, MATH | if bold { BOLD } else { 0 } | if italic { ITALIC } else { 0 });
+impl<'a> Layout<'a> {
+    fn text(&mut self, s: &str, st: MathStyle, bold: bool, italic: bool) -> MBox {
+        let f = FontKey::new(st.size, MATH | if bold { BOLD } else { 0 } | if italic { ITALIC } else { 0 });
         let w = self.fonts.measure(f, s);
         MBox { w, asc: 0.73 * st.size, desc: 0.22 * st.size, items: vec![MItem::Text { s: s.to_string(), f, x: 0.0, y: 0.0 }] }
     }
 
-    fn seq(&mut self, v: &[N], st: St) -> MBox {
+    fn seq(&mut self, v: &[Node], st: MathStyle) -> MBox {
         let mut out = mbox();
-        let mut prev: Option<Cls> = None;
+        let mut prev: Option<AtomClass> = None;
         for (n, cls) in v.iter().zip(classes(v)) {
-            if !matches!(n, N::Space(_)) {
+            if !matches!(n, Node::Space(_)) {
                 if let Some(p) = prev {
                     out.w += class_space(p, cls, st.script) * st.size;
                 }
@@ -1055,13 +1055,13 @@ impl<'a> Lay<'a> {
     }
 
     /// Style for scripts and limits: smaller, and no wide spaces.
-    fn script(st: St) -> St {
-        St { size: st.size * 0.7, display: false, script: true, ..st }
+    fn script(st: MathStyle) -> MathStyle {
+        MathStyle { size: st.size * 0.7, display: false, script: true, ..st }
     }
 
-    fn node(&mut self, n: &N, st: St) -> MBox {
+    fn node(&mut self, n: &Node, st: MathStyle) -> MBox {
         match n {
-            N::Sym(s, _, var) => {
+            Node::Sym(s, _, var) => {
                 let bold = matches!(st.font, 1 | 4);
                 if *var && matches!(st.font, 255 | 4 | 5) && s.chars().all(char::is_alphabetic) {
                     return self.text(s, st, bold, true);
@@ -1080,20 +1080,20 @@ impl<'a> Lay<'a> {
                 // \mathbf is upright, as MathJax draws it.
                 self.text(&out, st, bold, false)
             }
-            N::Group(v) => self.seq(v, st),
-            N::Font(f, v) => self.seq(v, St { font: *f, ..st }),
-            N::Style(d, v) => self.seq(v, St { display: *d, ..st }),
-            N::Class(_, b) => self.node(b, st),
-            N::Text(s) => {
-                let mut b = self.text(s, St { font: 0, ..st }, matches!(st.font, 1 | 4), st.font == 5);
+            Node::Group(v) => self.seq(v, st),
+            Node::Font(f, v) => self.seq(v, MathStyle { font: *f, ..st }),
+            Node::Style(d, v) => self.seq(v, MathStyle { display: *d, ..st }),
+            Node::Class(_, b) => self.node(b, st),
+            Node::Text(s) => {
+                let mut b = self.text(s, MathStyle { font: 0, ..st }, matches!(st.font, 1 | 4), st.font == 5);
                 b.asc = b.asc.max(0.73 * st.size);
                 b
             }
-            N::Name(s, _) => self.text(s, St { font: 0, ..st }, false, false),
-            N::Space(e) => MBox { w: e * st.size, asc: 0.0, desc: 0.0, items: vec![] },
-            N::Frac { num, den, style, bar } => {
+            Node::Name(s, _) => self.text(s, MathStyle { font: 0, ..st }, false, false),
+            Node::Space(e) => MBox { w: e * st.size, asc: 0.0, desc: 0.0, items: vec![] },
+            Node::Frac { num, den, style, bar } => {
                 let big = style.unwrap_or(st.display);
-                let s2 = St { size: st.size * if big { 1.0 } else { 0.8 }, display: false, script: st.script || !big, ..st };
+                let s2 = MathStyle { size: st.size * if big { 1.0 } else { 0.8 }, display: false, script: st.script || !big, ..st };
                 let mut num = self.node(num, s2);
                 let mut den = self.node(den, s2);
                 let pad = 0.1 * st.size;
@@ -1115,13 +1115,13 @@ impl<'a> Lay<'a> {
                 }
                 out
             }
-            N::Sqrt(idx, body) => {
-                let b = self.node(body, St { display: false, ..st });
+            Node::Sqrt(idx, body) => {
+                let b = self.node(body, MathStyle { display: false, ..st });
                 let th = (0.055 * st.size).max(1.0);
                 let h = b.asc + b.desc + 0.15 * st.size;
                 let mut out = mbox();
                 if let Some(i) = idx {
-                    let mut ib = self.node(i, St { size: st.size * 0.6, display: false, script: true, ..st });
+                    let mut ib = self.node(i, MathStyle { size: st.size * 0.6, display: false, script: true, ..st });
                     shift(&mut ib, 0.0, -h * 0.55);
                     out.w = ib.w;
                     out.items.extend(ib.items);
@@ -1146,14 +1146,14 @@ impl<'a> Lay<'a> {
                 out.desc = bb.desc + 0.05 * st.size;
                 out
             }
-            N::Script { base, sup, sub } => {
+            Node::Script { base, sup, sub } => {
                 let lim = match &**base {
-                    N::BigOp(_, l) | N::Name(_, l) => *l,
-                    N::Accent(Acc::OverBrace | Acc::UnderBrace, _) => Lim::Always,
-                    _ => Lim::Side,
+                    Node::BigOp(_, l) | Node::Name(_, l) => *l,
+                    Node::Accent(Accent::OverBrace | Accent::UnderBrace, _) => Limits::Always,
+                    _ => Limits::Side,
                 };
                 let ss = Self::script(st);
-                if lim == Lim::Always || lim == Lim::Display && st.display {
+                if lim == Limits::Always || lim == Limits::Display && st.display {
                     let b = self.node(base, st);
                     let sp = sup.as_ref().map(|s| self.node(s, ss));
                     let sb = sub.as_ref().map(|s| self.node(s, ss));
@@ -1161,8 +1161,8 @@ impl<'a> Lay<'a> {
                 }
                 let mut b = self.node(base, st);
                 // The prime glyph is already raised, so primes alone keep full size on the baseline.
-                let primes = matches!(sup.as_deref(), Some(N::Sym(s, ..)) if s.chars().all(|c| c == '′'));
-                let mut sp = sup.as_ref().map(|s| self.node(s, if primes { St { script: true, ..st } } else { ss }));
+                let primes = matches!(sup.as_deref(), Some(Node::Sym(s, ..)) if s.chars().all(|c| c == '′'));
+                let mut sp = sup.as_ref().map(|s| self.node(s, if primes { MathStyle { script: true, ..st } } else { ss }));
                 let mut sb = sub.as_ref().map(|s| self.node(s, ss));
                 let up = if primes { 0.0 } else { (b.asc - 0.35 * ss.size).max(0.4 * st.size) };
                 let dn = 0.2 * st.size;
@@ -1194,9 +1194,9 @@ impl<'a> Lay<'a> {
                 }
                 b
             }
-            N::BigOp(sym, _) => {
+            Node::BigOp(sym, _) => {
                 let k = if st.display { if sym == "∫" { 1.6 } else { 1.35 } } else { 1.1 };
-                let s2 = St { size: st.size * k, ..st };
+                let s2 = MathStyle { size: st.size * k, ..st };
                 let mut b = self.text(sym, s2, false, false);
                 let drop = 0.25 * st.size + (s2.size - st.size) * 0.22;
                 shift(&mut b, 0.0, drop);
@@ -1205,7 +1205,7 @@ impl<'a> Lay<'a> {
                 b.w += 0.1 * st.size;
                 b
             }
-            N::Delim(l, r, body) => {
+            Node::Delim(l, r, body) => {
                 let b = self.seq(body, st);
                 let h = (b.asc + b.desc).max(st.size * 1.0);
                 let mut out = mbox();
@@ -1220,16 +1220,16 @@ impl<'a> Lay<'a> {
                 out.desc = out.desc.max(bot);
                 out
             }
-            N::Matrix(env, spec, rows) => self.matrix(env, spec, rows, st),
-            N::Accent(a, body) => self.accent(*a, body, st),
-            N::Stack { base, over, under } => {
+            Node::Matrix(env, spec, rows) => self.matrix(env, spec, rows, st),
+            Node::Accent(a, body) => self.accent(*a, body, st),
+            Node::Stack { base, over, under } => {
                 let b = self.node(base, st);
                 let ss = Self::script(st);
                 let sp = over.as_ref().map(|s| self.node(s, ss));
                 let sb = under.as_ref().map(|s| self.node(s, ss));
                 self.limits_box(b, sp, sb, st)
             }
-            N::XArrow { left, over, under } => {
+            Node::XArrow { left, over, under } => {
                 let sz = st.size;
                 let ss = Self::script(st);
                 let mut o = self.node(over, ss);
@@ -1255,7 +1255,7 @@ impl<'a> Lay<'a> {
                 }
                 out
             }
-            N::Logo(name) => {
+            Node::Logo(name) => {
                 // (letter, size, raise in em, kern before in em), after TeX's own logo macros
                 let parts: &[(&str, f32, f32, f32)] = match *name {
                     "LaTeX" => &[("L", 1.0, 0.0, 0.0), ("A", 0.75, -0.21, -0.32), ("T", 1.0, 0.0, -0.12), ("E", 1.0, 0.22, -0.14), ("X", 1.0, 0.0, -0.11)],
@@ -1265,7 +1265,7 @@ impl<'a> Lay<'a> {
                 let mut out = mbox();
                 for &(s, k, dy, kern) in parts {
                     out.w += kern * st.size;
-                    let t = self.text(s, St { size: st.size * k, font: 0, ..st }, false, false);
+                    let t = self.text(s, MathStyle { size: st.size * k, font: 0, ..st }, false, false);
                     append(&mut out, t, dy * st.size);
                 }
                 out
@@ -1273,7 +1273,7 @@ impl<'a> Lay<'a> {
         }
     }
 
-    fn accent(&mut self, a: Acc, body: &N, st: St) -> MBox {
+    fn accent(&mut self, a: Accent, body: &Node, st: MathStyle) -> MBox {
         let mut b = self.node(body, st);
         let sz = st.size;
         let th = (0.055 * sz).max(1.0);
@@ -1283,17 +1283,17 @@ impl<'a> Lay<'a> {
             None => (b.asc - 0.04 * sz).max(0.46 * sz),
         };
         // An italic letter leans right, so its accent does too.
-        let skew = if st.font == 255 && matches!(body, N::Sym(s, _, true) if s.chars().count() == 1) { 0.07 * sz } else { 0.0 };
+        let skew = if st.font == 255 && matches!(body, Node::Sym(s, _, true) if s.chars().count() == 1) { 0.07 * sz } else { 0.0 };
         let cx = b.w / 2.0 + skew;
         let bottom = -(ink + 0.08 * sz);
         let top = match a {
-            Acc::Hat | Acc::WideHat => {
-                let (aw, h) = if a == Acc::Hat { (0.42 * sz, 0.14 * sz) } else { ((b.w * 0.95).max(0.42 * sz), 0.18 * sz) };
+            Accent::Hat | Accent::WideHat => {
+                let (aw, h) = if a == Accent::Hat { (0.42 * sz, 0.14 * sz) } else { ((b.w * 0.95).max(0.42 * sz), 0.18 * sz) };
                 b.items.push(MItem::Path { pts: vec![(cx - aw / 2.0, bottom), (cx, bottom - h), (cx + aw / 2.0, bottom)], w: th });
                 bottom - h - th
             }
-            Acc::Tilde | Acc::WideTilde => {
-                let aw = if a == Acc::Tilde { 0.45 * sz } else { (b.w * 0.95).max(0.45 * sz) };
+            Accent::Tilde | Accent::WideTilde => {
+                let aw = if a == Accent::Tilde { 0.45 * sz } else { (b.w * 0.95).max(0.45 * sz) };
                 let h = 0.1 * sz;
                 let pts = (0..=16)
                     .map(|i| {
@@ -1304,34 +1304,34 @@ impl<'a> Lay<'a> {
                 b.items.push(MItem::Path { pts, w: th });
                 bottom - h - th
             }
-            Acc::Vec | Acc::ArrowR | Acc::ArrowL | Acc::ArrowLR => {
-                let (x0, x1) = if a == Acc::Vec { (cx - 0.22 * sz, cx + 0.22 * sz) } else { (0.0, b.w) };
+            Accent::Vec | Accent::ArrowR | Accent::ArrowL | Accent::ArrowLR => {
+                let (x0, x1) = if a == Accent::Vec { (cx - 0.22 * sz, cx + 0.22 * sz) } else { (0.0, b.w) };
                 let y = bottom - 0.1 * sz;
-                arrow(&mut b.items, x0, x1, y, matches!(a, Acc::ArrowL | Acc::ArrowLR), a != Acc::ArrowL, sz);
+                arrow(&mut b.items, x0, x1, y, matches!(a, Accent::ArrowL | Accent::ArrowLR), a != Accent::ArrowL, sz);
                 y - 0.12 * sz
             }
-            Acc::Dot | Acc::Ddot => {
+            Accent::Dot | Accent::Ddot => {
                 let d = 0.1 * sz;
-                let offs: &[f32] = if a == Acc::Dot { &[0.0] } else { &[-0.12, 0.12] };
+                let offs: &[f32] = if a == Accent::Dot { &[0.0] } else { &[-0.12, 0.12] };
                 for o in offs {
                     b.items.push(MItem::Rule { x: cx + o * sz - d / 2.0, y: bottom - d, w: d, h: d });
                 }
                 bottom - d
             }
-            Acc::Bar => {
+            Accent::Bar => {
                 let y = bottom - th;
-                let (x, w) = if matches!(body, N::Sym(s, _, _) if s.chars().count() == 1) { (cx - b.w * 0.4, b.w * 0.8) } else { (0.0, b.w) };
+                let (x, w) = if matches!(body, Node::Sym(s, _, _) if s.chars().count() == 1) { (cx - b.w * 0.4, b.w * 0.8) } else { (0.0, b.w) };
                 b.items.push(MItem::Rule { x, y, w, h: th });
                 y
             }
-            Acc::OverBrace => {
+            Accent::OverBrace => {
                 let tip = bottom - 0.25 * sz;
                 b.items.push(MItem::Path { pts: hbrace(0.0, b.w, bottom, tip), w: th });
                 tip - th
             }
-            Acc::Under | Acc::UnderBrace => {
+            Accent::Under | Accent::UnderBrace => {
                 let edge = b.desc + 0.08 * sz;
-                if a == Acc::Under {
+                if a == Accent::Under {
                     b.items.push(MItem::Rule { x: 0.0, y: edge, w: b.w, h: th });
                     b.desc = edge + th + 0.04 * sz;
                 } else {
@@ -1346,7 +1346,7 @@ impl<'a> Lay<'a> {
         b
     }
 
-    fn put_delim(&mut self, out: &mut MBox, ch: &str, big: bool, top: f32, bot: f32, st: St) {
+    fn put_delim(&mut self, out: &mut MBox, ch: &str, big: bool, top: f32, bot: f32, st: MathStyle) {
         if ch.is_empty() {
             return;
         }
@@ -1356,7 +1356,7 @@ impl<'a> Lay<'a> {
             return;
         }
         let fs = if big { ((bot - top) * 1.05 / 0.93).max(st.size) } else { st.size };
-        let f = FKey::new(fs, MATH);
+        let f = FontKey::new(fs, MATH);
         let w = self.fonts.measure(f, ch);
         let y = if big { f32::midpoint(top, bot) + 0.27 * fs } else { 0.0 };
         out.items.push(MItem::Text { s: ch.to_string(), f, x: out.w, y });
@@ -1364,7 +1364,7 @@ impl<'a> Lay<'a> {
     }
 
     /// `base` with `over` centered above it and `under` centered below.
-    fn limits_box(&mut self, base: MBox, over: Option<MBox>, under: Option<MBox>, st: St) -> MBox {
+    fn limits_box(&mut self, base: MBox, over: Option<MBox>, under: Option<MBox>, st: MathStyle) -> MBox {
         let (mut sp, mut sb) = (over, under);
         let mut w = base.w;
         for b in [&sp, &sb].into_iter().flatten() {
@@ -1396,8 +1396,8 @@ impl<'a> Lay<'a> {
         out
     }
 
-    fn matrix(&mut self, env: &str, spec: &str, rows: &[Vec<Vec<N>>], st: St) -> MBox {
-        let cs = St { display: false, ..st };
+    fn matrix(&mut self, env: &str, spec: &str, rows: &[Vec<Vec<Node>>], st: MathStyle) -> MBox {
+        let cs = MathStyle { display: false, ..st };
         let aligned = matches!(env, "aligned" | "align" | "align*" | "split" | "eqnarray" | "alignedat" | "alignat" | "alignat*");
         // The l, c and r letters of an array's column spec, outside any `{…}` (as in `p{2cm}` or `@{}`).
         let mut depth = 0;
@@ -1429,7 +1429,7 @@ impl<'a> Lay<'a> {
             for (c, cell) in r.iter().enumerate() {
                 // The left column of a pair starts with `{}`, so `&= b` spaces the `=` as a relation.
                 let b = if aligned && c % 2 == 1 {
-                    let mut v = vec![N::Group(vec![])];
+                    let mut v = vec![Node::Group(vec![])];
                     v.extend(cell.iter().cloned());
                     self.seq(&v, cs)
                 } else {
@@ -1499,8 +1499,8 @@ impl<'a> Lay<'a> {
 
 pub fn layout(fonts: &mut Fonts, tex: &str, size: f32, display: bool) -> MBox {
     let nodes = parse_all(tex);
-    let mut l = Lay { fonts };
-    let mut b = l.seq(&nodes, St { size, display, script: false, font: 255 });
+    let mut l = Layout { fonts };
+    let mut b = l.seq(&nodes, MathStyle { size, display, script: false, font: 255 });
     b.asc = b.asc.max(0.8 * size);
     b.desc = b.desc.max(0.25 * size);
     b

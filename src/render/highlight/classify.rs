@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
-use super::{Runs, Tok};
+use super::{Runs, TokenKind};
 
 const CAPTURES: &[(&str, &str)] = &[
     ("comment", "pl-c"),
@@ -172,29 +172,29 @@ pub fn block(info: &str, code: &str) -> Runs {
 }
 
 /// The token for a GitHub `pl-*` class.
-fn tok_of(class: &str) -> Tok {
+fn tok_of(class: &str) -> TokenKind {
     match class {
-        "pl-c" => Tok::Comment,
-        "pl-k" => Tok::Keyword,
-        "pl-ent" => Tok::Tag,
-        "pl-s" | "pl-pds" | "pl-sr" => Tok::Str,
-        "pl-s1" => Tok::Ident,
-        "pl-c1" => Tok::Number,
-        "pl-cce" => Tok::Escape,
-        "pl-en" | "pl-e" => Tok::Func,
-        "pl-v" => Tok::Var,
-        "pl-smi" | "pl-sc" => Tok::Import,
-        "pl-mi1" | "pl-mi2" => Tok::Added,
-        "pl-md" => Tok::Removed,
-        "pl-mh" | "pl-mdr" | "pl-ms" => Tok::Meta,
-        _ => Tok::Plain,
+        "pl-c" => TokenKind::Comment,
+        "pl-k" => TokenKind::Keyword,
+        "pl-ent" => TokenKind::Tag,
+        "pl-s" | "pl-pds" | "pl-sr" => TokenKind::Str,
+        "pl-s1" => TokenKind::Ident,
+        "pl-c1" => TokenKind::Number,
+        "pl-cce" => TokenKind::Escape,
+        "pl-en" | "pl-e" => TokenKind::Func,
+        "pl-v" => TokenKind::Var,
+        "pl-smi" | "pl-sc" => TokenKind::Import,
+        "pl-mi1" | "pl-mi2" => TokenKind::Added,
+        "pl-md" => TokenKind::Removed,
+        "pl-mh" | "pl-mdr" | "pl-ms" => TokenKind::Meta,
+        _ => TokenKind::Plain,
     }
 }
 
 /// Splits `code`-wide spans, in order, into per-line spans with offsets from each line's start. Merges
 /// neighbours of one token and drops plain text.
-fn by_line(code: &str, spans: Vec<(usize, usize, Tok)>) -> Runs {
-    let mut merged: Vec<(usize, usize, Tok)> = vec![];
+fn by_line(code: &str, spans: Vec<(usize, usize, TokenKind)>) -> Runs {
+    let mut merged: Vec<(usize, usize, TokenKind)> = vec![];
     for (s, e, t) in spans {
         match merged.last_mut() {
             Some(r) if r.1 == s && r.2 == t => r.1 = e,
@@ -204,7 +204,7 @@ fn by_line(code: &str, spans: Vec<(usize, usize, Tok)>) -> Runs {
     }
     let mut out = vec![];
     let mut line_start = 0;
-    let mut runs = merged.into_iter().filter(|r| r.2 != Tok::Plain).peekable();
+    let mut runs = merged.into_iter().filter(|r| r.2 != TokenKind::Plain).peekable();
     for line in code.split('\n') {
         let end = line_start + line.len();
         let mut cur = vec![];
@@ -296,14 +296,14 @@ mod tests {
     fn runs_are_per_line() {
         let runs = block("rust", "let s = \"<a>\"; // hi");
         assert_eq!(runs.len(), 1);
-        assert!(runs[0].iter().any(|r| r.2 == Tok::Comment) && runs[0].iter().any(|r| r.2 == Tok::Str), "{runs:?}");
+        assert!(runs[0].iter().any(|r| r.2 == TokenKind::Comment) && runs[0].iter().any(|r| r.2 == TokenKind::Str), "{runs:?}");
         // TextMate-only languages too, and a trailing newline gives an empty last line.
         let yaml = block("yaml", "a: 1\n# c\n");
         assert_eq!(yaml.len(), 3);
-        assert_eq!(yaml[1], [(0, 3, Tok::Comment)]);
+        assert_eq!(yaml[1], [(0, 3, TokenKind::Comment)]);
         // CRLF lines keep their offsets.
         let crlf = block("yaml", "a: 1\r\n# c\r\n");
-        assert_eq!((crlf[1][0].0, crlf[1][0].2), (0, Tok::Comment), "{crlf:?}");
+        assert_eq!((crlf[1][0].0, crlf[1][0].2), (0, TokenKind::Comment), "{crlf:?}");
         assert_eq!(block("nosuchlang", "x\ny"), [vec![], vec![]]);
     }
 }

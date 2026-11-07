@@ -9,7 +9,7 @@ mod classify;
 mod textmate;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tok {
+pub enum TokenKind {
     Plain,
     Keyword,
     Str,
@@ -32,7 +32,7 @@ pub enum Tok {
 }
 
 /// Per source line, `(start_byte, end_byte, token)` spans.
-pub type Runs = Vec<Vec<(usize, usize, Tok)>>;
+pub type Runs = Vec<Vec<(usize, usize, TokenKind)>>;
 type Job = (String, String, mpsc::Sender<(String, String, Runs)>);
 
 /// Highlight threads. A page rarely has more languages than this, and a fixed count keeps a file of made-up

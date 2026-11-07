@@ -81,10 +81,10 @@ pub struct Engine {
     width: Cell<f64>,
     pub scale: Cell<f64>,
     smooth: bool,
-    st: RefCell<St>,
+    st: RefCell<State>,
 }
 
-struct St {
+struct State {
     fonts: Fonts,
     th: Theme,
     doc: Option<Doc>,
@@ -128,7 +128,7 @@ fn clamp_view(o: f32, view: f32, content: f32) -> f32 {
 impl Engine {
     /// `smooth` turns font smoothing on for every snapshot.
     pub fn new(width: f64, scale: f64, smooth: bool) -> Engine {
-        let st = St {
+        let st = State {
             fonts: Fonts::new(),
             th: Theme::new(crate::theme::builtin("github-light").unwrap_or_else(|| unreachable!())),
             doc: None,
@@ -159,7 +159,7 @@ impl Engine {
         st.doc = Some(doc::parse(if src.trim().is_empty() { "*This file is empty.*" } else { src }));
         crate::trace::mark("parsed");
         st.images = Images::new(base.to_path_buf());
-        let St { doc, images, th, .. } = &mut *st;
+        let State { doc, images, th, .. } = &mut *st;
         if let Some(doc) = doc {
             let mut srcs = vec![];
             crate::render::images::sources(&doc.blocks, &mut srcs);
@@ -182,11 +182,11 @@ impl Engine {
         crate::trace::mark("laid out");
     }
 
-    fn relayout(&self, st: &mut St) {
+    fn relayout(&self, st: &mut State) {
         let Some(doc) = st.doc.take() else { return };
         let o = Opts { width: (self.width.get() * self.scale.get()) as f32, scale: self.scale.get() as f32, wrap_code: st.wrap, toggled: st.toggled.clone() };
         let before = st.page.diagrams.len();
-        let St { fonts, th, images, .. } = st;
+        let State { fonts, th, images, .. } = st;
         fonts.set_scale(o.scale);
         st.page = layout::layout(fonts, th, &o, &doc, images);
         st.doc = Some(doc);
@@ -270,13 +270,13 @@ impl Engine {
         let (top, bottom) = (y as f32 * s, (y + h) as f32 * s);
         let page = &st.page;
         let items: Vec<u32> = page.items.iter().enumerate().filter(|(_, it)| it.y <= bottom && it.y + it.h >= top - 2.0).map(|(i, _)| i as u32).collect();
-        let St { fonts, page, th, ov, .. } = &mut *st;
+        let State { fonts, page, th, ov, .. } = &mut *st;
         let cx = Ctx { page, th, scale: s, ov, smooth: self.smooth };
         raster::render_into(fonts, &cx, top, height, width, &items, scale / self.scale.get(), dst);
         Some(Snapshot { width, height, rgba })
     }
 
-    fn overlay(&self, st: &mut St) {
+    fn overlay(&self, st: &mut State) {
         let mut marks = vec![];
         for (i, &(a, b)) in st.matches.clone().iter().enumerate() {
             for r in match_rects(st, a, b) {
@@ -292,11 +292,11 @@ impl Engine {
         [f64::from(r.0) / s, f64::from(r.1) / s, f64::from(r.2) / s, f64::from(r.3) / s]
     }
 
-    fn rects_of(&self, st: &mut St, a: usize, b: usize) -> Vec<Rect> {
+    fn rects_of(&self, st: &mut State, a: usize, b: usize) -> Vec<Rect> {
         match_rects(st, a, b).into_iter().map(|r| self.css((r.0 + dx(st, r.4), r.1, r.2, r.3))).collect()
     }
 
-    fn sel_rects(&self, st: &mut St) -> Vec<Rect> {
+    fn sel_rects(&self, st: &mut State) -> Vec<Rect> {
         st.sel.map(|(a, b)| self.rects_of(st, a, b)).unwrap_or_default()
     }
 
@@ -327,7 +327,7 @@ impl Engine {
     }
 
     /// Draws diagram `i` at its view, or at the fit size without one, and places its zoom bar. Returns its frame.
-    fn show(&self, st: &mut St, i: usize) -> Option<Rect> {
+    fn show(&self, st: &mut State, i: usize) -> Option<Rect> {
         let d = st.page.diagrams.get(i)?;
         let zb = d.zoom.as_ref()?;
         let frame = zb.frame;
@@ -346,7 +346,7 @@ impl Engine {
 
     /// Zooms diagram `i` to `z` device pixels per SVG unit, from the fit size, where the view goes,
     /// to three CSS pixels per unit.
-    fn zoom_to(&self, st: &mut St, i: usize, z: f32) -> Option<Rect> {
+    fn zoom_to(&self, st: &mut State, i: usize, z: f32) -> Option<Rect> {
         let d = st.page.diagrams.get(i)?;
         let frame = d.zoom.as_ref()?.frame;
         let (fit, size) = (d.fit, d.tree.size());
@@ -367,7 +367,7 @@ impl Engine {
     }
 
     /// Moves zoomed diagram `i` by device pixels, as a drag does. Returns its frame when it moved.
-    fn pan_by(&self, st: &mut St, i: usize, dx: f32, dy: f32) -> Option<Rect> {
+    fn pan_by(&self, st: &mut State, i: usize, dx: f32, dy: f32) -> Option<Rect> {
         let (d, v) = (st.page.diagrams.get(i)?, st.views.get(&i).copied()?);
         let (zb, size) = (d.zoom.as_ref()?, d.tree.size());
         let x = clamp_view(v.x - dx / v.z, zb.frame.2 / v.z, size.width());
@@ -380,7 +380,7 @@ impl Engine {
     }
 
     /// The zoomed diagram whose frame holds the point, off its buttons.
-    fn zoomed_at(st: &St, x: f32, y: f32) -> Option<usize> {
+    fn zoomed_at(st: &State, x: f32, y: f32) -> Option<usize> {
         if st.page.buttons.iter().any(|b| b.hit(x, y)) {
             return None;
         }
@@ -399,7 +399,7 @@ impl Engine {
         vec![self.css((0.0, e.y, st.page.w, e.h))]
     }
 
-    fn btn_rect(&self, st: &St, b: usize) -> Rect {
+    fn btn_rect(&self, st: &State, b: usize) -> Rect {
         let s = self.scale.get() as f32;
         let b = &st.page.buttons[b];
         self.css((b.x - 4.0 * s, b.y - 4.0 * s, b.w + 8.0 * s, b.h + 8.0 * s))
@@ -446,7 +446,7 @@ impl Engine {
 
     /// Scrolls the wide block that holds match `i` sideways until the match shows. Returns the block's rect
     /// when it moved.
-    fn reveal(&self, st: &mut St, i: usize) -> Option<Rect> {
+    fn reveal(&self, st: &mut State, i: usize) -> Option<Rect> {
         let (a, b) = st.matches.get(i).copied()?;
         let r = match_rects(st, a, b).into_iter().next()?;
         let k = usize::from(r.4).checked_sub(1)?;
@@ -679,13 +679,13 @@ impl Engine {
         Press::Nothing
     }
 
-    fn region(&self, st: &St, i: usize) -> Rect {
+    fn region(&self, st: &State, i: usize) -> Rect {
         let h = &st.page.hscroll[i];
         // The block's box holds its scroll bar too.
         self.css((h.x, h.y, h.w, h.h))
     }
 
-    fn shift(&self, st: &mut St, i: usize, d: f32) -> bool {
+    fn shift(&self, st: &mut State, i: usize, d: f32) -> bool {
         let max = st.page.hscroll[i].max;
         let n = (st.ov.hoff[i] + d).clamp(0.0, max);
         let moved = (n - st.ov.hoff[i]).abs() > 0.01;
@@ -697,11 +697,11 @@ impl Engine {
     }
 
     /// The track of block `i`'s scroll bar, its left end and width, and the thumb's width, in page pixels.
-    fn thumb(&self, st: &St, i: usize) -> (f32, f32) {
+    fn thumb(&self, st: &State, i: usize) -> (f32, f32) {
         st.page.hscroll[i].thumb(st.ov.hoff[i], self.scale.get() as f32)
     }
 
-    fn bar_set(&self, st: &mut St, i: usize, x: f32) {
+    fn bar_set(&self, st: &mut State, i: usize, x: f32) {
         let (tx, tw, thumb) = st.page.hscroll[i].track(self.scale.get() as f32);
         let r = ((x - tx - thumb / 2.0) / (tw - thumb).max(1.0)).clamp(0.0, 1.0);
         st.ov.hoff[i] = r * st.page.hscroll[i].max;
@@ -709,18 +709,18 @@ impl Engine {
     }
 }
 
-fn dx(st: &St, clip: u16) -> f32 {
+fn dx(st: &State, clip: u16) -> f32 {
     if clip > 0 { -st.ov.hoff.get(clip as usize - 1).copied().unwrap_or(0.0) } else { 0.0 }
 }
 
-fn in_clip(st: &St, clip: u16, x: f32, y: f32) -> bool {
+fn in_clip(st: &State, clip: u16, x: f32, y: f32) -> bool {
     clip == 0 || {
         let hs = &st.page.hscroll[clip as usize - 1];
         x >= hs.x && x <= hs.x + hs.w && y >= hs.y && y <= hs.y + hs.h
     }
 }
 
-fn link_at(st: &St, x: f32, y: f32) -> Option<u32> {
+fn link_at(st: &State, x: f32, y: f32) -> Option<u32> {
     st.page
         .links
         .iter()
@@ -731,7 +731,7 @@ fn link_at(st: &St, x: f32, y: f32) -> Option<u32> {
         .map(|l| l.link)
 }
 
-fn pointer(st: &St, x: f32, y: f32) -> Pointer {
+fn pointer(st: &State, x: f32, y: f32) -> Pointer {
     let p = &st.page;
     let on = |bx: f32, by: f32, bw: f32, bh: f32| x >= bx && x <= bx + bw && y >= by && y <= by + bh;
     if p.buttons.iter().any(|b| b.hit(x, y)) || link_at(st, x, y).is_some() || p.toggles.iter().any(|t| on(t.0, t.1, t.2, t.3)) {
@@ -760,7 +760,7 @@ fn build_runs(page: &Page) -> Vec<(usize, usize, u32)> {
     v
 }
 
-fn match_rects(st: &mut St, a: usize, b: usize) -> Vec<(f32, f32, f32, f32, u16)> {
+fn match_rects(st: &mut State, a: usize, b: usize) -> Vec<(f32, f32, f32, f32, u16)> {
     let mut out: Vec<(f32, f32, f32, f32, u16)> = vec![];
     let start = st.runs.partition_point(|r| r.0 + r.1 <= a);
     for ri in start..st.runs.len() {
@@ -795,7 +795,7 @@ fn match_rects(st: &mut St, a: usize, b: usize) -> Vec<(f32, f32, f32, f32, u16)
     out
 }
 
-fn hit_char(st: &mut St, px: f32, py: f32) -> Option<usize> {
+fn hit_char(st: &mut State, px: f32, py: f32) -> Option<usize> {
     let mut best: Option<(f32, usize)> = None;
     for (ri, &(_, _, it)) in st.runs.iter().enumerate() {
         let item = &st.page.items[it as usize];

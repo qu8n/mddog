@@ -1,5 +1,5 @@
 //! The laid-out page: a display list in device pixels plus the data the viewer needs.
-use crate::render::text::FKey;
+use crate::render::text::FontKey;
 use crate::render::theme::Rgb;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -23,7 +23,7 @@ pub enum Kind {
     },
     Text {
         s: String,
-        f: FKey,
+        f: FontKey,
         color: Rgb,
         under: bool,
         strike: bool,

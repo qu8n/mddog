@@ -1,12 +1,12 @@
 //! Block and inline layout into a display list. All sizes are device pixels.
 use crate::render::doc::*;
-use crate::render::highlight::{Tok, highlight};
+use crate::render::highlight::{TokenKind, highlight};
 use crate::render::icons::{self, Icon};
-use crate::render::images::{Images, Img, Status};
+use crate::render::images::{Image, Images, Status};
 use crate::render::math::{self, MItem};
 use crate::render::page::*;
 use crate::render::svg::{self, render_svg, render_view};
-use crate::render::text::{BOLD, FKey, Fonts, ITALIC, MONO, SEMIBOLD, TABULAR, WEIGHT_MASK, weight};
+use crate::render::text::{BOLD, FontKey, Fonts, ITALIC, MONO, SEMIBOLD, TABULAR, WEIGHT_MASK, weight};
 use crate::render::theme::{Look, Rgb, Theme, mix};
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -22,7 +22,7 @@ pub struct Opts {
 }
 
 #[derive(Clone)]
-struct Tc {
+struct TextStyle {
     size: f32,
     color: Rgb,
     bits: u16,
@@ -33,7 +33,7 @@ struct Tc {
 }
 
 #[derive(Clone)]
-enum AK {
+enum AtomKind {
     Word(String),
     Space,
     Hard,
@@ -45,9 +45,9 @@ enum AK {
 
 #[derive(Clone)]
 struct Atom {
-    k: AK,
+    k: AtomKind,
     w: f32,
-    f: FKey,
+    f: FontKey,
     color: Rgb,
     under: bool,
     strike: bool,
@@ -250,8 +250,8 @@ impl<'a> Layouter<'a> {
         }
     }
 
-    fn base_tc(&self) -> Tc {
-        Tc { size: self.fsize * self.s, color: self.ink.unwrap_or(self.th.text), bits: 0, lh: self.th.line_height, align: self.align, track: 0.0 }
+    fn base_tc(&self) -> TextStyle {
+        TextStyle { size: self.fsize * self.s, color: self.ink.unwrap_or(self.th.text), bits: 0, lh: self.th.line_height, align: self.align, track: 0.0 }
     }
 
     fn block(&mut self, b: &Block, x: f32, w: f32, y: &mut f32, tight: bool) {
@@ -275,7 +275,8 @@ impl<'a> Layouter<'a> {
                 let lv = (*l as usize - 1).min(5);
                 let em = self.th.heading_scale[lv];
                 let color = if *l == 6 { self.th.heading_6 } else { self.th.heading };
-                let tc = Tc { size: 16.0 * s * em, color, bits: weight(self.th.heading_weight[lv]), lh: self.th.heading_line_height[lv], align: self.align, track: self.th.heading_tracking[lv] };
+                let tc =
+                    TextStyle { size: 16.0 * s * em, color, bits: weight(self.th.heading_weight[lv]), lh: self.th.heading_line_height[lv], align: self.align, track: self.th.heading_tracking[lv] };
                 self.page.anchors.entry(id.clone()).or_insert(*y);
                 let y0 = *y;
                 self.inlines(v, x, w, y, &tc);
@@ -322,7 +323,7 @@ impl<'a> Layouter<'a> {
             Block::Details { summary, open, body, id } => {
                 let is_open = *open != self.o.toggled.contains(id);
                 let obs = self.th.look == Look::Obsidian;
-                let tc = Tc { size: 16.0 * s, color: self.th.text, bits: if self.th.summary_bold { BOLD } else { 0 }, lh: 1.5, align: Align::Left, track: 0.0 };
+                let tc = TextStyle { size: 16.0 * s, color: self.th.text, bits: if self.th.summary_bold { BOLD } else { 0 }, lh: 1.5, align: Align::Left, track: 0.0 };
                 let y0 = *y;
                 let ind = (if obs { 17.0 } else { 20.0 }) * s;
                 let c = (0xff000000u32) | self.th.text;
@@ -341,7 +342,7 @@ impl<'a> Layouter<'a> {
                 self.inlines(summary, x + ind, w - ind, y, &tc);
                 if summary.is_empty() {
                     let tc2 = tc.clone();
-                    self.inlines(&[Inl::Text("Details".into(), Sty::default())], x + ind, w - ind, y, &tc2);
+                    self.inlines(&[Inline::Text("Details".into(), Marks::default())], x + ind, w - ind, y, &tc2);
                 }
                 self.page.toggles.push((x, y0, w, *y - y0, *id));
                 if is_open && !body.is_empty() {
@@ -371,10 +372,10 @@ impl<'a> Layouter<'a> {
                         self.page.urls.len() as u32
                     };
                     if let Some(Block::Para(p) | Block::Text(p)) = bl.last_mut() {
-                        p.push(Inl::Text(" ↩".into(), Sty { link: id, ..Sty::default() }));
+                        p.push(Inline::Text(" ↩".into(), Marks { link: id, ..Marks::default() }));
                     }
                     self.page.anchors.entry(format!("{NOTE}{label}")).or_insert(*y);
-                    let item = LItem { task: None, blocks: bl };
+                    let item = ListItem { task: None, blocks: bl };
                     self.list(Some(*n as u64), &[item], true, x, w, y);
                     *y += self.th.footnote_gap * s;
                 }
@@ -415,23 +416,23 @@ impl<'a> Layouter<'a> {
         let r = 8.0 * s;
         if self.th.look == Look::Obsidian {
             // Obsidian's title: the octicon, 4 px, then 600-weight text on a 1.3 line, icon centered on it.
-            let tc = Tc { size: 16.0 * s, color: col, bits: SEMIBOLD, lh: 1.3, align: Align::Left, track: 0.0 };
+            let tc = TextStyle { size: 16.0 * s, color: col, bits: SEMIBOLD, lh: 1.3, align: Align::Left, track: 0.0 };
             let cy = *y + 0.65 * tc.size;
             if let Some(bmp) = icons::bitmap(Icon::Alert(k), col, (2.0 * r).round() as u32) {
                 self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Img(bmp));
             }
             let tx = x + ind + 2.0 * r + 4.0 * s;
-            self.inlines(&[Inl::Text(title.into(), Sty::default())], tx, w - ind - 2.0 * r - 4.0 * s, y, &tc);
+            self.inlines(&[Inline::Text(title.into(), Marks::default())], tx, w - ind - 2.0 * r - 4.0 * s, y, &tc);
         } else {
             let cy = *y + 8.0 * s;
             self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Rect { fill: 0, stroke: Some((1.5 * s, 0xff000000 | col)), radius: r });
-            let gf = FKey::new(11.0 * s, BOLD);
+            let gf = FontKey::new(11.0 * s, BOLD);
             let gw = self.fonts.measure(gf, glyph);
             let (ga, gd) = self.fonts.ascent_descent(gf);
             self.push(x + ind + r - gw / 2.0, cy - f32::midpoint(ga, gd), gw, ga + gd, Kind::Text { s: glyph.into(), f: gf, color: col, under: false, strike: false, asc: ga, tx: NO_TEXT });
-            let tc = Tc { size: 16.0 * s, color: col, bits: BOLD, lh: 1.0, align: Align::Left, track: 0.0 };
+            let tc = TextStyle { size: 16.0 * s, color: col, bits: BOLD, lh: 1.0, align: Align::Left, track: 0.0 };
             let tx = x + ind + 2.0 * r + 8.0 * s;
-            self.inlines(&[Inl::Text(title.into(), Sty::default())], tx, w - ind - 2.0 * r - 8.0 * s, y, &tc);
+            self.inlines(&[Inline::Text(title.into(), Marks::default())], tx, w - ind - 2.0 * r - 8.0 * s, y, &tc);
         }
         *y += 16.0 * s;
         self.nl();
@@ -442,7 +443,7 @@ impl<'a> Layouter<'a> {
         }
     }
 
-    fn list(&mut self, start: Option<u64>, items: &[LItem], tight: bool, x: f32, w: f32, y: &mut f32) {
+    fn list(&mut self, start: Option<u64>, items: &[ListItem], tight: bool, x: f32, w: f32, y: &mut f32) {
         let s = self.s;
         let th = self.th;
         let ind = match th.footnote_indent {
@@ -461,7 +462,7 @@ impl<'a> Layouter<'a> {
             *y += self.fsize * th.item_pad * s;
             let y0 = *y;
             let tc = self.base_tc();
-            let (asc, desc) = self.fonts.ascent_descent(FKey::new(tc.size, 0));
+            let (asc, desc) = self.fonts.ascent_descent(FontKey::new(tc.size, 0));
             let lh = tc.size * tc.lh;
             let base = y0 + (lh - (asc + desc)) / 2.0 + asc;
             let cx = x + ind;
@@ -497,7 +498,7 @@ impl<'a> Layouter<'a> {
                         2 => format!("{}.", roman(n)),
                         _ => format!("{}.", alpha(n)),
                     };
-                    let f = FKey::new(tc.size, if th.tabular_numbers { TABULAR } else { 0 });
+                    let f = FontKey::new(tc.size, if th.tabular_numbers { TABULAR } else { 0 });
                     let lw = self.fonts.measure(f, &label);
                     let gap = self.fonts.measure(f, " ");
                     self.push(cx - gap - lw, base - asc, lw, asc + desc, Kind::Text { s: label, f, color: th.list_marker, under: false, strike: false, asc, tx: NO_TEXT });
@@ -551,7 +552,7 @@ impl<'a> Layouter<'a> {
         let s = self.s;
         let [pad_y, pad] = self.th.pre_padding.map(|v| v * s);
         let size = 16.0 * self.th.code_size * s;
-        let f = FKey::new(size, MONO);
+        let f = FontKey::new(size, MONO);
         let (asc, desc) = self.fonts.ascent_descent(f);
         let adv = self.fonts.measure(f, "MMMMMMMMMM") / 10.0;
         let lh = size * self.th.code_line_height;
@@ -594,10 +595,10 @@ impl<'a> Layouter<'a> {
         let is_diff = matches!(lang.to_ascii_lowercase().as_str(), "diff" | "patch");
         for (ri, (li, _, _)) in rows.iter().enumerate() {
             if is_diff {
-                let t = hl[*li].first().map(|t| t.2).unwrap_or(Tok::Plain);
+                let t = hl[*li].first().map(|t| t.2).unwrap_or(TokenKind::Plain);
                 let bg = match t {
-                    Tok::Added => Some(self.th.diff_add_bg),
-                    Tok::Removed => Some(self.th.diff_del_bg),
+                    TokenKind::Added => Some(self.th.diff_add_bg),
+                    TokenKind::Removed => Some(self.th.diff_del_bg),
                     _ => None,
                 };
                 if let Some(c) = bg {
@@ -612,19 +613,19 @@ impl<'a> Layouter<'a> {
             let base = top + (lh - (asc + desc)) / 2.0;
             let mut col = 0usize;
             let mut cursor = *bs;
-            let mut spans: Vec<(usize, usize, Tok)> = vec![];
+            let mut spans: Vec<(usize, usize, TokenKind)> = vec![];
             for &(a, b, t) in &hl[*li] {
                 let (a, b) = (a.max(*bs), b.min(*be));
                 if a < b {
                     if a > cursor {
-                        spans.push((cursor, a, Tok::Plain));
+                        spans.push((cursor, a, TokenKind::Plain));
                     }
                     spans.push((a, b, t));
                     cursor = b;
                 }
             }
             if cursor < *be {
-                spans.push((cursor, *be, Tok::Plain));
+                spans.push((cursor, *be, TokenKind::Plain));
             }
             for (a, b, t) in spans {
                 let seg = &line[a..b];
@@ -725,7 +726,7 @@ impl<'a> Layouter<'a> {
 
     // ---------- tables ----------
 
-    fn table(&mut self, aligns: &[Align], head: &[Vec<Inl>], rows: &[Vec<Vec<Inl>>], x: f32, w: f32, y: &mut f32) {
+    fn table(&mut self, aligns: &[Align], head: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>], x: f32, w: f32, y: &mut f32) {
         let s = self.s;
         let ncol = head.len().max(rows.iter().map(std::vec::Vec::len).max().unwrap_or(0));
         if ncol == 0 {
@@ -741,7 +742,7 @@ impl<'a> Layouter<'a> {
         let mut maxw = vec![0f32; ncol];
         // Images in cells cap at this width while measuring; the cell layout sets its own later.
         self.cur_w = w;
-        let mut measure_row = |me: &mut Self, r: &[Vec<Inl>], tc: &Tc| {
+        let mut measure_row = |me: &mut Self, r: &[Vec<Inline>], tc: &TextStyle| {
             for (c, cell) in r.iter().enumerate().take(ncol) {
                 let atoms = me.atoms(cell, tc);
                 let (mn, mx) = me.atom_extent(&atoms);
@@ -784,7 +785,7 @@ impl<'a> Layouter<'a> {
             let mut rh = 0f32;
             let mut cx = x;
             for (c, &cw) in colw.iter().enumerate() {
-                let cell: &[Inl] = cells.get(c).map(|v| &v[..]).unwrap_or(&[]);
+                let cell: &[Inline] = cells.get(c).map(|v| &v[..]).unwrap_or(&[]);
                 let mut ty = cy + pady;
                 let mut t2 = tc.clone();
                 t2.align = aligns.get(c).copied().unwrap_or_default();
@@ -823,13 +824,13 @@ impl<'a> Layouter<'a> {
         let (mut mn, mut mx, mut cur) = (0f32, 0f32, 0f32);
         for a in atoms {
             match a.k {
-                AK::Hard => {
+                AtomKind::Hard => {
                     mx = mx.max(cur);
                     cur = 0.0;
                 }
                 _ => {
                     cur += a.w;
-                    if !matches!(a.k, AK::Space) {
+                    if !matches!(a.k, AtomKind::Space) {
                         mn = mn.max(a.w);
                     }
                 }
@@ -840,17 +841,17 @@ impl<'a> Layouter<'a> {
 
     // ---------- inlines ----------
 
-    fn atoms(&mut self, inl: &[Inl], tc: &Tc) -> Vec<Atom> {
+    fn atoms(&mut self, inl: &[Inline], tc: &TextStyle) -> Vec<Atom> {
         let mut out: Vec<Atom> = vec![];
         let th = self.th;
         // The link being read, where its atoms end, and whether it holds an image.
         let mut run: Option<(u32, usize, bool)> = None;
         for i in inl {
             let link = match i {
-                Inl::Text(_, st) | Inl::Math(_, st) => Some(st.link),
-                Inl::Img { link, .. } => Some(*link),
-                Inl::FootRef(..) => Some(0),
-                Inl::Soft | Inl::Hard => None,
+                Inline::Text(_, st) | Inline::Math(_, st) => Some(st.link),
+                Inline::Img { link, .. } => Some(*link),
+                Inline::FootRef(..) => Some(0),
+                Inline::Soft | Inline::Hard => None,
             };
             if let Some(l) = link
                 && run.is_some_and(|(r, _, _)| r != l)
@@ -858,33 +859,33 @@ impl<'a> Layouter<'a> {
                 self.external_arrow(run.take(), tc, &mut out);
             }
             match i {
-                Inl::Text(t, st) => self.text_atoms(t, st, tc, &mut out),
-                Inl::Soft => {
-                    let f = FKey::new(tc.size, tc.bits).tracked(tc.track);
+                Inline::Text(t, st) => self.text_atoms(t, st, tc, &mut out),
+                Inline::Soft => {
+                    let f = FontKey::new(tc.size, tc.bits).tracked(tc.track);
                     let w = self.fonts.measure(f, " ");
-                    out.push(Atom { k: AK::Space, w, f, color: tc.color, under: false, strike: false, link: 0, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
+                    out.push(Atom { k: AtomKind::Space, w, f, color: tc.color, under: false, strike: false, link: 0, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
                 }
-                Inl::Hard => {
-                    let f = FKey::new(tc.size, tc.bits);
-                    out.push(Atom { k: AK::Hard, w: 0.0, f, color: tc.color, under: false, strike: false, link: 0, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
+                Inline::Hard => {
+                    let f = FontKey::new(tc.size, tc.bits);
+                    out.push(Atom { k: AtomKind::Hard, w: 0.0, f, color: tc.color, under: false, strike: false, link: 0, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
                 }
-                Inl::FootRef(n, label) => {
+                Inline::FootRef(n, label) => {
                     self.page.urls.push(format!("#{NOTE}{label}"));
                     let link = self.page.urls.len() as u32;
-                    let sty = Sty { sup: true, link, ..Sty::default() };
+                    let sty = Marks { sup: true, link, ..Marks::default() };
                     // GitHub brackets the number.
                     self.text_atoms(&format!("[{n}]"), &sty, tc, &mut out);
                 }
-                Inl::Math(tex, st) => {
+                Inline::Math(tex, st) => {
                     let (tex, display) = match tex.strip_prefix("$$").and_then(|t| t.strip_suffix("$$")) {
                         Some(t) => (t, true),
                         None => (tex.strip_prefix('$').and_then(|t| t.strip_suffix('$')).unwrap_or(tex), false),
                     };
                     let mb = math::layout(self.fonts, tex, tc.size, display);
-                    let f = FKey::new(tc.size, tc.bits);
+                    let f = FontKey::new(tc.size, tc.bits);
                     let (w, up, down) = (mb.w, mb.asc, mb.desc);
                     out.push(Atom {
-                        k: AK::Math(Rc::new(mb)),
+                        k: AtomKind::Math(Rc::new(mb)),
                         w,
                         f,
                         color: if st.link > 0 { th.link } else { tc.color },
@@ -899,7 +900,7 @@ impl<'a> Layouter<'a> {
                         down,
                     });
                 }
-                Inl::Img { src, alt, w, link } => {
+                Inline::Img { src, alt, w, link } => {
                     let wanted = &mut self.page.wanted;
                     let drawn = match self.images.get(src, wanted) {
                         Status::Ready(img) => {
@@ -912,24 +913,24 @@ impl<'a> Layouter<'a> {
                                 dh *= maxw / dw;
                                 dw = maxw;
                             }
-                            if matches!(img, Img::Svg(_)) {
+                            if matches!(img, Image::Svg(_)) {
                                 (dw, dh) = svg::fit(dw, dh);
                             }
                             let bmp = match &img {
-                                Img::Raster(b) => Some(b.clone()),
-                                Img::Svg(t) => render_svg(t, dw.round() as u32, dh.round() as u32).map(Rc::new),
+                                Image::Raster(b) => Some(b.clone()),
+                                Image::Svg(t) => render_svg(t, dw.round() as u32, dh.round() as u32).map(Rc::new),
                             };
                             bmp.map(|b| (b, dw, dh))
                         }
                         Status::Pending | Status::Failed => None,
                     };
                     if let Some((bmp, dw, dh)) = drawn {
-                        let f = FKey::new(tc.size, tc.bits);
-                        out.push(Atom { k: AK::Img(bmp), w: dw, f, color: tc.color, under: false, strike: false, link: *link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: dh, down: 0.0 });
+                        let f = FontKey::new(tc.size, tc.bits);
+                        out.push(Atom { k: AtomKind::Img(bmp), w: dw, f, color: tc.color, under: false, strike: false, link: *link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: dh, down: 0.0 });
                     } else {
                         // Loading, failed, or an SVG that would not draw: the alt text in its place.
                         let t = if alt.is_empty() { "[image]".to_string() } else { alt.clone() };
-                        let sty = Sty { italic: true, link: *link, ..Sty::default() };
+                        let sty = Marks { italic: true, link: *link, ..Marks::default() };
                         let mut t2 = tc.clone();
                         t2.color = th.fg_muted;
                         self.text_atoms(&t, &sty, &t2, &mut out);
@@ -937,7 +938,7 @@ impl<'a> Layouter<'a> {
                 }
             }
             if let Some(l) = link.filter(|l| *l > 0) {
-                let img = matches!(i, Inl::Img { .. }) || run.is_some_and(|r| r.2);
+                let img = matches!(i, Inline::Img { .. }) || run.is_some_and(|r| r.2);
                 run = Some((l, out.len(), img));
             }
         }
@@ -947,18 +948,18 @@ impl<'a> Layouter<'a> {
 
     /// Obsidian's arrow after a link that leaves the page, placed where the link's atoms end. A link around an
     /// image gets none.
-    fn external_arrow(&mut self, run: Option<(u32, usize, bool)>, tc: &Tc, out: &mut Vec<Atom>) {
+    fn external_arrow(&mut self, run: Option<(u32, usize, bool)>, tc: &TextStyle, out: &mut Vec<Atom>) {
         let (Some(color), Some((link, at, false))) = (self.th.link_external, run) else { return };
         let url = self.page.urls.get(link as usize - 1).map_or("", String::as_str);
         if !external(url) {
             return;
         }
-        let f = out.get(at.wrapping_sub(1)).map_or(FKey::new(tc.size, tc.bits), |a| a.f);
+        let f = out.get(at.wrapping_sub(1)).map_or(FontKey::new(tc.size, tc.bits), |a| a.f);
         let w = 0.9 * f.px();
-        out.insert(at, Atom { k: AK::Ext, w, f, color, under: false, strike: false, link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
+        out.insert(at, Atom { k: AtomKind::Ext, w, f, color, under: false, strike: false, link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
     }
 
-    fn text_atoms(&mut self, t: &str, st: &Sty, tc: &Tc, out: &mut Vec<Atom>) {
+    fn text_atoms(&mut self, t: &str, st: &Marks, tc: &TextStyle, out: &mut Vec<Atom>) {
         let th = self.th;
         let mut bits = tc.bits;
         // Strong text is 600 everywhere, a heavier heading's too, as GitHub and Obsidian set it.
@@ -977,7 +978,7 @@ impl<'a> Layouter<'a> {
         if st.sub || st.sup {
             size *= 0.75;
         }
-        let f = FKey::new(size, bits).tracked(tc.track);
+        let f = FontKey::new(size, bits).tracked(tc.track);
         let shift = if st.sup {
             -0.4 * tc.size
         } else if st.sub {
@@ -1013,14 +1014,14 @@ impl<'a> Layouter<'a> {
                 return;
             }
             let w = me.fonts.measure(f, word);
-            out.push(Atom { k: AK::Word(std::mem::take(word)), w, f, color, under, strike, link: st.link, bg, ox: 0.0, shift, cjk, up: 0.0, down: 0.0 });
+            out.push(Atom { k: AtomKind::Word(std::mem::take(word)), w, f, color, under, strike, link: st.link, bg, ox: 0.0, shift, cjk, up: 0.0, down: 0.0 });
         };
         let sp_w = self.fonts.measure(f, " ");
         for c in t.chars() {
             if c.is_whitespace() && c != '\u{a0}' {
                 push_word(self, &mut word, out, false);
-                if !matches!(out.last().map(|a| &a.k), Some(AK::Space)) || out.len() == first_idx {
-                    out.push(Atom { k: AK::Space, w: sp_w, f, color, under, strike, link: st.link, bg, ox: 0.0, shift, cjk: false, up: 0.0, down: 0.0 });
+                if !matches!(out.last().map(|a| &a.k), Some(AtomKind::Space)) || out.len() == first_idx {
+                    out.push(Atom { k: AtomKind::Space, w: sp_w, f, color, under, strike, link: st.link, bg, ox: 0.0, shift, cjk: false, up: 0.0, down: 0.0 });
                 }
             } else if is_cjk(c) {
                 push_word(self, &mut word, out, false);
@@ -1034,23 +1035,23 @@ impl<'a> Layouter<'a> {
         if let Some(em) = bg.side_pad(self.th) {
             let pad_l = em * size;
             let pad_r = pad_l;
-            if let Some(a) = out[first_idx..].iter_mut().find(|a| matches!(a.k, AK::Word(_))) {
+            if let Some(a) = out[first_idx..].iter_mut().find(|a| matches!(a.k, AtomKind::Word(_))) {
                 a.ox = pad_l;
                 a.w += pad_l;
             }
-            if let Some(a) = out[first_idx..].iter_mut().rev().find(|a| matches!(a.k, AK::Word(_))) {
+            if let Some(a) = out[first_idx..].iter_mut().rev().find(|a| matches!(a.k, AtomKind::Word(_))) {
                 a.w += pad_r;
             }
         }
     }
 
-    fn inlines(&mut self, inl: &[Inl], x: f32, w: f32, y: &mut f32, tc: &Tc) {
+    fn inlines(&mut self, inl: &[Inline], x: f32, w: f32, y: &mut f32, tc: &TextStyle) {
         self.cur_w = w;
         let atoms = self.atoms(inl, tc);
         self.flow(atoms, x, w, y, tc);
     }
 
-    fn flow(&mut self, atoms: Vec<Atom>, x: f32, w: f32, y: &mut f32, tc: &Tc) {
+    fn flow(&mut self, atoms: Vec<Atom>, x: f32, w: f32, y: &mut f32, tc: &TextStyle) {
         let mut line: Vec<Atom> = vec![];
         let mut lw = 0f32;
         let mut brk: Option<usize> = None; // break after this index
@@ -1058,14 +1059,14 @@ impl<'a> Layouter<'a> {
         let mut queue: std::collections::VecDeque<Atom> = atoms.into();
         while let Some(a) = queue.pop_front() {
             match a.k {
-                AK::Hard => {
+                AtomKind::Hard => {
                     self.emit_line(&mut line, x, w, y, tc, true);
                     any_line = true;
                     lw = 0.0;
                     brk = None;
                     continue;
                 }
-                AK::Space => {
+                AtomKind::Space => {
                     if line.is_empty() {
                         continue;
                     }
@@ -1089,7 +1090,7 @@ impl<'a> Layouter<'a> {
                     brk = None;
                     queue.push_front(a);
                     continue;
-                } else if lw + a.w > w && matches!(a.k, AK::Img(_)) {
+                } else if lw + a.w > w && matches!(a.k, AtomKind::Img(_)) {
                     self.emit_line(&mut line, x, w, y, tc, false);
                     any_line = true;
                     line = vec![];
@@ -1100,7 +1101,7 @@ impl<'a> Layouter<'a> {
             }
             if a.w > w + 0.01
                 && line.is_empty()
-                && let AK::Word(ref s) = a.k
+                && let AtomKind::Word(ref s) = a.k
             {
                 let chars: Vec<char> = s.chars().collect();
                 if chars.len() > 1 {
@@ -1122,11 +1123,11 @@ impl<'a> Layouter<'a> {
                     let head: String = chars[..n].iter().collect();
                     let rest: String = chars[n..].iter().collect();
                     let mut h = a.clone();
-                    h.k = AK::Word(head);
+                    h.k = AtomKind::Word(head);
                     h.w = piece_w;
                     let mut r = a.clone();
                     let rw = self.fonts.measure(a.f, &rest);
-                    r.k = AK::Word(rest);
+                    r.k = AtomKind::Word(rest);
                     r.w = rw;
                     r.ox = 0.0;
                     line.push(h);
@@ -1148,12 +1149,12 @@ impl<'a> Layouter<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn emit_line(&mut self, line: &mut Vec<Atom>, x: f32, w: f32, y: &mut f32, tc: &Tc, hard: bool) {
-        while matches!(line.last().map(|a| &a.k), Some(AK::Space)) {
+    fn emit_line(&mut self, line: &mut Vec<Atom>, x: f32, w: f32, y: &mut f32, tc: &TextStyle, hard: bool) {
+        while matches!(line.last().map(|a| &a.k), Some(AtomKind::Space)) {
             line.pop();
         }
         let lh = tc.size * tc.lh;
-        let base_f = FKey::new(tc.size, tc.bits);
+        let base_f = FontKey::new(tc.size, tc.bits);
         let (asc, desc) = self.fonts.ascent_descent(base_f);
         let half = (lh - (asc + desc)) / 2.0;
         let mut up = asc + half;
@@ -1171,7 +1172,7 @@ impl<'a> Layouter<'a> {
             Align::Left => x,
         };
         let base = *y + up;
-        let mut bg_run: Option<(Bg, f32, f32, FKey, usize)> = None;
+        let mut bg_run: Option<(Bg, f32, f32, FontKey, usize)> = None;
         let mut link_run: Option<(u32, f32, f32)> = None;
         for (i, a) in line.iter().enumerate() {
             let x0 = cx;
@@ -1199,7 +1200,7 @@ impl<'a> Layouter<'a> {
                 }
             }
             match &a.k {
-                AK::Word(t) => {
+                AtomKind::Word(t) => {
                     if a.link > 0
                         && let Some(l) = self.page.urls.get(a.link as usize - 1).and_then(|u| u.strip_prefix('#')?.strip_prefix(NOTE))
                     {
@@ -1211,10 +1212,10 @@ impl<'a> Layouter<'a> {
                     let tw = a.w - a.ox - a.bg.side_pad(self.th).filter(|_| is_last_word(line, i)).map_or(0.0, |em| a.f.px() * em);
                     self.push(x0 + a.ox, base + a.shift - fa, tw, fa + fd, Kind::Text { s: t.clone(), f: a.f, color: a.color, under: a.under, strike: a.strike, asc: fa, tx });
                 }
-                AK::Space => {
+                AtomKind::Space => {
                     self.pend_space = true;
                     // An underline or strike carries across a space between two words that have it.
-                    if let Some(next) = line.get(i + 1).filter(|b| i > 0 && matches!(b.k, AK::Word(_))) {
+                    if let Some(next) = line.get(i + 1).filter(|b| i > 0 && matches!(b.k, AtomKind::Word(_))) {
                         let (under, strike, th) = a.f.lines();
                         for (on, dy) in [(a.under && next.under, under), (a.strike && next.strike, strike)] {
                             if on {
@@ -1223,15 +1224,15 @@ impl<'a> Layouter<'a> {
                         }
                     }
                 }
-                AK::Img(b) => {
+                AtomKind::Img(b) => {
                     let dh = a.up;
                     self.push(x0, base - dh, a.w, dh, Kind::Img(b.clone()));
                 }
-                AK::Math(m) => {
+                AtomKind::Math(m) => {
                     let mb = m.clone();
                     self.emit_math(&mb, x0, base + a.shift, a.color);
                 }
-                AK::Ext => {
+                AtomKind::Ext => {
                     // Lucide's external-link icon, 0.825 em at the right end of the 0.9 em, 0.25 em below the
                     // text's top, as Obsidian draws it.
                     let px = a.f.px();
@@ -1248,7 +1249,7 @@ impl<'a> Layouter<'a> {
                         self.push(ix, iy, 24.0 * k, 24.0 * k, Kind::Poly { pts, color: 0xff000000 | a.color, width: 2.0 * k, fill: false });
                     }
                 }
-                AK::Hard => {}
+                AtomKind::Hard => {}
             }
             cx += a.w;
         }
@@ -1268,7 +1269,7 @@ impl<'a> Layouter<'a> {
         }
     }
 
-    fn fill_bg(&mut self, idx: usize, kind: Bg, x0: f32, x1: f32, base: f32, f: FKey) {
+    fn fill_bg(&mut self, idx: usize, kind: Bg, x0: f32, x1: f32, base: f32, f: FontKey) {
         let s = self.s;
         let (a, d) = self.fonts.ascent_descent(f);
         let (fill, stroke, r) = match kind {
@@ -1293,7 +1294,7 @@ fn external(url: &str) -> bool {
 
 /// Whether no later word on the line shares `line[i]`'s background.
 fn is_last_word(line: &[Atom], i: usize) -> bool {
-    !line[i + 1..].iter().any(|a| matches!(a.k, AK::Word(_)) && a.bg == line[i].bg)
+    !line[i + 1..].iter().any(|a| matches!(a.k, AtomKind::Word(_)) && a.bg == line[i].bg)
 }
 
 /// `n` in lower-case Roman numerals, as CSS's `lower-roman` counts. Outside 1 to 3999 CSS falls back to decimal,

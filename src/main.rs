@@ -79,6 +79,9 @@ fn main() {
         std::process::exit(preview::browse(root));
     }
     let code = if file == "-" {
+        if stdin_is_tty() {
+            eprintln!("{}", fit("mdd: reading Markdown from the keyboard. Type it, then press Ctrl-D to open it, or Ctrl-C to quit."));
+        }
         let path = stdin_copy().unwrap_or_else(|e| fail(&e));
         let code = preview::run(path.clone(), true);
         let _ = std::fs::remove_file(path);

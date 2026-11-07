@@ -213,7 +213,7 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
         };
         if let Some(t) = label {
             let sc = cx.scale;
-            let f = crate::render::text::FKey::new(12.0 * sc, 0);
+            let f = crate::render::text::FontKey::new(12.0 * sc, 0);
             let tw = fonts.measure(f, t);
             let (a, d) = fonts.ascent_descent(f);
             let (px, py) = (4.0 * sc, 3.0 * sc);
