@@ -3,47 +3,66 @@ title: Configuration
 description: The config file and every key in it.
 ---
 
-mddog works without a config file. To change a setting, create `~/.config/mddog/config.toml`. If `XDG_CONFIG_HOME` is set, the file is `$XDG_CONFIG_HOME/mddog/config.toml` instead.
+## Config file
 
-Here is a config with every key at its default value. You only need the keys you change.
+To change a default setting, create a config file `~/.config/mddog/config.toml`. (If `XDG_CONFIG_HOME` is set, use `$XDG_CONFIG_HOME/mddog/config.toml` instead.)
+
+This is a config with every key at its default value:
 
 ```toml title="~/.config/mddog/config.toml"
 theme = "light:github-light,dark:github-dark"
 copy_on_select = false
 ```
 
-mddog reads the config at startup, so restart it to see a change. An unknown key or a bad value stops mddog with an error that names the key.
+In your own config, you only need to set the keys you want to change.
+
+After making a change, restart mddog to see it since mddog reads the config only at startup.
 
 ## `theme`
 
-The theme that sets the page's colors and fonts. The default is `"light:github-light,dark:github-dark"`.
+This value sets the page's colors and fonts.
 
-The value is one theme, or a pair with one theme for each macOS appearance:
+The value can be one theme, which mddog always uses:
 
 ```toml
-theme = "github-dark"                                # always dark
-theme = "light:obsidian-light,dark:obsidian-dark"     # follow macOS, in Obsidian's style
+theme = "github-dark"
 ```
 
-With a pair, mddog follows the macOS appearance: light mode uses the `light` theme, and dark mode uses the `dark` theme.
+Or it can be a `light` and `dark` pair:
 
-Each theme is a built-in name or a path to a theme file:
+```toml
+theme = "light:obsidian-light,dark:obsidian-dark"
+```
 
-- Built-in themes: `github-light`, `github-dark`, `obsidian-light`, `obsidian-dark`.
-- A theme file is any value that ends in `.css` or has a `/` in it. A relative path starts from the config folder, and `~/` is your home folder.
+With a pair, mddog follows the [macOS appearance](https://support.apple.com/en-bh/guide/mac-help/mchl52e1c2d2/mac): light mode automatically uses the `light` theme, and dark mode the `dark` theme.
 
-See [Themes](/docs/themes) to see the built-in themes and to write your own.
+A theme is a built-in name or a path to a custom theme file.
+
+- Built-in themes include `github-light`, `github-dark`, `obsidian-light`, and `obsidian-dark`
+- A theme file is any value that ends in `.css` or has a `/` in it. A relative path starts from the config folder, and `~/` is your home folder
+
+See [Themes](/docs/themes) for more about themes and how to make your own.
 
 ## `copy_on_select`
 
-When `true`, mddog copies the text you select with a drag or a double-click as soon as you let go. The default is `false`: the selection is only highlighted, and `Cmd-c` copies it.
+In the preview mode, you can select text by dragging it with the mouse or double-clicking to select a word.
 
-Turn this on in a terminal that keeps `Cmd-c` for itself, such as iTerm2. See [Limitations](/docs/limitations).
+By default, `copy_on_select` is set to `false`: selecting text only highlights it, and `Cmd-c` copies it.
 
-```toml
-copy_on_select = true
-```
+When set to `true`, mddog automatically copies to clipboard the text you select. `Cmd-c` might not always work in certain terminals (such as iTerm2), so this option is a good workaround.
 
 ## Font smoothing
 
-mddog draws text with font smoothing when macOS does. It reads the setting at startup, from `defaults -g AppleFontSmoothing`. A value of `0` turns smoothing off. This isn't a config key.
+mddog automatically applies font smoothing if your macOS system does. This makes text look better on some displays, but it can make it blurry on others.
+
+To turn font smoothing off for macOS and mddog, run this and then restart mddog:
+
+```sh
+defaults write -g AppleFontSmoothing -int 0
+```
+
+To turn it back on:
+
+```sh
+defaults delete -g AppleFontSmoothing
+```

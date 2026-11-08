@@ -1,0 +1,10 @@
+---
+title: Select and copy
+description: Select text and copy it, or copy a code block or the whole file.
+---
+
+While in the preview, drag to select text with your mouse, or double-click a word. Press `Cmd-c` to then copy the selection.
+
+To copy automatically on text selection, set [`copy_on_select`](/docs/config#copy_on_select) in your config.
+
+Copies go to the macOS clipboard, and also to your terminal over OSC 52, so they work over SSH, too. See [Terminals](/docs/terminals#copy-text-selection-with-cmd-c) for which terminals pass `Cmd-c` to mddog.

@@ -1,6 +1,119 @@
+/* Kumo registers its theme tokens first, as its install guide asks. */
+@source '../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}';
+@import '@cloudflare/kumo/styles/tailwind';
 @import 'tailwindcss';
+@import 'fumadocs-ui/css/generated/notebook.css';
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
+
+/* Berkeley Mono is licensed, so it is served from our own Worker (fonts-worker/), not this repo. */
+@font-face {
+  font-family: 'Berkeley Mono';
+  src: url('https://mddog-fonts.quanwnn2265.workers.dev/BerkeleyMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Berkeley Mono';
+  src: url('https://mddog-fonts.quanwnn2265.workers.dev/BerkeleyMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Inline code, code blocks and the wordmark all use font-mono. */
+@theme {
+  --font-mono: 'Berkeley Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+/*
+ * Page colors. The background is the same on home and docs. Cards sit a step
+ * darker than the page in light mode and a step lighter in dark mode, and
+ * popovers sit above both, so layered surfaces stay readable.
+ */
+:root {
+  --color-fd-background: #faf8f0;
+  --color-fd-foreground: #16150f;
+  --color-fd-card: #f3f0e4;
+  --color-fd-card-foreground: #16150f;
+  --color-fd-popover: #fdfcf7;
+  --color-fd-popover-foreground: #26241c;
+  --color-fd-muted: #f1eee2;
+  --color-fd-muted-foreground: #6f6b5e;
+  --color-fd-secondary: #ece8da;
+  --color-fd-secondary-foreground: #16150f;
+  --color-fd-accent: rgb(190 183 160 / 32%);
+  --color-fd-accent-foreground: #16150f;
+  --color-fd-border: rgb(170 162 138 / 40%);
+  --color-fd-primary: #16150f;
+  --color-fd-primary-foreground: #faf8f0;
+}
+
+.dark {
+  --color-fd-background: #090906;
+  --color-fd-foreground: #ebe9e1;
+  --color-fd-card: #11110d;
+  --color-fd-card-foreground: #f6f5ef;
+  --color-fd-popover: #1b1b17;
+  --color-fd-popover-foreground: #dedcd3;
+  --color-fd-muted: #1a1a15;
+  --color-fd-muted-foreground: rgb(186 183 170 / 85%);
+  --color-fd-secondary: #1c1c17;
+  --color-fd-secondary-foreground: #ebe9e1;
+  --color-fd-accent: rgb(120 117 104 / 28%);
+  --color-fd-accent-foreground: #e6e4dc;
+  --color-fd-border: rgb(110 107 94 / 26%);
+  --color-fd-primary: #f6f5ef;
+  --color-fd-primary-foreground: #11110d;
+}
+
+/* neutral.css lifts the sidebar's muted surfaces in dark mode; keep them warm. */
+.dark #nd-sidebar {
+  --color-fd-muted: #1d1d18;
+  --color-fd-secondary: #202019;
+  --color-fd-muted-foreground: rgb(196 193 180 / 90%);
+}
+
+/* The grey of "dog" in the logo. */
+:root {
+  --mddog-grey: #7e838d;
+}
+
+.dark {
+  --mddog-grey: #9da2ac;
+}
+
+/*
+ * Kumo's surfaces, lines and text follow the page palette above, so Kumo
+ * controls and Fumadocs' own parts read as one system. Kumo's blue brand stays:
+ * its primary buttons always use white text, and it doubles as the focus ring.
+ */
+:root {
+  --color-kumo-canvas: var(--color-fd-background);
+  --color-kumo-elevated: var(--color-fd-card);
+  --color-kumo-recessed: var(--color-fd-muted);
+  --color-kumo-base: var(--color-fd-popover);
+  --color-kumo-control: var(--color-fd-popover);
+  --color-kumo-overlay: var(--color-fd-popover);
+  --color-kumo-tint: var(--color-fd-secondary);
+  --color-kumo-fill: var(--color-fd-secondary);
+  --color-kumo-fill-hover: var(--color-fd-muted);
+  --color-kumo-line: var(--color-fd-border);
+  --color-kumo-hairline: var(--color-fd-border);
+  --text-color-kumo-default: var(--color-fd-foreground);
+  --text-color-kumo-strong: var(--color-fd-foreground);
+  --text-color-kumo-subtle: var(--color-fd-muted-foreground);
+
+  /* Fumadocs' focus rings use Kumo's: 2px in the brand blue. */
+  --color-fd-ring: var(--color-kumo-brand);
+}
+
+/* Kumo controls and Fumadocs' panels share Kumo's radius: lg for surfaces, md for rows. */
+@theme {
+  --radius-xl: 0.5rem;
+}
 
 html {
   scrollbar-gutter: stable;
@@ -9,4 +122,14 @@ html {
 html > body[data-scroll-locked] {
   margin-right: 0px !important;
   --removed-body-scroll-bar-size: 0px !important;
+}
+
+/* Primary is near black in light mode and near white in dark mode, so one mix works in both. */
+::selection {
+  background-color: color-mix(in oklab, var(--color-fd-primary) 22%, transparent);
+}
+
+/* The first sidebar section has no top margin, so it crowds the logo row. Give it the gap the other sections get, plus a little. */
+:is(#nd-sidebar, #nd-mobile-sidebar) p:first-child:has(> .fd-page-tree-item-name) {
+  margin-top: 1.25rem;
 }

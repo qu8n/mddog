@@ -1,0 +1,14 @@
+---
+title: File list
+description: Pick a Markdown file from the current repo or folder.
+---
+
+Run `mdd` with no file input, or press `Ctrl-p` in the preview, to see the Markdown files in the current directory or Git repo, up to 10,000 files.
+
+Hidden files and the files your `.gitignore` and `.ignore` files leave out are skipped.
+
+Each row shows the file's path, its first heading, and how old it is. The newest files come first. Type to filter with a fuzzy match on the path and the heading, then press `Enter` to open a file.
+
+After you open a file from the list, `Backspace` goes back to the file before it, at the same place.
+
+<FileListPreview className="my-6" />

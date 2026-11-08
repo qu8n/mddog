@@ -1,0 +1,456 @@
+/*
+ * A live copy of an mddog screenshot. The frame is drawn at its screenshot
+ * size, 798 x 456 px with 84 x 24 terminal cells, and --u is one of those
+ * pixels scaled to the frame's width. Every length below is a multiple of
+ * --u, so the frame scales as one picture while its text stays real text.
+ * Colors are mddog's github-dark theme (assets/themes/github-dark.css).
+ */
+/* No margin here: Tailwind's base already zeroes it, so a caller's my-6 applies. */
+.mdd-wrap {
+  container-type: inline-size;
+}
+
+.mdd {
+  --u: calc(100cqw / 798);
+  --cell: calc(9.45 * var(--u));
+  --row: calc(19 * var(--u));
+  --bg: #0d1117;
+  --bar-bg: #171b22;
+  --text: #f0f6fc;
+  --muted: #9198a1;
+  --fg: #c9d1d9;
+  --rule: #3d444d;
+  --code-bg: #1e232a;
+  --pre-bg: #151b23;
+  --button-bg: #212830;
+  --select-bg: #21262d;
+
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 1596 / 912;
+  overflow: hidden;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.75rem;
+  background: var(--bg);
+  color: var(--text);
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: calc(16 * var(--u));
+  line-height: 1.5;
+  text-align: start;
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 5%), 0 8px 10px -6px rgb(0 0 0 / 5%);
+  user-select: text;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+}
+
+.mdd ::selection {
+  background: #1f4a82;
+}
+
+.mdd-screen {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Terminal cells: the status bar, the panels and the key list. */
+.mdd-mono {
+  font-family: var(--font-mono);
+  font-size: calc(15.75 * var(--u));
+  line-height: var(--row);
+  white-space: pre;
+}
+
+.mdd-bright {
+  color: var(--text);
+}
+
+.mdd-dim {
+  color: var(--muted);
+}
+
+.mdd-b {
+  font-weight: 700;
+}
+
+.mdd-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: var(--row);
+  padding: 0 var(--cell);
+  background: var(--bar-bg);
+  color: var(--muted);
+  overflow: hidden;
+}
+
+.mdd-bar-hints {
+  display: flex;
+  gap: calc(2 * var(--cell));
+}
+
+.mdd-bar-hints-end {
+  margin-inline-start: auto;
+}
+
+.mdd-bar-pos {
+  width: calc(7 * var(--cell));
+  text-align: end;
+}
+
+/* The rendered page. */
+.mdd-page {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: calc(24 * var(--u)) calc(24 * var(--u)) 0;
+}
+
+.mdd-page > :first-child {
+  margin-top: 0;
+}
+
+.mdd-page h1,
+.mdd-page h2 {
+  margin: calc(24 * var(--u)) 0 calc(16 * var(--u));
+  border-bottom: calc(1 * var(--u)) solid var(--rule);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.mdd-page h1 {
+  padding-bottom: 0.3em;
+  font-size: 2em;
+}
+
+.mdd-page h2 {
+  padding-bottom: 0.3em;
+  font-size: 1.5em;
+}
+
+.mdd-page p,
+.mdd-page ul,
+.mdd-page ol,
+.mdd-page table,
+.mdd-page .mdd-alert,
+.mdd-page .mdd-pre,
+.mdd-page .mdd-diagram {
+  margin: 0 0 calc(16 * var(--u));
+}
+
+.mdd-page code {
+  padding: 0.2em 0.4em;
+  border-radius: calc(6 * var(--u));
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  white-space: break-spaces;
+}
+
+.mdd-page mark {
+  background: #5a4a00;
+  color: inherit;
+}
+
+.mdd-page mark.mdd-current {
+  background: #9e6a03;
+}
+
+/* Alerts. */
+.mdd-alert {
+  padding: calc(8 * var(--u)) calc(16 * var(--u));
+  border-left: calc(4 * var(--u)) solid var(--alert);
+}
+
+.mdd-alert-title {
+  display: flex;
+  align-items: center;
+  gap: calc(8 * var(--u));
+  margin-bottom: calc(12 * var(--u)) !important;
+  color: var(--alert);
+  font-weight: 600;
+}
+
+.mdd-alert-title svg {
+  width: calc(16 * var(--u));
+  height: calc(16 * var(--u));
+}
+
+.mdd-alert > :last-child {
+  margin-bottom: 0;
+}
+
+/* Tables. */
+.mdd-page table {
+  border-collapse: collapse;
+}
+
+.mdd-page th,
+.mdd-page td {
+  padding: calc(6 * var(--u)) calc(13 * var(--u));
+  border: calc(1 * var(--u)) solid var(--rule);
+  text-align: start;
+  vertical-align: top;
+}
+
+.mdd-page th {
+  font-weight: 600;
+}
+
+.mdd-page tbody tr:nth-child(2n) {
+  background: var(--pre-bg);
+}
+
+.mdd-page .mdd-num {
+  text-align: end;
+}
+
+.mdd-scroll-x {
+  overflow-x: auto;
+}
+
+/*
+ * Sideways scroll bars stay visible, as mddog draws them, even where the
+ * system hides scroll bars until you scroll. Firefox gets a thin one.
+ */
+.mdd ::-webkit-scrollbar {
+  height: calc(5 * var(--u));
+}
+
+.mdd ::-webkit-scrollbar-thumb {
+  border-radius: calc(3 * var(--u));
+  background: #6e7681;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .mdd-scroll-x,
+  .mdd-pre pre {
+    scrollbar-color: #6e7681 transparent;
+    scrollbar-width: thin;
+  }
+}
+
+/* Code blocks. Each line is a block, so diff lines fill the width. */
+.mdd-pre {
+  position: relative;
+  border-radius: calc(6 * var(--u));
+  background: var(--pre-bg);
+}
+
+.mdd-pre pre {
+  margin: 0;
+  padding: calc(16 * var(--u)) 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  line-height: 1.45;
+}
+
+.mdd-page pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+  white-space: inherit;
+}
+
+.mdd-line {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 0 calc(16 * var(--u));
+}
+
+.mdd-copy {
+  position: absolute;
+  top: calc(8 * var(--u));
+  right: calc(8 * var(--u));
+  display: grid;
+  place-items: center;
+  width: calc(28 * var(--u));
+  height: calc(28 * var(--u));
+  border-radius: calc(6 * var(--u));
+  background: var(--button-bg);
+  color: var(--muted);
+}
+
+.mdd-copy svg {
+  width: calc(16 * var(--u));
+  height: calc(16 * var(--u));
+}
+
+.mdd-pre-plain .mdd-copy {
+  background: none;
+}
+
+.pl-k { color: #ff7b72; }
+.pl-c1 { color: #79c0ff; }
+.pl-en { color: #d2a8ff; }
+.pl-s { color: #a5d6ff; }
+.pl-del { background: #2d1214; color: #ffdcd7; }
+.pl-ins { background: #12261e; color: #aff5b4; }
+
+/* Mermaid diagram and its buttons. */
+.mdd-diagram {
+  position: relative;
+}
+
+.mdd-diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.mdd-diagram-buttons {
+  position: absolute;
+  top: calc(8 * var(--u));
+  right: calc(8 * var(--u));
+  display: flex;
+  gap: calc(8 * var(--u));
+}
+
+.mdd-diagram-buttons span {
+  display: grid;
+  place-items: center;
+  width: calc(34 * var(--u));
+  height: calc(34 * var(--u));
+  border: calc(1 * var(--u)) solid var(--rule);
+  border-radius: calc(6 * var(--u));
+  background: var(--button-bg);
+  color: var(--fg);
+}
+
+.mdd-diagram-buttons svg {
+  width: calc(18 * var(--u));
+  height: calc(18 * var(--u));
+}
+
+.mdd-math {
+  margin: calc(16 * var(--u)) 0;
+  font-size: 1.21em;
+}
+
+/* Task lists. */
+.mdd-page .mdd-tasks {
+  padding-left: calc(9 * var(--u));
+  list-style: none;
+}
+
+.mdd-tasks li + li {
+  margin-top: 0.25em;
+}
+
+.mdd-tasks li {
+  display: flex;
+  align-items: center;
+  gap: calc(10 * var(--u));
+}
+
+.mdd-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(13 * var(--u));
+  height: calc(13 * var(--u));
+  border-radius: calc(2.5 * var(--u));
+  background: #3b3f45;
+  color: #2a2e33;
+}
+
+.mdd-check[data-checked] {
+  background: #6b7078;
+}
+
+.mdd-check svg {
+  width: 80%;
+  height: 80%;
+}
+
+/* The contents panel beside the page. */
+.mdd-toc {
+  flex: none;
+  width: calc(27.6 * var(--cell));
+  border-right: calc(1.5 * var(--u)) solid #4b5159;
+  color: var(--muted);
+}
+
+.mdd-toc-title {
+  padding: var(--row) var(--cell) 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.mdd-toc-rule {
+  height: var(--row);
+  background: linear-gradient(#4b5159, #4b5159) center / 100% calc(1.5 * var(--u)) no-repeat;
+}
+
+.mdd-row {
+  display: block;
+  padding: 0 var(--cell);
+}
+
+.mdd-row-selected {
+  background: var(--select-bg);
+  color: var(--text);
+}
+
+.mdd-toc .mdd-row-selected {
+  margin-right: calc(4 * var(--u));
+}
+
+/* Full-screen terminal views: the file list and the key list. */
+.mdd-term {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 var(--cell);
+  color: var(--fg);
+}
+
+.mdd-files-head {
+  display: flex;
+  justify-content: space-between;
+}
+
+.mdd-cursor {
+  display: inline-block;
+  width: var(--cell);
+  height: calc(17 * var(--u));
+  vertical-align: calc(-3 * var(--u));
+  outline: calc(1 * var(--u)) solid var(--text);
+  outline-offset: calc(-1 * var(--u));
+}
+
+.mdd-files-rule {
+  height: var(--row);
+  background: linear-gradient(#4b5159, #4b5159) center / 100% calc(1.5 * var(--u)) no-repeat;
+}
+
+.mdd-file {
+  display: grid;
+  grid-template-columns: var(--cell) calc(30 * var(--cell)) 1fr auto;
+}
+
+.mdd-file > :nth-child(2) {
+  color: var(--text);
+}
+
+.mdd-file > :nth-child(3) {
+  color: var(--muted);
+}
+
+.mdd-file-selected {
+  background: var(--select-bg);
+}
+
+.mdd-file-selected > :first-child {
+  background: linear-gradient(var(--text), var(--text)) left / 55% 100% no-repeat;
+}
+
+/* A wide table keeps every column at its narrowest, as mddog lays it out. */
+.mdd-page table.mdd-wide {
+  width: min-content;
+  margin-bottom: calc(8 * var(--u));
+}

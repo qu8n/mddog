@@ -5,3 +5,7 @@
 /.react-router/
 /build/
 .source
+
+# Berkeley Mono is served by fonts-worker/ now. Older checkouts may still
+# hold the licensed files here, so keep them out of git.
+/public/fonts/

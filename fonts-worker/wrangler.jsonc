@@ -1,0 +1,12 @@
+// Deploy: copy the fonts in, then run `npx wrangler deploy` from this folder.
+//   mkdir -p fonts && cp ~/dev/qu8n/src/fonts/BerkeleyMono-{Regular,Bold}.woff2 fonts/
+{
+  "name": "mddog-fonts",
+  "main": "index.js",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "fonts",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
+}

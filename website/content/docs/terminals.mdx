@@ -1,9 +1,9 @@
 ---
 title: Terminals
-description: Which terminals mddog runs in.
+description: Which terminals mddog runs in, and how to work around their problems.
 ---
 
-mddog sends the page to the terminal as images, over the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/). So it needs a terminal that supports that protocol.
+mddog sends the page to the terminal as images and thus requires the terminal to support the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 
 ## Supported
 
@@ -11,24 +11,41 @@ mddog sends the page to the terminal as images, over the [kitty graphics protoco
 |---|---|
 | [Ghostty](https://ghostty.org) | Everything works |
 | [kitty](https://sw.kovidgoyal.net/kitty/) | Everything works |
-| [WezTerm](https://wezterm.org) `Cmd-c` needs a setting, and without it empties the clipboard. The mouse pointer doesn't change shape over links |
-| [iTerm2](https://iterm2.com) | `Cmd-c` doesn't reach mddog. Use `copy_on_select` instead |
-| Rex | Everything works. Tested alone only, not inside a multiplexer |
+| [WezTerm](https://wezterm.org) | [`Cmd-c`](#copy-text-selection-with-cmd-c) needs a setting to work, and the [mouse pointer](#mouse-pointer) doesn't change shape over links |
+| [iTerm2](https://iterm2.com) | [`Cmd-c`](#copy-text-selection-with-cmd-c) can't reach mddog. Set `copy_on_select` in your config as a workaround |
+| Rex | Everything works |
 
-See [Limitations](/docs/limitations) for the details and workarounds.
+## Copy text selection with Cmd-c
 
-## Not supported
+Some terminals keep `Cmd-c` for themselves, so it never reaches mddog. To work around this:
 
-In a terminal that can't show images, such as Terminal.app or screen, mddog stops with an error.
+- In WezTerm, set `enable_kitty_keyboard = true` and remove WezTerm's `Cmd-c` (`SUPER+c`) binding
+- In iTerm2, set [`copy_on_select = true`](/docs/config#copy_on_select) in mddog's config so that text selection is automatically copied to the clipboard
 
-mddog also refuses to run in these three, which it detects by name:
+## Mouse pointer
 
-- tmux can't show images yet ([tmux#5445](https://github.com/tmux/tmux/pull/5445)).
-- Warp can't crop images, and mddog crops images to scroll them ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424)).
-- zellij garbles scrolled images ([zellij#5573](https://github.com/zellij-org/zellij/issues/5573)).
+The pointer turns into a hand over links and buttons in Ghostty, kitty, and iTerm2. This doesn't work in WezTerm and herdr.
 
 ## Multiplexers
 
-mddog works inside herdr. With a terminal other than Ghostty, images arrive late, most of all in iTerm2. See [Limitations](/docs/limitations#herdr).
+### herdr
+
+mddog works inside herdr, but images reach every terminal except Ghostty slowly ([herdr#5512](https://github.com/herdrdev/herdr/issues/5512)). Starting herdr with `TERM_PROGRAM=ghostty herdr` fixes the lag, but then herdr also treats the terminal as Ghostty for notifications and focus.
+
+Under herdr with Ghostty, a copy larger than about 220 KB doesn't reach the clipboard over OSC 52. This only matters over SSH. On the same Mac, mddog also copies with `pbcopy`.
+
+When herdr runs inside Warp, mddog can't detect Warp and runs anyway. There, scrolling doesn't move the page, and `G` draws it squashed.
+
+### Rex
 
 Rex has its own panes and tabs, and mddog works in them.
+
+## Not supported
+
+In these terminals, mddog stops with an error:
+
+- Terminal.app: can't show images
+- screen: can't show images
+- tmux: can't show kitty graphics yet ([tmux#5445](https://github.com/tmux/tmux/pull/5445))
+- Warp: can't crop images, and mddog crops images to scroll ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424))
+- zellij: garbles scrolled images ([zellij#5573](https://github.com/zellij-org/zellij/issues/5573))

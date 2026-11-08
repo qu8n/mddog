@@ -4,7 +4,7 @@ description: The ways to start mdd, from a file, a folder, or standard input.
 ---
 
 ```sh
-mdd                 # pick from the Markdown files in the current repo or folder
+mdd                 # list Markdown files in the current directory to pick from
 mdd README.md       # preview a file
 mdd docs            # pick from the Markdown files in a folder
 cat notes.md | mdd  # preview standard input
@@ -12,9 +12,9 @@ cat notes.md | mdd  # preview standard input
 
 ## Preview a file
 
-`mdd FILE` opens one file. It opens any text file. If the name doesn't end in `.md` or `.markdown`, mddog shows it as Markdown anyway, with a short notice.
+Run `mdd FILE` to open a file.
 
-mddog opens one file at a time. If a name has spaces, put quotes around it. If a name starts with `-`, write `./-name.md` or `mdd -- -name.md`.
+If a name has spaces, put quotes around it. If a name starts with `-`, write `./-name.md` or `mdd -- -name.md`.
 
 mddog opens only local files. To preview a file on the web, download it first:
 
@@ -22,33 +22,27 @@ mddog opens only local files. To preview a file on the web, download it first:
 curl -sL https://example.com/README.md | mdd
 ```
 
-If you mistype a name, mddog suggests a close match in the same folder.
-
 ## Pick a file
 
-With no file, `mdd` shows the [file list](/docs/features#file-list). It lists every `.md` and `.markdown` file in the current git repo, or in the current folder when you're not in a repo. `mdd FOLDER` lists the files in that folder instead.
+Run `mdd` with no file to pick from a [file list](/docs/file-list) of Markdown files in the current directory or Git repo. Use the arrow keys to select a file, then press `Enter` to open it.
+
+Run `mdd FOLDER` to lists the files in a specific folder instead.
 
 ## Read standard input
 
-When you pipe text into `mdd`, it previews that text:
+When you pipe text into `mdd`, it previews that text as Markdown. For example:
 
 ```sh
 cat notes.md | mdd
 gh pr view 123 --json body -q .body | mdd
 ```
 
-When standard input isn't a terminal, `mdd` with no file always reads it, even in a script. Empty input stops with an error. `mdd -` also reads standard input. If you run `mdd -` in a terminal with nothing piped in, type the Markdown and press `Ctrl-D` to open it.
-
-A preview of standard input doesn't reload, and `e` can't edit it.
+You can also run `mdd -` with nothing piped in, then type Markdown on the fly, and press `Ctrl-D` to preview it.
 
 ## Options
 
-| Option | Does |
+| Flag | Description |
 |---|---|
 | `-h`, `--help` | Show the help |
 | `-V`, `--version` | Show the version |
 | `--` | Treat every argument after it as a file name |
-
-On an error, `mdd` prints what went wrong and exits with code 2.
-
-Inside the preview, press `?` to see the [key bindings](/docs/keys).

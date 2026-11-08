@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="assets/spike.png" width="70" alt="Logo"/><br/>
+  <img src="assets/logo.png" width="150" alt="Logo"/><br/>
   mddog
 </h1>
 
@@ -11,10 +11,10 @@
 </p>
 
 <p align="center">
-  Preview Markdown in your terminal the way a browser renders it.
+  Real Markdown rendering, right in your terminal
 </p>
 
-https://github.com/user-attachments/assets/3a6fda37-b0d3-4678-bff6-7a5085d48719
+https://github.com/user-attachments/assets/982f59b8-5723-4da3-9665-11384b4fda58
 
 ## Install
 
@@ -22,18 +22,19 @@ https://github.com/user-attachments/assets/3a6fda37-b0d3-4678-bff6-7a5085d48719
 curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 ```
 
-You need macOS and a terminal that supports the kitty graphics protocol: Ghostty, kitty, WezTerm, iTerm2, or Rex. Rex was tested alone, not inside a multiplexer.
+### Requirements
+
+- macOS
+- A terminal that supports the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/): Ghostty, iTerm2, kitty, WezTerm, or Rex
+
 
 ## Usage
 
 ```sh
-mdd README.md       # preview a file
-mdd                 # pick from the Markdown files in this repo or folder
-cat notes.md | mdd  # preview standard input
+mdd             # list Markdown files in the current directory to pick from
+mdd README.md   # preview a file
 ```
-
-Press `?` in the preview to see every key.
 
 ## Docs
 
-Read the full docs at **[mddog.pages.dev/docs](https://mddog.pages.dev/docs)**: key bindings, features, the Claude Code plugin, configuration, themes, and limitations.
+Read the full docs at **[mddog.pages.dev/docs](https://mddog.pages.dev/docs)** for key bindings, Claude Code plugin, configuration, themes, and more.

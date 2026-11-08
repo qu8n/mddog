@@ -173,7 +173,7 @@ fn loose_html_text_has_no_margin() {
 #[test]
 fn a_table_image_measures_at_the_table_width() {
     // Cell measure once read the width the previous paragraph left behind, 40 px at the page top.
-    let table = "| a |\n|---|\n| ![a](assets/spike.png) |\n";
+    let table = "| a |\n|---|\n| ![a](assets/logo.png) |\n";
     let first = engine(table).layout().height;
     let after = engine(&format!("hello\n\n{table}")).layout().height - engine("hello\n").layout().height;
     assert!(first > 0.9 * after, "{first} vs {after}");

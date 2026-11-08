@@ -1,16 +1,22 @@
 {
   "pages": [
+    "---Getting started---",
     "index",
-    "install",
     "usage",
-    "keys",
-    "features",
+    "---Features---",
+    "markdown",
+    "search",
+    "navigation",
+    "file-list",
+    "select-and-copy",
+    "wide-content",
+    "reload-and-edit",
     "claude-code",
     "---Customize---",
     "config",
     "themes",
     "---Reference---",
-    "terminals",
-    "limitations"
+    "keys",
+    "terminals"
   ]
 }

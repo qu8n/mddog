@@ -1,0 +1,25 @@
+---
+title: Reload and edit
+description: The page reloads when the file changes, and opens in your editor with one key.
+---
+
+## Live reload
+
+While you're previewing a file, mddog watches it. Save a change from an editor (like VS Code, NeoVim, etc.) and the page automatically reloads to show your changes.
+
+![A file edited in Vim on the left, and the preview on the right after it reloaded](/docs/reload.webp)
+
+Note that a preview of standard input doesn't reload.
+
+## Edit
+
+mddog is a viewer, so clicking a task list checkbox doesn't change it. To change the file, press `e` or `v` in preview mode to open it in your editor. mddog runs `$EDITOR` in the same terminal, or `vi` when `$EDITOR` isn't set.
+
+mddog waits until the editor command exits, then shows the page again with your changes. With a terminal editor such as Vim, that happens when you quit the editor.
+
+For an editor that opens in its own window, such as VS Code, choose one of these:
+
+- `EDITOR=code`: `code` exits at once, so mddog comes back right away. The page reloads each time you save in VS Code
+- `EDITOR="code --wait"`: mddog waits until you close the file's tab in VS Code. Until then, the terminal shows your shell's screen
+
+If the `code` command isn't on your `PATH`, mddog shows `Editor "code" not found`. To fix this, open the VS Code Command Palette and run **Shell Command: Install 'code' command in PATH**.
