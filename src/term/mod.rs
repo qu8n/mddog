@@ -119,6 +119,11 @@ impl Probe {
         self.version.starts_with("libghostty") || herdr_by_env()
     }
 
+    /// Ghostty shows kitty image pixels as Display P3 but cell colors as sRGB, unless `window-colorspace = display-p3`.
+    pub fn ghostty(&self) -> bool {
+        self.version.starts_with("ghostty")
+    }
+
     /// How many bytes of images the terminal keeps.
     pub fn storage_limit(&self) -> usize {
         kitty::storage_limit(self.herdr())
@@ -767,6 +772,10 @@ mod tests {
         assert_eq!(p.cell, Some((19, 38)));
         assert_eq!(p.version, "libghostty 1.3");
         assert_eq!(p.hand(), "pointer");
+        assert!(!p.ghostty(), "herdr's libghostty doesn't say which terminal shows its images");
+        // Ghostty 1.3.2's own answer.
+        let (p, _) = parse_probe(b"\x1bP>|ghostty 1.3.2-main-+22391ed64\x1b\\\x1b[?62;22;52c");
+        assert!(p.ghostty());
         let (p, _) = parse_probe(b"\x1b[6;38t\x1b[?62;22c");
         assert_eq!(p.cell, None);
         assert_eq!(p.version, "");

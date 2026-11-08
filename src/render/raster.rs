@@ -4,7 +4,7 @@ use crate::render::page::*;
 use crate::render::text::Fonts;
 use crate::render::theme::{Theme, rgb};
 use core_graphics::base::kCGImageAlphaPremultipliedLast;
-use core_graphics::color_space::CGColorSpace;
+use core_graphics::color_space::{CGColorSpace, kCGColorSpaceDisplayP3};
 use core_graphics::context::CGContext;
 use core_graphics::data_provider::CGDataProvider;
 use core_graphics::geometry::{CGPoint, CGRect, CGSize};
@@ -43,6 +43,8 @@ pub struct Ctx<'a> {
     pub ov: &'a Overlay,
     /// Font smoothing, which CoreGraphics bitmap contexts leave off unless asked.
     pub smooth: bool,
+    /// Convert the page's sRGB colors to Display P3 pixels.
+    pub display_p3: bool,
 }
 
 fn set_fill(c: &CGContext, rgbv: u32, a: f64) {
@@ -93,7 +95,14 @@ pub fn cg_image(b: &Bitmap) -> CGImage {
 /// layout pixel.
 #[expect(clippy::too_many_arguments, reason = "the tile's place, size and scale, each a plain number")]
 pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, items: &[u32], z: f64, out: &mut [u8]) {
-    let cs = CGColorSpace::create_device_rgb();
+    // CoreGraphics takes DeviceRGB colors as sRGB, so a Display P3 context converts every fill, glyph and image.
+    let cs = if cx.display_p3 {
+        // SAFETY: a constant CoreGraphics exports, read once and never written.
+        let p3 = unsafe { kCGColorSpaceDisplayP3 };
+        CGColorSpace::create_with_name(p3).unwrap_or_else(CGColorSpace::create_device_rgb)
+    } else {
+        CGColorSpace::create_device_rgb()
+    };
     // CoreGraphics draws into `out`, which holds w * h * 4 bytes and outlives the context: the context drops before this returns.
     let ctx = CGContext::create_bitmap_context(Some(out.as_mut_ptr().cast()), w, h, 8, w * 4, &cs, kCGImageAlphaPremultipliedLast);
     ctx.set_allows_font_smoothing(cx.smooth);

@@ -299,6 +299,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         tty.write(term::PIXEL_MOUSE_ON.as_bytes());
     }
     trace::mark("terminal probed");
+    engine.set_display_p3(probe.ghostty());
     if probe.no_graphics() {
         let refusal =
             format!("mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use {SUPPORTED}. Terminal.app and screen don't support it.");

@@ -245,3 +245,15 @@ fn an_svg_whose_rounded_size_is_too_big_still_draws() {
     assert!(height > 13_000.0, "page is {height} px tall");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_display_p3_page_matches_the_cells_around_it() {
+    // Ghostty shows image pixels as Display P3 but cell colors as sRGB, so the page's #0d1117 must go out in P3 to
+    // look like the #0d1117 cells beside it.
+    let e = Engine::new(640.0, 2.0, false);
+    e.load("x\n", std::path::Path::new("."), false, mddog::theme::builtin("github-dark").unwrap_or_else(|| unreachable!()));
+    let corner = |e: &Engine| e.snapshot(0.0, 10.0, 2.0, |n| Some(vec![0; n])).unwrap().rgba[..4].to_vec();
+    assert_eq!(corner(&e), [13, 17, 23, 255]);
+    e.set_display_p3(true);
+    assert_eq!(corner(&e), [14, 17, 22, 255]);
+}

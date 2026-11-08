@@ -81,6 +81,7 @@ pub struct Engine {
     width: Cell<f64>,
     pub scale: Cell<f64>,
     smooth: bool,
+    display_p3: Cell<bool>,
     st: RefCell<State>,
 }
 
@@ -146,7 +147,7 @@ impl Engine {
             held: None,
             grip: 0.0,
         };
-        Engine { width: Cell::new(width), scale: Cell::new(scale), smooth, st: RefCell::new(st) }
+        Engine { width: Cell::new(width), scale: Cell::new(scale), smooth, display_p3: Cell::new(false), st: RefCell::new(st) }
     }
 
     /// Parses and lays out `src` in place of the page.
@@ -239,6 +240,11 @@ impl Engine {
         }
     }
 
+    /// Draws snapshots in Display P3 rather than sRGB, for a terminal that shows image pixels as Display P3.
+    pub fn set_display_p3(&self, on: bool) {
+        self.display_p3.set(on);
+    }
+
     pub fn rescale(&self, scale: f64, width: f64) {
         let ratio = (scale / self.scale.get()) as f32;
         self.scale.set(scale);
@@ -271,7 +277,7 @@ impl Engine {
         let page = &st.page;
         let items: Vec<u32> = page.items.iter().enumerate().filter(|(_, it)| it.y <= bottom && it.y + it.h >= top - 2.0).map(|(i, _)| i as u32).collect();
         let State { fonts, page, th, ov, .. } = &mut *st;
-        let cx = Ctx { page, th, scale: s, ov, smooth: self.smooth };
+        let cx = Ctx { page, th, scale: s, ov, smooth: self.smooth, display_p3: self.display_p3.get() };
         raster::render_into(fonts, &cx, top, height, width, &items, scale / self.scale.get(), dst);
         Some(Snapshot { width, height, rgba })
     }
