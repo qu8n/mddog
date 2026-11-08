@@ -15,12 +15,21 @@ See [Terminals](/docs/terminals) for more info on the supported terminals.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
+brew install qu8n/tap/mddog
 ```
 
-The script downloads the latest release and puts the `mdd` binary in `~/.local/bin`. To install somewhere else, set `MDDOG_INSTALL_DIR` to a folder you can write to.
+To update, run `brew upgrade mddog`. If you use the [Claude Code plugin](/docs/claude-code), update the plugin too.
 
-To update, run the script again. If you use the [Claude Code plugin](/docs/claude-code), update the plugin too.
+<details>
+  <summary>Install without Homebrew</summary>
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
+  ```
+
+  The script downloads the latest release and puts the `mdd` binary in `~/.local/bin`. To install somewhere else, set `MDDOG_INSTALL_DIR` to a folder you can write to. To update, run the script again.
+
+</details>
 
 <details>
   <summary>Build from source</summary>
@@ -40,10 +49,10 @@ To update, run the script again. If you use the [Claude Code plugin](/docs/claud
 <details>
   <summary>Uninstall</summary>
 
-  Delete the `mdd` binary, the image cache, and your config folder if you made one:
+  Remove the `mdd` binary, the image cache, and your config folder if you made one:
 
   ```sh
-  rm ~/.local/bin/mdd
+  brew uninstall mddog   # or, if you used the script: rm ~/.local/bin/mdd
   rm -rf ~/Library/Caches/mddog
   rm -r ~/.config/mddog
   ```

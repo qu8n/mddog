@@ -22,7 +22,7 @@ import { gitConfig } from '@/lib/shared';
 
 const tagline = 'Preview Markdown in your terminal, with real fonts, tables, diagrams, math, and images.';
 const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
-const install = `curl -fsSL https://raw.githubusercontent.com/${gitConfig.user}/${gitConfig.repo}/main/install.sh | sh`;
+const install = `brew install ${gitConfig.user}/tap/mddog`;
 const plugin = `claude plugin marketplace add ${gitConfig.user}/${gitConfig.repo}
 claude plugin install mddog@mddog`;
 const usage = `mdd README.md       # preview a file

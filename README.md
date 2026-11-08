@@ -19,6 +19,12 @@ https://github.com/user-attachments/assets/982f59b8-5723-4da3-9665-11384b4fda58
 ## Install
 
 ```sh
+brew install qu8n/tap/mddog
+```
+
+Or, without Homebrew:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 ```
 

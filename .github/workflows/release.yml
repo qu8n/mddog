@@ -38,3 +38,22 @@ jobs:
       - run: gh release create "$GITHUB_REF_NAME" mdd-macos-*.tar.gz mdd-macos-*.tar.gz.sha256 --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Point the Homebrew formula at this release
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 "https://x-access-token:$TAP_TOKEN@github.com/qu8n/homebrew-tap.git" tap
+          f=tap/Formula/mddog.rb
+          for arch in arm64 x86_64; do
+            sum=$(cut -d' ' -f1 "mdd-macos-$arch.tar.gz.sha256")
+            # The sha256 line sits right under its url line.
+            sed -i '' -E -e "s|/download/v[^/]+/mdd-macos-$arch|/download/$GITHUB_REF_NAME/mdd-macos-$arch|" \
+              -e "/mdd-macos-$arch\.tar\.gz\"/{n;s/sha256 \"[0-9a-f]{64}\"/sha256 \"$sum\"/;}" "$f"
+            grep -q "sha256 \"$sum\"" "$f" || { echo "::error::$arch checksum not written to $f"; exit 1; }
+          done
+          grep -c "/download/$GITHUB_REF_NAME/" "$f" | grep -qx 2 || { echo "::error::urls not updated in $f"; exit 1; }
+          cd tap
+          git -c user.name=github-actions[bot] -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            commit -am "mddog ${GITHUB_REF_NAME#v}"
+          git push

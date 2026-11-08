@@ -66,9 +66,9 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 
 ## Releasing
 
-`mdd` ships through `install.sh`, and the plugin through the Claude Code marketplace. Claude Code caches an installed plugin by the `version` in its `plugin.json`, so each release bumps it along with Cargo's.
+`mdd` ships through the [`qu8n/tap`](https://github.com/qu8n/homebrew-tap) Homebrew tap and `install.sh`, and the plugin through the Claude Code marketplace. Claude Code caches an installed plugin by the `version` in its `plugin.json`, so each release bumps it along with Cargo's.
 
 1. Run `claude plugin test plugins/claude-code`.
 2. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
 3. Commit as `chore: release X.Y.Z`.
-4. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` checks that the tag matches both versions, runs `./check.sh`, then builds both architectures and publishes the release.
+4. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` checks that the tag matches both versions, runs `./check.sh`, then builds both architectures and publishes the release. Last, it points `Formula/mddog.rb` in `qu8n/homebrew-tap` at the new tarballs and pushes, using the `HOMEBREW_TAP_TOKEN` repo secret (a fine-grained token with write access to that repo's contents).
