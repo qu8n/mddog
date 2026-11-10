@@ -32,14 +32,14 @@ const GLIDE_FRAME: Duration = Duration::from_millis(8);
 const FOLD_IDLE: Duration = Duration::from_secs(1);
 /// The X11 name for the arrow, sent with OSC 22 off text, links and buttons.
 const DEFAULT_POINTER: &str = "left_ptr";
-const SUPPORTED: &str = "Ghostty, Kitty, WezTerm, iTerm2, or Rex";
+const SUPPORTED: &str = "Ghostty, iTerm2, Kitty, WezTerm, or Rex";
 
 /// Why mddog won't run here, when the environment alone tells. Checked before anything goes to the terminal.
 pub fn refusal() -> Option<String> {
     Some(match term::refused_by_env(|k| std::env::var_os(k))? {
-        term::Refused::Tmux => "mdd: mddog doesn't support tmux yet, because tmux doesn't pass its images through. Run mdd outside tmux.".to_string(),
-        term::Refused::Zellij => "mdd: mddog doesn't support zellij yet, because zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648). Run mdd outside zellij.".to_string(),
-        term::Refused::Warp => format!("mdd: mddog doesn't support Warp, because Warp can't crop images, and mddog crops images to scroll them. Use {SUPPORTED}."),
+        term::Refused::Tmux => "mdd: mddog doesn't support tmux yet because tmux doesn't pass its images through. Run mdd outside tmux.".to_string(),
+        term::Refused::Zellij => "mdd: mddog doesn't support zellij yet because zellij 0.45 garbles scrolled images (zellij-org/zellij#5573 and #5648). Run mdd outside zellij.".to_string(),
+        term::Refused::Warp => format!("mdd: mddog doesn't support Warp because Warp can't crop images, and mddog crops images to scroll them. Use {SUPPORTED}."),
     })
 }
 /// The longest the input thread waits before it checks `paused` again.
@@ -301,8 +301,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     trace::mark("terminal probed");
     engine.set_display_p3(probe.ghostty());
     if probe.no_graphics() {
-        let refusal =
-            format!("mdd: this terminal can't show images, so it can't show the preview. mddog needs the Kitty graphics protocol: use {SUPPORTED}. Terminal.app and screen don't support it.");
+        let refusal = format!("mdd: this terminal can't show images so it can't show the preview. mddog needs the Kitty graphics protocol: use {SUPPORTED}.");
         drop(loader);
         drop(picker);
         tty.write(term::leave().as_bytes());

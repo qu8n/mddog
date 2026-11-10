@@ -13,7 +13,7 @@ export const previewLabels = {
   FileListPreview: 'The file list showing Markdown files with their headings and ages',
   MarkdownPreview: 'A release plan in mddog with front matter, a note, a task list, tables, lists, a quote, a diff, and a footnote',
   WideTablePreview: 'A wide table with a scroll bar along its bottom edge',
-  ClaudeCodePreview: 'A Markdown file in the mddog pane beside the Claude Code chat',
+  ClaudeCodePreview: 'Claude Code checks off a goal in plan.md, and the mddog pane beside the chat shows the check at once',
   SelectPreview: 'A selected phrase in a paragraph, and the status bar saying Copied the selection',
   CodeCopyPreview: 'A code block with its copy button in the top right corner',
   DiagramButtonsPreview: 'A Mermaid flowchart with expand and copy buttons in its top right corner',

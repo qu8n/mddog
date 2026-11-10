@@ -11,10 +11,25 @@
 </p>
 
 <p align="center">
-  Real Markdown rendering, right in your terminal
+  Real Markdown, right in your terminal
 </p>
 
-https://github.com/user-attachments/assets/982f59b8-5723-4da3-9665-11384b4fda58
+https://github.com/user-attachments/assets/0ac6535b-2c72-4222-a3ad-18cb04c12fe7
+
+## Why mddog?
+
+Other terminal viewers render Markdown with only characters. Code editors render the real page but live outside the terminal. mddog renders the real page in your terminal, using a single binary without browser nor Electron.
+
+|                                       | mddog | Text-based terminal viewers | Code editor preview |
+|---------------------------------------|:-----:|:---------------------------:|:-------------------:|
+| Stays in the terminal                 | ✅    | ✅                          | 🚫                  |
+| Real fonts and heading sizes          | ✅    | 🚫                          | ✅                  |
+| Diagrams and math drawn as graphics   | ✅    | 🚫                          | Some                |
+| Images                                | ✅    | Some                        | ✅                  |
+| Live reload                           | ✅    | Some                        | ✅                  |
+| Preview pane in Claude Code           | ✅    | 🚫                          | 🚫                  |
+
+<sub><em>Compared in November 2026 to terminal viewers like glow, leaf, mdcat, Frogmouth, and rich-cli, and to the built-in Markdown previews in VS Code, Cursor, Zed, and JetBrains IDEs.</em></sub>
 
 ## Install
 

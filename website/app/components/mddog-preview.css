@@ -1034,6 +1034,24 @@ html:not(.dark) .mdd:not([data-theme]) {
   color: var(--cc-mode);
 }
 
+.mdd-cc-spin {
+  color: #d77757;
+}
+
+.mdd-cc-ok {
+  color: #4eba65;
+}
+
+.mdd-cc-del {
+  background: var(--pl-del-bg);
+  color: var(--pl-del);
+}
+
+.mdd-cc-ins {
+  background: var(--pl-ins-bg);
+  color: var(--pl-ins);
+}
+
 /* Buttons that work, in the mouse previews. Each draws its state as src/render/raster.rs does. */
 .mdd-live {
   cursor: pointer;

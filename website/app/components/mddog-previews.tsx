@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Alert, CodeBlock, ExpandIcon, type Hint, MddogFrame, OcticonCopy, Page, StatusBar } from '@/components/mddog-frame';
+import { Alert, CodeBlock, ExpandIcon, type Hint, MddogFrame, OcticonCopy, Page, StatusBar, useLoop } from '@/components/mddog-frame';
 import { previewLabels } from '@/components/mddog-preview-labels';
 import { cn } from '@/lib/cn';
 
@@ -514,11 +514,52 @@ const sizes: [trail: string, length: string, tiles: string, cache: string][] = [
   ['Summit trail', '24 km', '2,015', '158 MB'],
 ];
 
+const open = '/mddog plan.md';
+const ask = 'check off the 30-day cleanup goal';
+
+/** How far the Claude Code loop got, in order. */
+const stages = ['start', 'opened', 'asked', 'working', 'edited', 'done'] as const;
+
+/** One moment of the loop: what's in the prompt box, and how far the session got. */
+type CcStep = { input: string; stage: (typeof stages)[number]; ms: number };
+
+/** Typing `text` into the prompt box, one key per step, while the session stays at `stage`. */
+const typing = (text: string, stage: CcStep['stage']): CcStep[] =>
+  Array.from({ length: text.length }, (_, i) => ({
+    input: text.slice(0, i + 1),
+    stage,
+    ms: text[i] === ' ' ? 110 : 55,
+  }));
+
+const ccSteps: CcStep[] = [
+  { input: '', stage: 'start', ms: 1000 },
+  ...typing(open, 'start'),
+  { input: open, stage: 'start', ms: 500 },
+  { input: '', stage: 'opened', ms: 1500 },
+  ...typing(ask, 'opened'),
+  { input: ask, stage: 'opened', ms: 500 },
+  { input: '', stage: 'working', ms: 1600 },
+  { input: '', stage: 'edited', ms: 900 },
+  { input: '', stage: 'done', ms: 4000 },
+];
+
+/** The edit as Claude Code shows it: the file's line numbers, then the removed and added lines. */
+const ccDiff: [line: string, kind?: 'del' | 'ins'][] = [
+  ['       11    - [x] Show the cache size per trail'],
+  ['       12 -  - [ ] Remove old trails on their own after 30 days', 'del'],
+  ['       12 +  - [x] Remove old trails on their own after 30 days', 'ins'],
+];
+
 /**
  * Claude Code after `/mddog plan.md`, as a 146 x 34 terminal: the chat on the left, the mddog pane on the
- * right with its close button, and the prompt box and mode line across the bottom.
+ * right with its close button, and the prompt box and mode line across the bottom. In a loop, you ask
+ * Claude to check off a goal, and the pane checks it the moment Claude edits plan.md.
  */
 export function ClaudeCodePreview({ className }: PreviewProps) {
+  const { input, stage } = useLoop(ccSteps);
+  const reached = (at: CcStep['stage']) => stages.indexOf(stage) >= stages.indexOf(at);
+  const opened = reached('opened');
+  const edited = reached('edited');
   return (
     <MddogFrame label={previewLabels.ClaudeCodePreview} className={className} cols={146} rows={34} bar={null}>
       <div className="mdd-cc mdd-mono">
@@ -533,17 +574,57 @@ export function ClaudeCodePreview({ className }: PreviewProps) {
               <span className="mdd-cc-dim">~/trailmix</span>
             </span>
           </div>
-          <div>{' '}</div>
-          <div>
-            <span className="mdd-cc-prompt">
-              <span className="mdd-cc-dim">❯ </span>/mddog plan.md{' '}
-            </span>
-          </div>
-          <div>
-            <span className="mdd-cc-dim">{'  ⎿  '}</span>mddog: Opened plan.md in the mddog pane.
-          </div>
+          {opened && (
+            <>
+              <div>{' '}</div>
+              <div>
+                <span className="mdd-cc-prompt">
+                  <span className="mdd-cc-dim">❯ </span>
+                  {open}{' '}
+                </span>
+              </div>
+              <div>
+                <span className="mdd-cc-dim">{'  ⎿  '}</span>mddog: Opened plan.md in the mddog pane.
+              </div>
+            </>
+          )}
+          {reached('working') && (
+            <>
+              <div>{' '}</div>
+              <div>
+                <span className="mdd-cc-prompt">
+                  <span className="mdd-cc-dim">❯ </span>
+                  {ask}{' '}
+                </span>
+              </div>
+              <div>{' '}</div>
+            </>
+          )}
+          {stage === 'working' && <div className="mdd-cc-spin">✻ Updating… <span className="mdd-cc-dim">(esc to interrupt)</span></div>}
+          {edited && (
+            <>
+              <div>
+                <span className="mdd-cc-ok">⏺</span> <span className="mdd-b">Update</span>(plan.md)
+              </div>
+              <div>
+                <span className="mdd-cc-dim">{'  ⎿  '}</span>Updated <span className="mdd-b">plan.md</span> with{' '}
+                <span className="mdd-b">1</span> addition and <span className="mdd-b">1</span> removal
+              </div>
+              {ccDiff.map(([line, kind]) => (
+                <div key={line} className={cn(kind && `mdd-cc-${kind}`)}>
+                  {line}
+                </div>
+              ))}
+            </>
+          )}
+          {stage === 'done' && (
+            <>
+              <div>{' '}</div>
+              <div>⏺ Checked off the 30-day cleanup goal in plan.md.</div>
+            </>
+          )}
         </div>
-        <div className="mdd-cc-pane">
+        {opened && <div className="mdd-cc-pane">
           <div className="mdd-cc-close">✕ </div>
           <div className="mdd-cc-page">
             <Page>
@@ -563,7 +644,7 @@ export function ClaudeCodePreview({ className }: PreviewProps) {
                   Show the cache size per trail
                 </li>
                 <li>
-                  <Check />
+                  <Check checked={edited} />
                   Remove old trails on their own after 30 days
                 </li>
               </ul>
@@ -592,10 +673,13 @@ export function ClaudeCodePreview({ className }: PreviewProps) {
               </table>
             </Page>
           </div>
-        </div>
+        </div>}
         <div className="mdd-cc-input">
           <div className="mdd-cc-rule" />
-          <div>❯ </div>
+          <div>
+            ❯ {input}
+            <span className="mdd-vim-cursor"> </span>
+          </div>
           <div className="mdd-cc-rule" />
           <div>
             <span className="mdd-cc-mode">{'  ⏵⏵ auto mode on '}</span>

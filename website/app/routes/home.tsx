@@ -129,7 +129,7 @@ function Hero() {
       <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 max-w-3xl">
           <h1 className="text-4xl font-medium tracking-tight text-balance sm:text-6xl">
-            Real Markdown rendering, right in your terminal
+            Real Markdown, right in your terminal
           </h1>
           <p className="mt-5 max-w-2xl text-xl text-fd-muted-foreground text-pretty">
             View Markdown with real fonts, tables, diagrams, math, and images.
@@ -207,7 +207,7 @@ function WhyMddog() {
       <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
         <SectionHeading
           title="Why mddog?"
-          body="Other terminal viewers render Markdown with only characters. Code editors render the real page but live outside the terminal. mddog renders the real page in your terminal, using a single binary and no browser or Electron."
+          body="Other terminal viewers render Markdown with only characters. Code editors render the real page but live outside the terminal. mddog renders the real page in your terminal, using a single binary without browser nor Electron."
         />
         <WhyMddogTable className="mt-12" />
       </div>

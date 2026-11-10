@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { cn } from '@/lib/cn';
 import './mddog-preview.css';
 
@@ -213,4 +213,25 @@ export function CodeCopiedIcon() {
       <path d="M3 8l3.5 4L13.5 4" />
     </svg>
   );
+}
+
+/**
+ * Plays a preview's steps in a loop, each for its `ms`, and returns the one on screen. Before the page
+ * runs scripts, and when motion is reduced, it holds the last step.
+ */
+export function useLoop<T extends { ms: number }>(steps: T[]): T {
+  const [i, setI] = useState<number | null>(null);
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let step = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const next = () => {
+      setI(step);
+      timer = setTimeout(next, steps[step].ms);
+      step = (step + 1) % steps.length;
+    };
+    next();
+    return () => clearTimeout(timer);
+  }, [steps]);
+  return steps[i ?? steps.length - 1];
 }

@@ -5,6 +5,7 @@
 @import 'fumadocs-ui/css/generated/notebook.css';
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
+@import '@fontsource-variable/rubik/wght.css';
 
 /* Berkeley Mono is licensed, so it is served from our own Worker (fonts-worker/), not this repo. */
 @font-face {
@@ -23,8 +24,9 @@
   font-display: swap;
 }
 
-/* Inline code, code blocks and the wordmark all use font-mono. */
+/* Inline code, code blocks and the wordmark all use font-mono. Everything else uses Rubik. */
 @theme {
+  --font-sans: 'Rubik Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Berkeley Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 

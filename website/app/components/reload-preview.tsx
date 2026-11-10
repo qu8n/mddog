@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { MddogFrame, Page, StatusBar } from '@/components/mddog-frame';
+import { MddogFrame, Page, StatusBar, useLoop } from '@/components/mddog-frame';
 import { previewLabels } from '@/components/mddog-preview-labels';
 import { cn } from '@/lib/cn';
 
@@ -56,26 +55,6 @@ const steps: Step[] = [
   { typed: newLine.length, cmd: ':w', saved: false, ms: 350 },
   { typed: newLine.length, cmd: written, saved: true, ms: 3500 },
 ];
-
-/** The last step: what shows before the page runs scripts, and when motion is reduced. */
-const still: Frame = steps[steps.length - 1];
-
-function useLoop(): Frame {
-  const [i, setI] = useState<number | null>(null);
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    let step = 0;
-    let timer: ReturnType<typeof setTimeout>;
-    const next = () => {
-      setI(step);
-      timer = setTimeout(next, steps[step].ms);
-      step = (step + 1) % steps.length;
-    };
-    next();
-    return () => clearTimeout(timer);
-  }, []);
-  return i === null ? still : steps[i];
-}
 
 /** Splits a line into screen rows, as Vim wraps it: at the last column, even inside a word. */
 function wrap(line: string) {
@@ -140,7 +119,7 @@ function Preview({ saved }: Frame) {
 }
 
 export function ReloadPreview({ className }: { className?: string }) {
-  const frame = useLoop();
+  const frame = useLoop(steps);
   return (
     <div role="group" aria-label={previewLabels.ReloadPreview} className={cn('grid gap-4 sm:grid-cols-2', className)}>
       <MddogFrame label="Vim typing a new open question into plan.md and saving it" cols={COLS} rows={ROWS} bar={null}>

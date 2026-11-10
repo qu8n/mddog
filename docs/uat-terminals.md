@@ -1,6 +1,6 @@
 # Terminal UAT
 
-Manual tests of mddog in each terminal, alone and inside a multiplexer. The results feed the Limitations section of the README.
+Manual tests of mddog in each terminal, alone and inside a multiplexer. The results feed the [Compatibility](https://mddog.pages.dev/docs/compatibility) page of the docs.
 
 Build under test: `7699b95`, run as `target/release/mdd` from a worktree, first on `PATH`. Tested on 2026-11-07 on a Retina Mac with macOS 27.2. Agents drove the terminals with AppleScript keys and CoreGraphics mouse events, and checked screenshots.
 
