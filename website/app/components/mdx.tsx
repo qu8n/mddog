@@ -2,6 +2,10 @@ import { Banner } from '@cloudflare/kumo/components/banner';
 import { CheckCircleIcon, InfoIcon, LightbulbIcon, WarningCircleIcon, WarningIcon } from '@phosphor-icons/react';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
 import * as previews from '@/components/mddog-previews';
+import * as mousePreviews from '@/components/mouse-previews';
+import { ReloadPreview } from '@/components/reload-preview';
+import { ThemesPreview } from '@/components/theme-previews';
+import { No, WhyMddogTable, Yes } from '@/components/why-mddog-table';
 import type { MDXComponents } from 'mdx/types';
 import type { ComponentProps, ReactNode } from 'react';
 
@@ -40,7 +44,13 @@ export function getMDXComponents(components?: MDXComponents) {
   return {
     ...defaultMdxComponents,
     Callout,
+    WhyMddogTable,
+    Yes,
+    No,
+    ThemesPreview,
+    ReloadPreview,
     ...previews,
+    ...mousePreviews,
     ...components,
   } satisfies MDXComponents;
 }

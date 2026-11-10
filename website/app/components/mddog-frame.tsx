@@ -3,18 +3,25 @@ import { cn } from '@/lib/cn';
 import './mddog-preview.css';
 
 /**
- * A terminal frame drawn the way mddog looks in its github-dark theme. The
- * children fill the screen above the status bar. It stays dark on light pages.
+ * A terminal window drawn the way mddog looks in its github-dark theme: a macOS title bar, then the
+ * children on the screen above the status bar. It turns github-light when the site is in light mode.
  */
 export function MddogFrame({
   label,
   bar,
+  rows = 24,
+  cols = 84,
   className,
   children,
 }: {
   /** Says what the frame shows, for screen readers. */
   label: string;
+  /** The status bar, or null for a frame without one. */
   bar: ReactNode;
+  /** Terminal rows, status bar included. More rows make the frame taller. */
+  rows?: number;
+  /** Terminal columns. More columns draw everything smaller in the same width. */
+  cols?: number;
   className?: string;
   children: ReactNode;
 }) {
@@ -23,11 +30,37 @@ export function MddogFrame({
     // The drawing inside stays real text for the mouse, but its sample headings
     // and tables would read as part of the page, so it's hidden from them.
     <figure role="img" aria-label={label} className={cn('mdd-wrap not-prose', className)}>
-      <div className="mdd" aria-hidden>
+      <div className="mdd" aria-hidden style={frameSize(cols, rows)}>
+        <TitleBar />
         <div className="mdd-screen">{children}</div>
         {bar}
       </div>
     </figure>
+  );
+}
+
+/** The title bar's height, in the frame's pixels. */
+const TITLE_BAR = 30;
+
+/**
+ * A window's size: the title bar, then cells of 9.5 x 19 of its pixels. Each of its lengths is a multiple
+ * of --u, so more columns make --u smaller.
+ */
+function frameSize(cols: number, rows: number) {
+  return {
+    aspectRatio: `${cols * 9.5} / ${rows * 19 + TITLE_BAR}`,
+    '--u': `calc(100cqw / ${cols * 9.5})`,
+  } as React.CSSProperties;
+}
+
+/** A macOS title bar with only the traffic lights. An inactive window draws them gray. */
+export function TitleBar({ inactive }: { inactive?: boolean }) {
+  return (
+    <div className="mdd-titlebar" data-inactive={inactive || undefined}>
+      <span />
+      <span />
+      <span />
+    </div>
   );
 }
 
@@ -110,7 +143,7 @@ const alerts: Record<AlertKind, { title: string; color: string; icon: ReactNode 
 export function Alert({ kind, children }: { kind: AlertKind; children: ReactNode }) {
   const { title, color, icon } = alerts[kind];
   return (
-    <div className="mdd-alert" style={{ '--alert': color } as React.CSSProperties}>
+    <div className="mdd-alert" style={{ '--alert': `var(--alert-${kind}, ${color})` } as React.CSSProperties}>
       <p className="mdd-alert-title">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
           {icon}
@@ -131,16 +164,53 @@ export function CopyIcon() {
   );
 }
 
-/** A code block. Pass one child per line; wide lines scroll sideways. */
-export function CodeBlock({ plain, children }: { plain?: boolean; children: ReactNode }) {
+/** A code block. Pass one child per line; wide lines scroll sideways. `button` replaces the still copy button. */
+export function CodeBlock({ plain, button, children }: { plain?: boolean; button?: ReactNode; children: ReactNode }) {
   return (
     <div className={cn('mdd-pre', plain && 'mdd-pre-plain')}>
       <pre>
         <code>{children}</code>
       </pre>
-      <span className="mdd-copy" aria-hidden>
-        <CopyIcon />
-      </span>
+      {button ?? (
+        <span className="mdd-copy" aria-hidden>
+          <CopyIcon />
+        </span>
+      )}
     </div>
+  );
+}
+
+/** mddog's diagram button icons: GitHub's octicons, as src/render/icons.rs draws them. */
+export function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M3.72 3.72a.75.75 0 011.06 1.06L2.56 7h10.88l-2.22-2.22a.75.75 0 011.06-1.06l3.5 3.5a.75.75 0 010 1.06l-3.5 3.5a.75.75 0 11-1.06-1.06l2.22-2.22H2.56l2.22 2.22a.75.75 0 11-1.06 1.06l-3.5-3.5a.75.75 0 010-1.06l3.5-3.5z" />
+    </svg>
+  );
+}
+
+export function OcticonCopy() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z" />
+      <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z" />
+    </svg>
+  );
+}
+
+export function OcticonCheck() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+    </svg>
+  );
+}
+
+/** The check a code block's copy button turns into, drawn as mddog strokes it. */
+export function CodeCopiedIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3 8l3.5 4L13.5 4" />
+    </svg>
   );
 }

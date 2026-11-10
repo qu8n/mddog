@@ -1,5 +1,5 @@
 /*
- * A live copy of an mddog screenshot. The frame is drawn at its screenshot
+ * A live copy of an mddog screenshot, in github-dark, or github-light when the site is light. The frame is drawn at its screenshot
  * size, 798 x 456 px with 84 x 24 terminal cells, and --u is one of those
  * pixels scaled to the frame's width. Every length below is a multiple of
  * --u, so the frame scales as one picture while its text stays real text.
@@ -24,17 +24,54 @@
   --pre-bg: #151b23;
   --button-bg: #212830;
   --select-bg: #21262d;
+  --link: #4493f8;
+  --accent: #1f6feb;
+  --alt-bg: #151b23;
+  --border: #3d444d;
+  --text-selection: #1f4a82;
+  --mark-bg: #5a4a00;
+  --match-bg: #5a4a00;
+  --match-current-bg: #9e6a03;
+  --alert-note: #4493f8;
+  --alert-tip: #3fb950;
+  --alert-warning: #d29922;
+  --pl-k: #ff7b72;
+  --pl-c1: #79c0ff;
+  --pl-en: #d2a8ff;
+  --pl-s: #a5d6ff;
+  --pl-del-bg: #2d1214;
+  --pl-del: #ffdcd7;
+  --pl-ins-bg: #12261e;
+  --pl-ins: #aff5b4;
+  /* GitHub's gray task boxes, as task_box in src/render/theme.rs. */
+  --check-bg: #3b3b3b;
+  --check-border: #626262;
+  --check-done-bg: #757575;
+  --check-fg: #3b3b3b;
+  --panel-rule: #4b5159;
+  --scroll-thumb: #6e7681;
+  --tip-bg: #30363d;
+  /* Claude Code's own colors, around the mddog pane. */
+  --cc-dim: #999999;
+  --cc-prompt-bg: #373737;
+  --cc-pane-bg: #262626;
+  --cc-divider: #5c5c5c;
+  --cc-rule: #888888;
+  --cc-mode: #ffc107;
+  --diagram-fill: #161b22;
+  --diagram-border: #3d444d;
+  --diagram-line: #9198a1;
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   display: flex;
   flex-direction: column;
-  aspect-ratio: 1596 / 912;
   overflow: hidden;
   border: 1px solid var(--color-fd-border);
   border-radius: 0.75rem;
   background: var(--bg);
   color: var(--text);
   color-scheme: dark;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-body);
   font-size: calc(16 * var(--u));
   line-height: 1.5;
   text-align: start;
@@ -45,7 +82,7 @@
 }
 
 .mdd ::selection {
-  background: #1f4a82;
+  background: var(--text-selection);
 }
 
 .mdd-screen {
@@ -53,6 +90,35 @@
   display: flex;
   flex: 1;
   min-height: 0;
+}
+
+/* A macOS title bar: 12 px traffic lights, 8 px apart, on the window's background. */
+.mdd-titlebar {
+  display: flex;
+  flex: none;
+  gap: calc(8 * var(--u));
+  height: calc(30 * var(--u));
+  padding: 0 calc(12 * var(--u));
+  align-items: center;
+}
+
+.mdd-titlebar span {
+  width: calc(12 * var(--u));
+  height: calc(12 * var(--u));
+  border-radius: 50%;
+  background: #ff5f57;
+}
+
+.mdd-titlebar span:nth-child(2) {
+  background: #febc2e;
+}
+
+.mdd-titlebar span:nth-child(3) {
+  background: #28c840;
+}
+
+.mdd-titlebar[data-inactive] span {
+  background: color-mix(in srgb, var(--text) 18%, var(--bg));
 }
 
 /* Terminal cells: the status bar, the panels and the key list. */
@@ -150,12 +216,12 @@
 }
 
 .mdd-page mark {
-  background: #5a4a00;
+  background: var(--match-bg);
   color: inherit;
 }
 
 .mdd-page mark.mdd-current {
-  background: #9e6a03;
+  background: var(--match-current-bg);
 }
 
 /* Alerts. */
@@ -200,7 +266,7 @@
 }
 
 .mdd-page tbody tr:nth-child(2n) {
-  background: var(--pre-bg);
+  background: var(--alt-bg);
 }
 
 .mdd-page .mdd-num {
@@ -221,13 +287,13 @@
 
 .mdd ::-webkit-scrollbar-thumb {
   border-radius: calc(3 * var(--u));
-  background: #6e7681;
+  background: var(--scroll-thumb);
 }
 
 @supports not selector(::-webkit-scrollbar) {
   .mdd-scroll-x,
   .mdd-pre pre {
-    scrollbar-color: #6e7681 transparent;
+    scrollbar-color: var(--scroll-thumb) transparent;
     scrollbar-width: thin;
   }
 }
@@ -284,12 +350,12 @@
   background: none;
 }
 
-.pl-k { color: #ff7b72; }
-.pl-c1 { color: #79c0ff; }
-.pl-en { color: #d2a8ff; }
-.pl-s { color: #a5d6ff; }
-.pl-del { background: #2d1214; color: #ffdcd7; }
-.pl-ins { background: #12261e; color: #aff5b4; }
+.pl-k { color: var(--pl-k); }
+.pl-c1 { color: var(--pl-c1); }
+.pl-en { color: var(--pl-en); }
+.pl-s { color: var(--pl-s); }
+.pl-del { background: var(--pl-del-bg); color: var(--pl-del); }
+.pl-ins { background: var(--pl-ins-bg); color: var(--pl-ins); }
 
 /* Mermaid diagram and its buttons. */
 .mdd-diagram {
@@ -310,7 +376,8 @@
   gap: calc(8 * var(--u));
 }
 
-.mdd-diagram-buttons span {
+.mdd-diagram-buttons > span {
+  position: relative;
   display: grid;
   place-items: center;
   width: calc(34 * var(--u));
@@ -318,12 +385,12 @@
   border: calc(1 * var(--u)) solid var(--rule);
   border-radius: calc(6 * var(--u));
   background: var(--button-bg);
-  color: var(--fg);
+  color: var(--muted);
 }
 
 .mdd-diagram-buttons svg {
-  width: calc(18 * var(--u));
-  height: calc(18 * var(--u));
+  width: calc(16 * var(--u));
+  height: calc(16 * var(--u));
 }
 
 .mdd-math {
@@ -354,12 +421,14 @@
   width: calc(13 * var(--u));
   height: calc(13 * var(--u));
   border-radius: calc(2.5 * var(--u));
-  background: #3b3f45;
-  color: #2a2e33;
+  border: calc(1 * var(--u)) solid var(--check-border);
+  background: var(--check-bg);
+  color: var(--check-fg);
 }
 
 .mdd-check[data-checked] {
-  background: #6b7078;
+  border-color: var(--check-done-bg);
+  background: var(--check-done-bg);
 }
 
 .mdd-check svg {
@@ -367,11 +436,11 @@
   height: 80%;
 }
 
-/* The contents panel beside the page. */
+/* The table of contents beside the page. */
 .mdd-toc {
   flex: none;
   width: calc(27.6 * var(--cell));
-  border-right: calc(1.5 * var(--u)) solid #4b5159;
+  border-right: calc(1.5 * var(--u)) solid var(--panel-rule);
   color: var(--muted);
 }
 
@@ -383,7 +452,7 @@
 
 .mdd-toc-rule {
   height: var(--row);
-  background: linear-gradient(#4b5159, #4b5159) center / 100% calc(1.5 * var(--u)) no-repeat;
+  background: linear-gradient(var(--panel-rule), var(--panel-rule)) center / 100% calc(1.5 * var(--u)) no-repeat;
 }
 
 .mdd-row {
@@ -425,7 +494,7 @@
 
 .mdd-files-rule {
   height: var(--row);
-  background: linear-gradient(#4b5159, #4b5159) center / 100% calc(1.5 * var(--u)) no-repeat;
+  background: linear-gradient(var(--panel-rule), var(--panel-rule)) center / 100% calc(1.5 * var(--u)) no-repeat;
 }
 
 .mdd-file {
@@ -453,4 +522,591 @@
 .mdd-page table.mdd-wide {
   width: min-content;
   margin-bottom: calc(8 * var(--u));
+}
+
+/* More page elements, for the Markdown support preview. */
+.mdd-page h3 {
+  margin: calc(24 * var(--u)) 0 calc(16 * var(--u));
+  font-size: 1.25em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.mdd-page a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.mdd-page blockquote,
+.mdd-page details,
+.mdd-page hr,
+.mdd-page .mdd-footnotes {
+  margin: 0 0 calc(16 * var(--u));
+}
+
+.mdd-page blockquote {
+  padding: 0 1em;
+  border-left: 0.25em solid var(--rule);
+  color: var(--muted);
+}
+
+.mdd-page ol,
+.mdd-page ul:not(.mdd-tasks) {
+  padding-left: 2em;
+}
+
+.mdd-page ol {
+  list-style: decimal;
+}
+
+.mdd-page ul:not(.mdd-tasks) {
+  list-style: disc;
+}
+
+.mdd-page li ul:not(.mdd-tasks) {
+  margin: 0.25em 0 0;
+  list-style: circle;
+}
+
+.mdd-page li + li {
+  margin-top: 0.25em;
+}
+
+.mdd-page hr {
+  height: 0.25em;
+  border: 0;
+  background: var(--rule);
+}
+
+.mdd-page kbd {
+  display: inline-block;
+  padding: 0 0.3em;
+  border: calc(1 * var(--u)) solid var(--rule);
+  border-radius: calc(6 * var(--u));
+  background: var(--pre-bg);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  line-height: 1.45;
+}
+
+.mdd-page sup {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+/* <details>: mddog's 8 px triangle, then the bold summary 20 px in. A click opens it, as in mddog. */
+.mdd-page details summary {
+  position: relative;
+  padding-left: calc(20 * var(--u));
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+
+.mdd-page details summary::-webkit-details-marker {
+  display: none;
+}
+
+.mdd-page details summary::before {
+  content: '';
+  position: absolute;
+  top: calc(8 * var(--u));
+  left: calc(4 * var(--u));
+  width: calc(7 * var(--u));
+  height: calc(8 * var(--u));
+  background: var(--text);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.mdd-page details[open] summary::before {
+  top: calc(10 * var(--u));
+  width: calc(8 * var(--u));
+  height: calc(7 * var(--u));
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.mdd-page details > :not(summary) {
+  margin: calc(8 * var(--u)) 0 0;
+}
+
+/* Front matter: one row per key, the key bold in the first column. */
+.mdd-page table.mdd-front th {
+  text-align: center;
+}
+
+.mdd-page .mdd-img {
+  display: block;
+  width: calc(480 * var(--u));
+  height: auto;
+}
+
+/* Footnotes: 12 px muted text under a line, each with a back link. */
+.mdd-page .mdd-footnotes {
+  padding-top: calc(16 * var(--u));
+  border-top: calc(1 * var(--u)) solid var(--rule);
+  color: var(--muted);
+  font-size: 0.75em;
+}
+
+.mdd-page .mdd-footnotes ol {
+  margin: 0;
+}
+
+.mdd-page .mdd-footnotes li::marker {
+  color: var(--text);
+}
+
+.mdd-backref svg {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.2em;
+}
+
+/*
+ * The built-in themes, for the themes preview. Each block sets the tokens of
+ * one file in assets/themes/. github-dark is the default above.
+ */
+/* github-light, for its theme window, and for every other preview when the site is in light mode. */
+.mdd[data-theme='github-light'],
+html:not(.dark) .mdd:not([data-theme]) {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bar-bg: #f6f8fa;
+  --text: #1f2328;
+  --muted: #59636e;
+  --fg: #393f46;
+  --rule: #d1d9e0;
+  --border: #d1d9e0;
+  --code-bg: #eff1f3;
+  --pre-bg: #f6f8fa;
+  --alt-bg: #f6f8fa;
+  --button-bg: #f6f8fa;
+  --link: #0969da;
+  --accent: #0969da;
+  --text-selection: #b6d6fb;
+  --mark-bg: #fff8c5;
+  --alert-note: #0969da;
+  --pl-k: #cf222e;
+  --pl-c1: #0550ae;
+  --pl-en: #6639ba;
+  --pl-s: #0a3069;
+  --select-bg: #e6eaef;
+  --match-bg: #fff8c5;
+  --match-current-bg: #ffb86c;
+  --alert-tip: #1a7f37;
+  --alert-warning: #9a6700;
+  --pl-del-bg: #ffebe9;
+  --pl-del: #82071e;
+  --pl-ins-bg: #dafbe1;
+  --pl-ins: #116329;
+  --check-bg: #f8f8f8;
+  --check-border: #d1d1d1;
+  --check-done-bg: #d1d1d1;
+  --check-fg: #ededed;
+  --panel-rule: #d1d9e0;
+  --scroll-thumb: color-mix(in srgb, #59636e 55%, #ffffff);
+  --tip-bg: #25292e;
+  --cc-dim: #666666;
+  --cc-prompt-bg: #e8e8e8;
+  --cc-pane-bg: #f0f0f0;
+  --cc-divider: #c4c4c4;
+  --cc-rule: #999999;
+  --cc-mode: #a16207;
+  --diagram-fill: #f6f8fa;
+  --diagram-border: #d1d9e0;
+  --diagram-line: #59636e;
+}
+
+.mdd[data-theme='obsidian-light'] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bar-bg: #f6f6f6;
+  --text: #222222;
+  --muted: #5c5c5c;
+  --fg: #222222;
+  --rule: #e4e4e4;
+  --border: #e4e4e4;
+  --code-bg: #fafafa;
+  --pre-bg: #fafafa;
+  --alt-bg: #fafafa;
+  --button-bg: #f6f6f6;
+  --link: #8a5cf5;
+  --accent: #9873f7;
+  --text-selection: #c6b8f5;
+  --mark-bg: #fff3a3;
+  --alert-note: #086ddd;
+  --pl-k: #d53984;
+  --pl-c1: #7852ee;
+  --pl-en: #e0ac00;
+  --pl-s: #08b94e;
+  --check-bg: #ffffff;
+  --diagram-fill: #ececff;
+  --diagram-border: #9370db;
+  --diagram-line: #333333;
+}
+
+.mdd[data-theme='obsidian-dark'] {
+  --bg: #1c1c1c;
+  --bar-bg: #282828;
+  --text: #dadada;
+  --muted: #b3b3b3;
+  --fg: #dadada;
+  --rule: #333333;
+  --border: #333333;
+  --code-bg: #232323;
+  --pre-bg: #232323;
+  --alt-bg: #232323;
+  --button-bg: #282828;
+  --link: #a68af9;
+  --accent: #8a5cf5;
+  --text-selection: #483699;
+  --mark-bg: #5a4a00;
+  --alert-note: #027aff;
+  --pl-k: #fa99cd;
+  --pl-c1: #a882ff;
+  --pl-en: #e0de71;
+  --pl-s: #44cf6e;
+  --check-bg: #1c1c1c;
+  --diagram-fill: #0f0f27;
+  --diagram-border: #986cf2;
+  --diagram-line: #cccccc;
+}
+
+/* Obsidian's layout, from the `obsidian` rules in src/render/theme.rs. */
+.mdd[data-theme^='obsidian'] {
+  --font-body: ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+.mdd[data-theme^='obsidian'] .mdd-page h1 {
+  padding-bottom: 0;
+  border-bottom: 0;
+  font-size: 1.618em;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.mdd[data-theme^='obsidian'] .mdd-page th,
+.mdd[data-theme^='obsidian'] .mdd-page td {
+  padding: calc(4 * var(--u)) calc(8 * var(--u));
+  line-height: 1.3;
+}
+
+.mdd[data-theme^='obsidian'] .mdd-page tbody tr:nth-child(2n) {
+  background: none;
+}
+
+.mdd[data-theme^='obsidian'] .mdd-alert {
+  padding: calc(12 * var(--u)) calc(24 * var(--u)) calc(16 * var(--u));
+  border-left: 0;
+  border-radius: calc(4 * var(--u));
+  background: color-mix(in srgb, var(--alert) 10%, var(--bg));
+}
+
+.mdd[data-theme^='obsidian'] .mdd-pre {
+  border-radius: calc(4 * var(--u));
+}
+
+.mdd[data-theme^='obsidian'] .mdd-pre pre {
+  padding: calc(12 * var(--u)) 0;
+  font-size: 0.875em;
+  line-height: 1.715;
+}
+
+.mdd[data-theme^='obsidian'] .mdd-check {
+  border: calc(1 * var(--u)) solid var(--muted);
+}
+
+.mdd[data-theme^='obsidian'] .mdd-check[data-checked] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.mdd[data-theme^='obsidian'] .mdd-done {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* A guide line down the nested list, under its parent's checkbox. */
+.mdd[data-theme^='obsidian'] .mdd-nested {
+  box-shadow: inset calc(4 * var(--u)) 0 0 calc(-3 * var(--u)) color-mix(in srgb, var(--text) 14%, var(--bg));
+}
+
+.mdd[data-theme^='obsidian'] .mdd-ext::after {
+  content: '';
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-left: 0.15em;
+  background: color-mix(in srgb, var(--text) 40%, var(--bg));
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 2h5v5M14 2 7 9M12 9.5V14H2V4h4.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* Obsidian puts a diagram at the left edge, with square nodes; GitHub centers it. */
+.mdd[data-theme^='obsidian'] .mdd-theme-diagram svg {
+  margin: 0;
+}
+
+.mdd[data-theme^='github'] .mdd-node:is(rect) {
+  rx: 6px;
+}
+
+/* The page parts only the themes preview draws. */
+.mdd-window {
+  aspect-ratio: 798 / 830;
+  box-shadow: 0 20px 40px -12px rgb(0 0 0 / 25%);
+}
+
+
+.mdd-window .mdd-page {
+  padding-top: calc(12 * var(--u));
+}
+
+.mdd-page sub {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.mdd-page .mdd-center {
+  text-align: center;
+}
+
+.mdd-theme-tasks {
+  padding-left: calc(18 * var(--u)) !important;
+}
+
+.mdd-theme-tasks .mdd-nested {
+  margin-left: calc(-8 * var(--u));
+  padding-left: calc(32 * var(--u));
+}
+
+.mdd-math math {
+  font-size: 1em;
+}
+
+.mdd-theme-diagram {
+  margin-top: calc(48 * var(--u)) !important;
+}
+
+.mdd-theme-diagram svg {
+  width: 74%;
+  margin: 0 auto;
+}
+
+.mdd-node {
+  fill: var(--diagram-fill);
+  stroke: var(--diagram-border);
+  stroke-width: 1.5;
+}
+
+.mdd-edge {
+  fill: none;
+  stroke: var(--diagram-line);
+}
+
+.mdd-arrow {
+  fill: var(--diagram-line);
+}
+
+.mdd-node-label {
+  fill: var(--text);
+}
+
+.mdd-theme-diagram .mdd-diagram-buttons {
+  top: calc(-44 * var(--u));
+}
+
+/* The four windows: a grid, or on a wide container the cascade, each a column further right and a little lower. */
+.mdd-theme-slot {
+  cursor: default;
+}
+
+.mdd-theme-name {
+  margin-bottom: 0.5rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+
+@container (min-width: 36rem) {
+  .mdd-themes {
+    position: relative;
+    aspect-ratio: 1579 / 860;
+  }
+
+  .mdd-theme-slot {
+    position: absolute;
+    top: calc(var(--i) * 7.4%);
+    left: calc(var(--i) * 21.1%);
+    width: 36.7%;
+  }
+
+  .mdd-theme-name {
+    margin: 0 0 0 0.75rem;
+    padding: 0.125rem 0.625rem;
+    width: fit-content;
+    border: 1px solid var(--color-fd-border);
+    border-bottom: 0;
+    border-radius: 0.5rem 0.5rem 0 0;
+    background: var(--color-fd-card);
+    font-size: 0.75rem;
+  }
+}
+
+/*
+ * The Claude Code plugin, measured in a 146 x 59 Claude Code window: 82 columns of chat, a divider column,
+ * and the mddog pane on Claude Code's #262626, its page drawn by mddog at the pane's width.
+ */
+.mdd-cc {
+  display: grid;
+  flex: 1;
+  grid-template-columns: calc(82 * var(--cell)) 1fr;
+  grid-template-rows: 1fr auto;
+  min-width: 0;
+  color: var(--text);
+}
+
+.mdd-cc-chat {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mdd-cc-banner {
+  display: flex;
+  gap: calc(2 * var(--cell));
+  padding-top: var(--row);
+}
+
+.mdd-cc-logo {
+  color: #d77757;
+}
+
+.mdd-cc-dim {
+  color: var(--cc-dim);
+}
+
+.mdd-cc-prompt {
+  background: var(--cc-prompt-bg);
+}
+
+.mdd-cc-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 0 var(--row) calc(2 * var(--cell));
+  /* The divider: a dim │ down the middle of the first column. */
+  background: linear-gradient(var(--cc-divider), var(--cc-divider)) calc(var(--cell) / 2) 0 / calc(1.5 * var(--u)) 100% no-repeat, var(--cc-pane-bg);
+}
+
+.mdd-cc-close {
+  height: var(--row);
+  color: var(--cc-dim);
+  text-align: end;
+}
+
+.mdd-cc-page {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: var(--font-body);
+  white-space: normal;
+}
+
+.mdd-cc-page .mdd-page {
+  height: 100%;
+}
+
+.mdd-cc-input {
+  grid-column: 1 / -1;
+}
+
+.mdd-cc-rule {
+  height: var(--row);
+  background: linear-gradient(var(--cc-rule), var(--cc-rule)) center / 100% calc(1.5 * var(--u)) no-repeat;
+}
+
+.mdd-cc-mode {
+  color: var(--cc-mode);
+}
+
+/* Buttons that work, in the mouse previews. Each draws its state as src/render/raster.rs does. */
+.mdd-live {
+  cursor: pointer;
+}
+
+.mdd-copy.mdd-live {
+  background: var(--pre-bg);
+}
+
+.mdd-copy.mdd-live:hover {
+  background: color-mix(in srgb, var(--rule) 60%, var(--pre-bg));
+}
+
+.mdd-copy[data-copied],
+.mdd-diagram-buttons [data-copied] {
+  color: var(--alert-tip);
+}
+
+/* The label left of a button: 12 px white text on a dark box, 6 px from the button. */
+.mdd-tip {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 6 * var(--u));
+  padding: calc(3 * var(--u)) calc(4 * var(--u));
+  border-radius: calc(6 * var(--u));
+  background: var(--tip-bg);
+  color: #ffffff;
+  font-family: var(--font-body);
+  font-size: calc(12 * var(--u));
+  line-height: 1.2;
+  white-space: nowrap;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* An expanded diagram fills the screen above the status bar. */
+.mdd-expanded {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: calc(16 * var(--u));
+  background: var(--bg);
+}
+
+.mdd-expanded svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* A selection, as mddog paints it: the theme's selection color at 60% over the text. */
+.mdd-sel {
+  background: color-mix(in srgb, var(--text-selection) 60%, transparent);
+}
+
+/* Vim beside mddog in the reload preview: plain text in terminal cells, `~` past the end of the file. */
+.mdd-vim {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 calc(var(--cell) / 2);
+  color: var(--fg);
+}
+
+.mdd-vim > div {
+  height: var(--row);
+}
+
+.mdd-vim-tilde {
+  color: var(--link);
+}
+
+.mdd-vim-cursor {
+  background: var(--fg);
+  color: var(--bg);
 }

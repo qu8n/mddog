@@ -1,0 +1,74 @@
+---
+title: Mouse support
+description: Select and copy text, follow links, scroll wide blocks, and click the buttons on code blocks, diagrams, and details.
+---
+
+## Select and copy
+
+While in the preview, drag to select text with your mouse, or double-click a word. Press `Cmd-c` to then copy the selection.
+
+<SelectPreview className="my-6" />
+
+To copy automatically on text selection, set [`copy_on_select`](/docs/config#copy_on_select) in your config.
+
+Copies go to the macOS clipboard and also to your terminal over OSC 52 so they work over SSH, too. See [Compatibility](/docs/compatibility) for caveats around this feature with certain terminals.
+
+## Links
+
+You can click a link to follow it. Each link type behaves differently:
+
+- A web link opens in your browser, and a `mailto:` link in your mail app
+- A `#heading` link scrolls to that heading
+- A relative link to a `.md` or `.markdown` file opens it in mddog, at the heading if the link names one
+- A link to a folder opens its `README.md` or `README.markdown`, as GitHub does
+
+To come back, press `Backspace` or `Ctrl-o`.
+
+### Safety guardrails
+
+- A link opens only Markdown files, and only inside the current repo
+- With no repo, the limit is your home folder, or the file's own folder when it's outside your home folder. A link to any other local file shows a notice and does nothing
+- Links with other schemes, such as `javascript:`, also do nothing
+
+## Copy a code block
+
+Each code block has a copy button in its top right corner. Click it to copy the code. The button turns into a green check for two seconds, and the status bar says what you copied.
+
+<CodeCopyPreview className="my-6" />
+
+To copy the whole file's Markdown source instead, press `c`.
+
+## Wide code blocks and tables
+
+A code block or table wider than the page can be scrolled horizontally, like in the browser.
+
+<WideTablePreview className="my-6" />
+
+You have many options to scroll:
+
+- `Shift` + mouse wheel, or a sideways wheel, scrolls the block under the pointer
+- `h` and `l` (or `Left` and `Right`) scroll every wide block on screen
+- Drag the scroll bar
+- Press `w` to wrap long lines in code blocks instead
+
+## Diagrams
+
+A Mermaid diagram has two buttons in its top right corner:
+
+- The expand button shows the diagram alone, scaled to fill the screen. Press `Esc` or click to go back
+- The copy button copies the diagram's Mermaid source
+
+<DiagramButtonsPreview className="my-6" />
+
+A diagram wider than the page shrinks to fit and gets a zoom bar. Zoom in, then drag inside the diagram to pan.
+
+## Details
+
+Click the summary of a `<details>` block to open or close it.
+
+<DetailsPreview className="my-6" />
+
+## Other clicks
+
+- Click an entry in the table of contents to jump to it. See [Table of contents](/docs/table-of-contents)
+- Click a key in the status bar to run it

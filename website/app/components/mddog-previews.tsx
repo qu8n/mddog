@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Alert, CodeBlock, CopyIcon, type Hint, MddogFrame, Page, StatusBar } from '@/components/mddog-frame';
+import { Alert, CodeBlock, ExpandIcon, type Hint, MddogFrame, OcticonCopy, Page, StatusBar } from '@/components/mddog-frame';
 import { previewLabels } from '@/components/mddog-preview-labels';
 import { cn } from '@/lib/cn';
 
@@ -97,19 +97,19 @@ export function CodePreview({ className }: PreviewProps) {
 }
 
 /** The Mermaid flowchart from the screenshot, drawn by hand in its page coordinates. */
-function PlanDiagram() {
-  const node = { fill: '#161b22', stroke: '#3d444d', strokeWidth: 1.5 };
-  const edge = { fill: 'none', stroke: '#9198a1', strokeWidth: 2, markerEnd: 'url(#mdd-arrow)' };
-  const label = { fill: '#f0f6fc', fontSize: 16, textAnchor: 'middle', dominantBaseline: 'central' } as const;
+/** The Mermaid flowchart's drawing alone, for the page and for the expanded view. */
+export function PlanDiagramSvg({ className }: { className?: string }) {
+  // Colors come from the theme's diagram tokens in mddog-preview.css.
+  const node = { className: 'mdd-node' };
+  const edge = { className: 'mdd-edge', strokeWidth: 2, markerEnd: 'url(#mdd-arrow)' };
+  const label = { className: 'mdd-node-label', fontSize: 16, textAnchor: 'middle', dominantBaseline: 'central' } as const;
   return (
-    <div className="mdd-diagram">
-      <svg viewBox="24 78 750 206">
+      <svg viewBox="24 78 750 206" className={className}>
         <defs>
           <marker id="mdd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
-            <path d="M0 0 10 5 0 10z" fill="#9198a1" />
+            <path d="M0 0 10 5 0 10z" className="mdd-arrow" />
           </marker>
         </defs>
-        <rect x="91.5" y="96.5" width="617.5" height="168.5" fill="#0f141b" />
         <path d="M202 127H265" {...edge} />
         <path d="M219 225.5H265" {...edge} />
         <path d="M410 149.5C440 149.5 445 166 465 166" {...edge} />
@@ -128,16 +128,24 @@ function PlanDiagram() {
         <text x="490" y="176" {...label}>Score</text>
         <text x="631.25" y="176.5" {...label}>Top 3 hikes</text>
       </svg>
-      <div className="mdd-diagram-buttons" aria-hidden>
-        <span>
-          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 9h14M5 6 2 9l3 3M13 6l3 3-3 3" />
-          </svg>
-        </span>
-        <span>
-          <CopyIcon />
-        </span>
-      </div>
+  );
+}
+
+/** The flowchart on the page, with its expand and copy buttons. Pass `buttons` to make them work. */
+export function PlanDiagram({ buttons }: { buttons?: ReactNode }) {
+  return (
+    <div className="mdd-diagram">
+      <PlanDiagramSvg />
+      {buttons ?? (
+        <div className="mdd-diagram-buttons" aria-hidden>
+          <span>
+            <ExpandIcon />
+          </span>
+          <span>
+            <OcticonCopy />
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -320,19 +328,57 @@ function Check({ checked }: { checked?: boolean }) {
   );
 }
 
+/** A footnote's back link, the arrow GitHub draws after its text. */
+function BackLink() {
+  return (
+    <a className="mdd-backref" aria-hidden>
+      <svg viewBox="0 0 16 16" fill="currentColor">
+        <path d="M4.53 7.47a.75.75 0 0 1 0 1.06L3.31 9.75H10a2.5 2.5 0 0 0 0-5H8.75a.75.75 0 0 1 0-1.5H10a4 4 0 0 1 0 8H3.31l1.22 1.22a.75.75 0 1 1-1.06 1.06l-2.5-2.5a.75.75 0 0 1 0-1.06l2.5-2.5a.75.75 0 0 1 1.06 0Z" />
+      </svg>
+    </a>
+  );
+}
+
+/** The page of docs/markdown, drawn as mddog draws plan.md in github-dark. Click "Open questions" to open it. */
 export function MarkdownPreview({ className }: PreviewProps) {
   return (
     <MddogFrame
       label={previewLabels.MarkdownPreview}
       className={className}
+      rows={78}
       bar={<StatusBar left="plan.md" />}
     >
       <Page>
+        <table className="mdd-front">
+          <tbody>
+            <tr>
+              <th>title</th>
+              <td>Release plan</td>
+            </tr>
+            <tr>
+              <th>version</th>
+              <td>2.0</td>
+            </tr>
+            <tr>
+              <th>owner</th>
+              <td>maps-team</td>
+            </tr>
+          </tbody>
+        </table>
         <h1>Trail cache: release plan</h1>
-        <p>Trail cache keeps offline map tiles for hikers. This plan covers the 2.0 release.</p>
+        <p>
+          Trail cache keeps <strong>offline map tiles</strong> for hikers. This plan covers the <em>2.0</em> release,
+          which replaces <del>region packs</del> with <code>trail packs</code>. Read the <a>design doc</a> first.
+          <sup>
+            <a>[1]</a>
+          </sup>
+        </p>
         <Alert kind="note">
           <p>The cache now stores tiles by trail, not by region, so a trip downloads only what it needs.</p>
         </Alert>
+        <p>
+          <img className="mdd-img" src="/previews/trail-map.svg" alt="" width={480} height={200} />
+        </p>
         <h2>Goals</h2>
         <ul className="mdd-tasks">
           <li>
@@ -349,6 +395,60 @@ export function MarkdownPreview({ className }: PreviewProps) {
           </li>
         </ul>
         <h2>Sizes</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Trail</th>
+              <th className="mdd-num">Tiles</th>
+              <th className="mdd-num">Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Coast path</td>
+              <td className="mdd-num">1,240</td>
+              <td className="mdd-num">38 MB</td>
+            </tr>
+            <tr>
+              <td>Ridge loop</td>
+              <td className="mdd-num">610</td>
+              <td className="mdd-num">19 MB</td>
+            </tr>
+          </tbody>
+        </table>
+        <h2>Rollout</h2>
+        <ol>
+          <li>Ship to beta testers</li>
+          <li>
+            Watch the crash rate
+            <ul>
+              <li>Roll back if it passes 0.5%</li>
+            </ul>
+          </li>
+          <li>
+            Release to everyone. Press <kbd>Cmd</kbd>+<kbd>R</kbd> in the app to refresh the cache.
+          </li>
+        </ol>
+        <blockquote>
+          <p>Hikers lose signal on every trail we tested. Offline has to be the default.</p>
+        </blockquote>
+        <details>
+          <summary>Open questions</summary>
+          <p>Should the cache keep trails the user starred?</p>
+        </details>
+        <h3>Migration</h3>
+        <CodeBlock>
+          <span className="mdd-line pl-del">- cache.load_region(&quot;north&quot;)</span>
+          <span className="mdd-line pl-ins">+ cache.load_trail(&quot;coast-path&quot;)</span>
+        </CodeBlock>
+        <hr />
+        <div className="mdd-footnotes">
+          <ol>
+            <li>
+              The doc has the tile format and the cleanup rules. <BackLink />
+            </li>
+          </ol>
+        </div>
       </Page>
     </MddogFrame>
   );
@@ -404,6 +504,105 @@ export function WideTablePreview({ className }: PreviewProps) {
           </table>
         </div>
       </Page>
+    </MddogFrame>
+  );
+}
+
+const sizes: [trail: string, length: string, tiles: string, cache: string][] = [
+  ['Coastal ridge', '18 km', '1,240', '96 MB'],
+  ['Lake loop', '7 km', '410', '31 MB'],
+  ['Summit trail', '24 km', '2,015', '158 MB'],
+];
+
+/**
+ * Claude Code after `/mddog plan.md`, as a 146 x 34 terminal: the chat on the left, the mddog pane on the
+ * right with its close button, and the prompt box and mode line across the bottom.
+ */
+export function ClaudeCodePreview({ className }: PreviewProps) {
+  return (
+    <MddogFrame label={previewLabels.ClaudeCodePreview} className={className} cols={146} rows={34} bar={null}>
+      <div className="mdd-cc mdd-mono">
+        <div className="mdd-cc-chat">
+          <div className="mdd-cc-banner">
+            <span className="mdd-cc-logo">{' ▐▛███▜▌\n▝▜█████▛▘\n  ▘▘ ▝▝'}</span>
+            <span>
+              <span className="mdd-b mdd-bright">Claude Code</span>
+              {'\n'}
+              <span className="mdd-cc-dim">Opus 5.5 · Claude Max</span>
+              {'\n'}
+              <span className="mdd-cc-dim">~/trailmix</span>
+            </span>
+          </div>
+          <div>{' '}</div>
+          <div>
+            <span className="mdd-cc-prompt">
+              <span className="mdd-cc-dim">❯ </span>/mddog plan.md{' '}
+            </span>
+          </div>
+          <div>
+            <span className="mdd-cc-dim">{'  ⎿  '}</span>mddog: Opened plan.md in the mddog pane.
+          </div>
+        </div>
+        <div className="mdd-cc-pane">
+          <div className="mdd-cc-close">✕ </div>
+          <div className="mdd-cc-page">
+            <Page>
+              <h1>Trail cache: release plan</h1>
+              <p>Trail cache keeps offline map tiles for hikers. This plan covers the 2.0 release.</p>
+              <Alert kind="note">
+                <p>The cache now stores tiles by trail, not by region, so a trip downloads only what it needs.</p>
+              </Alert>
+              <h2>Goals</h2>
+              <ul className="mdd-tasks">
+                <li>
+                  <Check checked />
+                  Download a trail's tiles in one tap
+                </li>
+                <li>
+                  <Check checked />
+                  Show the cache size per trail
+                </li>
+                <li>
+                  <Check />
+                  Remove old trails on their own after 30 days
+                </li>
+              </ul>
+              <h2>Sizes</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Trail</th>
+                    <th className="mdd-num">Length</th>
+                    <th className="mdd-num">Tiles</th>
+                    <th className="mdd-num">Cache</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sizes.map(([trail, ...numbers]) => (
+                    <tr key={trail}>
+                      <td>{trail}</td>
+                      {numbers.map((n, i) => (
+                        <td key={i} className="mdd-num">
+                          {n}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Page>
+          </div>
+        </div>
+        <div className="mdd-cc-input">
+          <div className="mdd-cc-rule" />
+          <div>❯ </div>
+          <div className="mdd-cc-rule" />
+          <div>
+            <span className="mdd-cc-mode">{'  ⏵⏵ auto mode on '}</span>
+            <span className="mdd-cc-dim">(shift+tab to cycle)</span>
+          </div>
+        </div>
+      </div>
     </MddogFrame>
   );
 }

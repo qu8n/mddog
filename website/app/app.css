@@ -115,8 +115,33 @@
   --radius-xl: 0.5rem;
 }
 
+/* Overscroll and the area outside body show this color, not the browser's white. */
 html {
   scrollbar-gutter: stable;
+  background-color: var(--color-fd-background);
+}
+
+/*
+ * Four GitHub Light code colors fall below 4.5:1 on our warm code
+ * backgrounds, so swap in darker GitHub shades. Comments use #6a737d in both
+ * themes, which is also 4:1 in dark. Shiki sets the colors inline, so these
+ * need !important.
+ */
+.shiki [style*='--shiki-light:#6A737D'] {
+  --shiki-light: #59636e !important;
+  --shiki-dark: #9198a1 !important;
+}
+
+.shiki [style*='--shiki-light:#D73A49'] {
+  --shiki-light: #b31d28 !important;
+}
+
+.shiki [style*='--shiki-light:#22863A'] {
+  --shiki-light: #116329 !important;
+}
+
+.shiki [style*='--shiki-light:#E36209'] {
+  --shiki-light: #953800 !important;
 }
 
 html > body[data-scroll-locked] {
@@ -132,4 +157,17 @@ html > body[data-scroll-locked] {
 /* The first sidebar section has no top margin, so it crowds the logo row. Give it the gap the other sections get, plus a little. */
 :is(#nd-sidebar, #nd-mobile-sidebar) p:first-child:has(> .fd-page-tree-item-name) {
   margin-top: 1.25rem;
+}
+
+/* A list in a table cell keeps prose's paragraph margins, so its row is taller than the rest. Drop them. */
+.prose td > ul {
+  margin-block: 0;
+}
+
+.prose td > ul > li:first-child {
+  margin-top: 0;
+}
+
+.prose td > ul > li:last-child {
+  margin-bottom: 0;
 }

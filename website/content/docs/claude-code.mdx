@@ -7,7 +7,7 @@ The mddog plugin for [Claude Code](https://claude.com/claude-code) shows a Markd
 
 You can open a file yourself, or ask Claude to show you one. The pane works in the terminal, the Claude Code desktop app, and the VS Code extension.
 
-![A Markdown file in the mddog pane beside the Claude Code chat](/docs/claude-code.webp)
+<ClaudeCodePreview className="my-6" />
 
 ## Install
 
@@ -20,36 +20,24 @@ claude plugin marketplace add qu8n/mddog && claude plugin install mddog@mddog
 
 ## Update
 
-1. Re-run the [install script](/docs#install)
+1. Update mddog (see [Install](/docs#install))
 2. Update the plugin:
 
    ```sh
    claude plugin marketplace update mddog && claude plugin update mddog@mddog
    ```
 
-3. Start a new Claude Code session, or run `/reload-plugins`
+3. Start a new Claude Code session or run `/reload-plugins`
 
 ## Usage
 
-- Preview a file with `/mddog <file.md>` or `/mddog @<file.md>`
-- Ask Claude to show you a file, for example "show me the plan in mddog"
-- Scroll the pane with the mouse wheel or click the pane and use the arrow and page keys
-- The pane reloads when the file changes, so you see Claude's edits as it makes them
-
-If Claude opens the pane and you don't see it, the terminal is too narrow. Zoom out, or run `/mddog <file.md>` yourself.
+- To activate this pane, you can either (a) invoke the `/mddog` command directly with either `/mddog <file.md>` or `/mddog @<file.md>` or (b) ask Claude to show you a file, e.g. `Show me the plan using mddog`
+- Once the pane is activated, you can scroll it with the mouse wheel or click inside it and use the arrow and page keys
+- The pane reloads when the file changes, so you will see Claude's edits as it makes them
+- If Claude opens the pane and you don't see it, the terminal is too narrow. Either zoom out, or run `/mddog <file.md>` yourself
 
 ## Limitations
 
-### Images
-
-Claude Code shows images only in terminals it knows, such as Ghostty, iTerm2, kitty, and WezTerm. In other terminals, run:
-
-```sh
-CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 claude
-```
-
-### Desktop apps (e.g. Claude Code, VS Code)
-
-The pane can't click links or select text.
-
-If `/mddog` is the first message of a new session, you will see the error `"/mddog isn't a command here"`, the app shows this note, but the command still runs. This is because the app checks the first message before the plugin has registered `/mddog`. Later calls don't show it.
+- Unlike the mddog TUI, you can't click links or select text inside a Claude Code pane
+- Claude Code shows images only in terminals it knows, such as Ghostty, iTerm2, kitty, and WezTerm. To get `/mddog` working in other terminals, try running `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 claude` as a workaround
+- In the Claude Code desktop app, if `/mddog` is the first message of a new session, you may see the error `"/mddog isn't a command here"`. This is because the app checks the first message before the plugin has registered `/mddog`

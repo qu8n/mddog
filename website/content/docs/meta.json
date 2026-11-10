@@ -5,11 +5,10 @@
     "usage",
     "---Features---",
     "markdown",
+    "table-of-contents",
     "search",
-    "navigation",
+    "mouse",
     "file-list",
-    "select-and-copy",
-    "wide-content",
     "reload-and-edit",
     "claude-code",
     "---Customize---",
@@ -17,6 +16,6 @@
     "themes",
     "---Reference---",
     "keys",
-    "terminals"
+    "compatibility"
   ]
 }

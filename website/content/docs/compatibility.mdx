@@ -1,0 +1,27 @@
+---
+title: Compatibility
+description: Which terminal emulators and multiplexers mddog runs in, and how to work around their problems.
+---
+
+mddog sends the page to the terminal as images and thus requires the application to support the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
+
+## Terminal emulators
+
+| Terminal | Supported | Notes |
+|---|---|---|
+| Ghostty | <Yes /> | None |
+| iTerm2 | <Yes /> | `Cmd-c` doesn't reach mddog because iTerm2 uses it for its own copy. As a workaround, set [`copy_on_select = true`](/docs/config#copy_on_select) to automatically copy a selection |
+| kitty | <Yes /> | None |
+| WezTerm | <Yes /> | <ul><li>`Cmd-c` doesn't reach mddog because WezTerm uses it for its own copy. To fix it, set `enable_kitty_keyboard = true` and remove WezTerm's `Cmd-c` (`SUPER+c`) binding</li><li>The mouse pointer doesn't turn into a hand over links and buttons because WezTerm ignores mddog's request to change the pointer</li></ul> |
+| Rex | <Yes /> | None |
+| Terminal.app | <No /> | Can't show images |
+| Warp | <No /> | Can't crop images, but mddog needs to crop images to scroll ([Warp#16424](https://github.com/warpdotdev/Warp/issues/16424)) |
+
+## Multiplexers
+
+| Multiplexer | Supported | Notes |
+|---|---|---|
+| herdr | <Yes /> | <ul><li>Feels slow in every terminal except Ghostty ([herdr#5512](https://github.com/herdrdev/herdr/issues/5512)). Starting herdr with `TERM_PROGRAM=ghostty herdr` fixes the lag, but then herdr also treats the terminal as Ghostty for notifications and focus</li><li>The mouse pointer doesn't turn into a hand over links and buttons because herdr ignores mddog's request to change the pointer</li><li>With Ghostty over SSH, a copy larger than about 220 KB doesn't reach the clipboard</li><li>In supported terminals, mddog runs anyway instead of showing an error because herdr overrides `TERM_PROGRAM`, preventing mddog from detecting the terminal</li></ul> |
+| screen | <No /> | Can't show images |
+| tmux | <No /> | Can't show kitty graphics yet ([tmux#5445](https://github.com/tmux/tmux/pull/5445)) |
+| zellij | <No /> | Garbles scrolled images ([zellij#5573](https://github.com/zellij-org/zellij/issues/5573)) |

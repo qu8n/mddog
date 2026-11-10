@@ -5,12 +5,18 @@ description: Install mddog and preview your first file.
 
 mddog previews Markdown in your terminal the way GitHub or Obsidian renders it. It works by building the page with macOS's own text and graphics engines, then sending the result to the terminal as images.
 
+## Why mddog?
+
+Other terminal viewers render Markdown with only characters. Code editors render the real page but live outside the terminal. mddog renders the real page in your terminal, using a single binary and no browser or Electron.
+
+<WhyMddogTable className="my-6" />
+
 ## Requirements
 
 - macOS
 - A terminal that supports the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/): Ghostty, iTerm2, kitty, WezTerm, or Rex
 
-See [Terminals](/docs/terminals) for more info on the supported terminals.
+See [Compatibility](/docs/compatibility) for more info on the supported terminals.
 
 ## Install
 
@@ -72,9 +78,11 @@ mdd README.md   # preview a file
   <Card title="Usage" href="/docs/usage">The ways to start mdd, from a file, a folder, or standard input.</Card>
   <Card title="Key bindings" href="/docs/keys">Every key and mouse action in the preview.</Card>
   <Card title="Markdown support" href="/docs/markdown">What mddog draws, from GitHub Flavored Markdown, math, Mermaid, images, and HTML.</Card>
+  <Card title="Table of contents" href="/docs/table-of-contents">Jump between sections with the table of contents and section keys.</Card>
   <Card title="Search" href="/docs/search">Find text on the page.</Card>
-  <Card title="Navigation" href="/docs/navigation">Move around a document with the contents panel, section keys, links, and Back.</Card>
+  <Card title="Mouse support" href="/docs/mouse">Select and copy text, follow links, scroll wide blocks, and click the buttons on code blocks, diagrams, and details.</Card>
   <Card title="File list" href="/docs/file-list">Pick a Markdown file from the current repo or folder.</Card>
+  <Card title="Reload and edit" href="/docs/reload-and-edit">The page reloads when the file changes, and opens in your editor with one key.</Card>
   <Card title="Claude Code plugin" href="/docs/claude-code">Preview Markdown files in a pane beside the Claude Code chat.</Card>
   <Card title="Configuration" href="/docs/config">The config file and every key in it.</Card>
   <Card title="Themes" href="/docs/themes">The built-in themes, and how to write your own.</Card>

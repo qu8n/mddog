@@ -1,6 +1,6 @@
 import type { Route } from './+types/not-found';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
-import { baseOptions } from '@/lib/layout.shared';
+import { homeOptions } from '@/lib/layout.shared';
 import { DefaultNotFound } from 'fumadocs-ui/layouts/home/not-found';
 
 export function meta({}: Route.MetaArgs) {
@@ -9,7 +9,7 @@ export function meta({}: Route.MetaArgs) {
 
 export default function NotFound() {
   return (
-    <HomeLayout {...baseOptions()}>
+    <HomeLayout {...homeOptions()}>
       <DefaultNotFound />
     </HomeLayout>
   );
