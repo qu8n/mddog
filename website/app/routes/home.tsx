@@ -147,7 +147,7 @@ function Hero() {
           </div>
         </div>
         <img
-          src="/logo.png"
+          src="/logo.webp"
           alt="The mddog dog, reading a book"
           width={384}
           height={255}
@@ -172,7 +172,7 @@ function Terminals() {
   return (
     <section className="mx-auto w-full max-w-6xl px-4 pt-16 pb-20 text-center sm:px-6 sm:pt-20">
       <p className="text-lg text-fd-muted-foreground text-pretty">
-        Works in any terminal that supports the{' '}
+        Works on macOS in any terminal that supports the{' '}
         <a
           href="https://sw.kovidgoyal.net/kitty/graphics-protocol/"
           className="rounded-sm underline underline-offset-4 hover:text-fd-foreground outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2 focus-visible:ring-offset-fd-background"
@@ -259,7 +259,8 @@ function Themes() {
         <SectionHeading
           title={
             <>
-              <GitHubMark /> GitHub and <ObsidianMark /> Obsidian themes
+              <span className="whitespace-nowrap"><GitHubMark /> GitHub</span> and{' '}
+              <span className="whitespace-nowrap"><ObsidianMark /> Obsidian</span> themes
             </>
           }
           body="Light and dark variants, with colors and fonts you can change."
@@ -280,7 +281,7 @@ function ClaudeCode() {
         <SectionHeading
           title={
             <>
-              <ClaudeMark /> Claude Code plugin
+              <span className="whitespace-nowrap"><ClaudeMark /> Claude</span> Code plugin
             </>
           }
           body="Open a Markdown file in a pane right in the chat."
@@ -301,7 +302,12 @@ function Footer() {
   return (
     <footer className="border-t">
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-10 text-sm text-fd-muted-foreground sm:px-6">
-        <span>MIT licensed</span>
+        <span>
+          MIT licensed · Logo by{' '}
+          <a href="https://instagram.com/daymelon" className="rounded-sm underline underline-offset-4 hover:text-fd-foreground outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2 focus-visible:ring-offset-fd-background">
+            Helen Nguyen
+          </a>
+        </span>
         <nav className="flex gap-6">
           <Link to="/docs" className="rounded-sm hover:text-fd-foreground outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2 focus-visible:ring-offset-fd-background">
             Docs

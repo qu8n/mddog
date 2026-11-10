@@ -13,17 +13,6 @@ import type { Route } from './+types/root';
 import './app.css';
 import NotFound from './routes/not-found';
 
-export const links: Route.LinksFunction = () => [
-  // The bold wordmark in the navbar uses this face on every page.
-  {
-    rel: 'preload',
-    href: 'https://mddog-fonts.quanwnn2265.workers.dev/BerkeleyMono-Bold.woff2',
-    as: 'font',
-    type: 'font/woff2',
-    crossOrigin: 'anonymous',
-  },
-];
-
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>

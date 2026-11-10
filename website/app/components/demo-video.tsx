@@ -24,7 +24,6 @@ export function DemoVideo() {
       <video
         ref={ref}
         src="/mddog-demo.mp4"
-        poster="/mddog-demo-poster.webp"
         muted
         loop
         playsInline

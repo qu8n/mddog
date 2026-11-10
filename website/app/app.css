@@ -24,7 +24,7 @@
   font-display: swap;
 }
 
-/* Inline code, code blocks and the wordmark all use font-mono. Everything else uses Rubik. */
+/* Inline code and code blocks use font-mono. Everything else uses Rubik. */
 @theme {
   --font-sans: 'Rubik Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Berkeley Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;

@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="assets/logo.png" width="150" alt="Logo"/><br/>
+  <img src="assets/logo.webp" width="160" alt="Logo"/><br/>
   mddog
 </h1>
 
@@ -14,7 +14,7 @@
   Real Markdown, right in your terminal
 </p>
 
-https://github.com/user-attachments/assets/0ac6535b-2c72-4222-a3ad-18cb04c12fe7
+https://github.com/user-attachments/assets/bf496fc9-b348-47e7-bbad-5c2874194c61
 
 ## Why mddog?
 
@@ -59,3 +59,7 @@ mdd README.md   # preview a file
 ## Docs
 
 Read the full docs at **[mddog.pages.dev/docs](https://mddog.pages.dev/docs)** for key bindings, Claude Code plugin, configuration, themes, and more.
+
+## Credits
+
+The logo was made by Helen Nguyen ([@daymelon](https://instagram.com/daymelon)), commissioned for mddog and not covered by the MIT license.
