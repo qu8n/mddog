@@ -1253,6 +1253,11 @@ impl Preview {
     /// cell height, so the page zooms with the terminal's font.
     fn take_size(&mut self) {
         self.size = self.tty.size();
+        // Rex starts a block opened from its CLI with no pixel size and a stand-in cell until a window shows it.
+        // The font zoom counts from the first size with pixels, or else the first real cell reads as a zoom.
+        if (self.start.xpix == 0 || self.start.ypix == 0) && self.size.xpix > 0 && self.size.ypix > 0 {
+            self.start = self.size;
+        }
         (self.cell_w, self.cell_h) = self.probe.cell_px(self.size, self.display);
         let base = self.probe.cell_px(self.start, self.display).1;
         self.scale = page_scale(self.display, self.cell_h, base);
