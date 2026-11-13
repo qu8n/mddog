@@ -69,7 +69,8 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 
 `mdd` ships through the [`qu8n/tap`](https://github.com/qu8n/homebrew-tap) Homebrew tap and `install.sh`, and the plugin through the Claude Code marketplace. Claude Code caches an installed plugin by the `version` in its `plugin.json`, so each release bumps it along with Cargo's.
 
-1. Run `claude plugin test plugins/claude-code`.
-2. Set the same `version` in `Cargo.toml` and `plugins/claude-code/.claude-plugin/plugin.json`, then run `cargo build` to update `Cargo.lock`.
-3. Commit as `chore: release X.Y.Z`.
-4. Push a `vX.Y.Z` tag. `.github/workflows/release.yml` checks that the tag matches both versions, runs `./check.sh`, then builds both architectures and publishes the release. Last, it points `Formula/mddog.rb` in `qu8n/homebrew-tap` at the new tarballs and pushes, using the `HOMEBREW_TAP_TOKEN` repo secret (a fine-grained token with write access to that repo's contents).
+Releases use [cargo-release](https://github.com/crate-ci/cargo-release) (`brew install cargo-release`), set up in `release.toml`.
+
+1. On a clean `main`, run `cargo release patch` (or `minor`, `major`, or an exact version) to see what it will do. It changes nothing.
+2. Run it again with `--execute`. It runs `claude plugin test plugins/claude-code`, sets the version in `Cargo.toml`, `Cargo.lock` and `plugins/claude-code/.claude-plugin/plugin.json`, commits as `chore: release X.Y.Z`, tags `vX.Y.Z`, and pushes both.
+3. The tag starts `.github/workflows/release.yml`. It checks that the tag matches both versions, runs `./check.sh`, then builds both architectures and publishes the release. Last, it points `Formula/mddog.rb` in `qu8n/homebrew-tap` at the new tarballs and pushes, using the `HOMEBREW_TAP_TOKEN` repo secret (a fine-grained token with write access to that repo's contents).

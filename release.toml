@@ -1,0 +1,12 @@
+# Settings for `cargo release`. See CONTRIBUTING.md, "Releasing".
+allow-branch = ["main"]
+pre-release-commit-message = "chore: release {{version}}"
+tag-name = "v{{version}}"
+pre-release-hook = ["claude", "plugin", "test", "plugins/claude-code"]
+
+# Claude Code caches the plugin by this version, so it moves with Cargo's.
+[[pre-release-replacements]]
+file = "plugins/claude-code/.claude-plugin/plugin.json"
+search = '"version": "[^"]+"'
+replace = '"version": "{{version}}"'
+exactly = 1
