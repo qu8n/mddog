@@ -478,7 +478,37 @@ fn csi_u(params: &str) -> Option<Key> {
     }
 }
 
+/// The longest unfinished graphics reply the input keeps while it waits for the rest. A reply to a placement is
+/// under 150 bytes.
+const MAX_REPLY: usize = 256;
+
+/// Whether `rest`, what follows `ESC _`, can be the start of a graphics reply: `Gi=` and the image's id.
+fn reply_start(rest: &[u8]) -> bool {
+    let n = rest.len().min(3);
+    rest[..n] == b"Gi="[..n] && rest.get(3).is_none_or(u8::is_ascii_digit)
+}
+
+/// What the terminal sends: a key, or a reply the viewer acts on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Input {
+    Key(Key),
+    /// The terminal no longer holds this image: it answered a placement with `ENOENT`.
+    Gone(u32),
+}
+
 pub fn parse_keys(buf: &mut Vec<u8>, flush_esc: bool) -> Vec<Key> {
+    parse_input(buf, flush_esc)
+        .into_iter()
+        .filter_map(|i| match i {
+            Input::Key(k) => Some(k),
+            Input::Gone(_) => None,
+        })
+        .collect()
+}
+
+/// Reads keys and the replies the viewer acts on from `buf`, and drops other replies. Leaves an unfinished
+/// sequence in `buf` unless `flush_esc` is set.
+pub fn parse_input(buf: &mut Vec<u8>, flush_esc: bool) -> Vec<Input> {
     let mut keys = Vec::new();
     let mut i = 0;
     let b = &buf[..];
@@ -487,7 +517,7 @@ pub fn parse_keys(buf: &mut Vec<u8>, flush_esc: bool) -> Vec<Key> {
         if c == 0x1b {
             if i + 1 >= b.len() {
                 if flush_esc {
-                    keys.push(Key::Esc);
+                    keys.push(Input::Key(Key::Esc));
                     i += 1;
                 }
                 break;
@@ -506,33 +536,33 @@ pub fn parse_keys(buf: &mut Vec<u8>, flush_esc: bool) -> Vec<Key> {
                 }
                 let params = std::str::from_utf8(&b[i + 2..j]).unwrap_or("");
                 match (b[j], params) {
-                    (b'A', _) => keys.push(Key::Up),
-                    (b'B', _) => keys.push(Key::Down),
-                    (b'C', _) => keys.push(Key::Right),
-                    (b'D', _) => keys.push(Key::Left),
-                    (b'H', _) => keys.push(Key::Home),
-                    (b'F', _) => keys.push(Key::End),
-                    (b'~', "5") => keys.push(Key::PageUp),
-                    (b'~', "6") => keys.push(Key::PageDown),
-                    (b'~', "1" | "7") => keys.push(Key::Home),
-                    (b'~', "4" | "8") => keys.push(Key::End),
-                    (b'u', p) => keys.extend(csi_u(p)),
+                    (b'A', _) => keys.push(Input::Key(Key::Up)),
+                    (b'B', _) => keys.push(Input::Key(Key::Down)),
+                    (b'C', _) => keys.push(Input::Key(Key::Right)),
+                    (b'D', _) => keys.push(Input::Key(Key::Left)),
+                    (b'H', _) => keys.push(Input::Key(Key::Home)),
+                    (b'F', _) => keys.push(Input::Key(Key::End)),
+                    (b'~', "5") => keys.push(Input::Key(Key::PageUp)),
+                    (b'~', "6") => keys.push(Input::Key(Key::PageDown)),
+                    (b'~', "1" | "7") => keys.push(Input::Key(Key::Home)),
+                    (b'~', "4" | "8") => keys.push(Input::Key(Key::End)),
+                    (b'u', p) => keys.extend(csi_u(p).map(Input::Key)),
                     (b'M' | b'm', p) if p.starts_with('<') => {
                         let code: u32 = p[1..].split(';').next().and_then(|x| x.parse().ok()).unwrap_or(0);
                         let side = |(c, r)| if code & 1 == 0 { Key::WheelLeft(c, r) } else { Key::WheelRight(c, r) };
                         if b[j] == b'M' {
                             match code & !0x1c {
-                                64 | 65 if code & 4 != 0 => keys.extend(cell(p).map(side)),
-                                66 | 67 => keys.extend(cell(p).map(side)),
-                                64 => keys.extend(cell(p).map(|(c, r)| Key::WheelUp(c, r))),
-                                65 => keys.extend(cell(p).map(|(c, r)| Key::WheelDown(c, r))),
-                                0 => keys.extend(cell(p).map(|(c, r)| Key::Mouse(Click::Press, c, r))),
-                                32 => keys.extend(cell(p).map(|(c, r)| Key::Mouse(Click::Drag, c, r))),
-                                35 => keys.extend(cell(p).map(|(c, r)| Key::Mouse(Click::Move, c, r))),
+                                64 | 65 if code & 4 != 0 => keys.extend(cell(p).map(side).map(Input::Key)),
+                                66 | 67 => keys.extend(cell(p).map(side).map(Input::Key)),
+                                64 => keys.extend(cell(p).map(|(c, r)| Key::WheelUp(c, r)).map(Input::Key)),
+                                65 => keys.extend(cell(p).map(|(c, r)| Key::WheelDown(c, r)).map(Input::Key)),
+                                0 => keys.extend(cell(p).map(|(c, r)| Key::Mouse(Click::Press, c, r)).map(Input::Key)),
+                                32 => keys.extend(cell(p).map(|(c, r)| Key::Mouse(Click::Drag, c, r)).map(Input::Key)),
+                                35 => keys.extend(cell(p).map(|(c, r)| Key::Mouse(Click::Move, c, r)).map(Input::Key)),
                                 _ => {}
                             }
                         } else if code & !0x1c == 0 {
-                            keys.extend(cell(p).map(|(c, r)| Key::Mouse(Click::Release, c, r)));
+                            keys.extend(cell(p).map(|(c, r)| Key::Mouse(Click::Release, c, r)).map(Input::Key));
                         }
                     }
                     _ => {}
@@ -545,19 +575,30 @@ pub fn parse_keys(buf: &mut Vec<u8>, flush_esc: bool) -> Vec<Key> {
                 // drop the two bytes and read on, or every mouse report after it would wait.
                 match (i + 2..b.len()).find(|&j| b[j] == 0x07 || b[j] == 0x1b).map(|j| (j, b.get(j + 1))) {
                     Some((j, _)) if b[j] == 0x07 => i = j + 1,
-                    Some((j, Some(b'\\'))) => i = j + 2,
+                    Some((j, Some(b'\\'))) => {
+                        if n == b'_'
+                            && let Some(id) = std::str::from_utf8(&b[i + 2..j]).ok().and_then(kitty::gone)
+                        {
+                            keys.push(Input::Gone(id));
+                        }
+                        i = j + 2;
+                    }
                     Some((j, Some(_))) => i = j,
+                    // A graphics reply cut between reads waits for its end, or its tail would read as keys.
+                    Some(_) | None if n == b'_' && reply_start(&b[i + 2..]) && b.len() - i <= MAX_REPLY => break,
+                    // Alt+_ and the like: drop the two bytes and read the keys after them.
+                    Some(_) | None if flush_esc && n == b'_' && b.len() - i <= MAX_REPLY => i += 2,
                     Some(_) | None if flush_esc => i = b.len(),
                     Some(_) | None => break,
                 }
                 continue;
             }
-            keys.push(Key::Esc);
+            keys.push(Input::Key(Key::Esc));
             i += 1;
             continue;
         }
         match c {
-            0x01..=0x1a | 0x7f => keys.push(control(c)),
+            0x01..=0x1a | 0x7f => keys.push(Input::Key(control(c))),
             _ => {
                 let len = match c {
                     0xc0..=0xdf => 2,
@@ -578,7 +619,7 @@ pub fn parse_keys(buf: &mut Vec<u8>, flush_esc: bool) -> Vec<Key> {
                 }
                 match std::str::from_utf8(&b[i..i + len]) {
                     Ok(s) => {
-                        keys.extend(s.chars().map(Key::Char));
+                        keys.extend(s.chars().map(Key::Char).map(Input::Key));
                         i += len;
                     }
                     Err(_) => i += 1,
@@ -733,6 +774,35 @@ mod tests {
         let mut b = b"\x1b_Gi=4001;OK\x1b\\".to_vec();
         assert!(parse_keys(&mut b, true).is_empty());
         assert!(b.is_empty());
+    }
+
+    #[test]
+    fn a_missing_image_reply_reaches_the_viewer() {
+        let mut b = b"\x1b_Gi=26,p=1;ENOENT: image not found\x1b\\j\x1b_Gi=4001;OK\x1b\\".to_vec();
+        assert_eq!(parse_input(&mut b, true), vec![Input::Gone(26), Input::Key(Key::Char('j'))]);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn a_graphics_reply_split_across_reads_still_arrives() {
+        for cut in [2, 3, 15] {
+            let reply = b"\x1b_Gi=26,p=1;ENOENT: image not found\x1b\\j";
+            let mut b = reply[..cut].to_vec();
+            assert!(parse_input(&mut b, true).is_empty(), "cut at {cut}");
+            b.extend_from_slice(&reply[cut..]);
+            assert_eq!(parse_input(&mut b, true), vec![Input::Gone(26), Input::Key(Key::Char('j'))], "cut at {cut}");
+        }
+    }
+
+    #[test]
+    fn alt_underscore_does_not_hold_the_keys_after_it() {
+        // Alone, it may be a reply cut after its first two bytes.
+        let mut b = b"\x1b_".to_vec();
+        assert!(parse_input(&mut b, true).is_empty());
+        b.extend_from_slice(b"j");
+        assert_eq!(parse_input(&mut b, true), vec![Input::Key(Key::Char('j'))]);
+        let mut b = b"\x1b_Gj".to_vec();
+        assert_eq!(parse_input(&mut b, true), vec![Input::Key(Key::Char('G')), Input::Key(Key::Char('j'))]);
     }
 
     #[test]

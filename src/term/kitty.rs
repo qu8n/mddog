@@ -212,7 +212,27 @@ pub fn place(out: &mut String, p: &Place) {
     if p.z != 0 {
         let _ = write!(out, "z={},", p.z);
     }
-    out.push_str("q=2\x1b\\");
+    // Errors only, so a placement of an image the terminal dropped answers ENOENT.
+    out.push_str("q=1\x1b\\");
+}
+
+/// The image a graphics reply says is missing, from the `ENOENT` a terminal answers a placement of an image it
+/// no longer holds. `apc` is the reply between `ESC _` and its ST.
+pub fn gone(apc: &str) -> Option<u32> {
+    let (keys, msg) = apc.strip_prefix('G')?.split_once(';')?;
+    if !msg.starts_with("ENOENT") {
+        return None;
+    }
+    keys.split(',').find_map(|k| k.strip_prefix("i=")?.parse().ok())
+}
+
+/// The id that ends a check. No image has it, so the terminal answers ENOENT once it has read the whole check.
+pub const END_CHECK: u32 = u32::MAX;
+
+/// Asks whether the terminal still holds image `id`: places it in one cell as placement 2, then removes that.
+/// Only a missing image answers, with ENOENT.
+pub fn check(out: &mut String, id: u32) {
+    let _ = write!(out, "\x1b[1;1H\x1b_Ga=p,i={id},p=2,c=1,r=1,C=1,q=1\x1b\\\x1b_Ga=d,d=i,i={id},p=2,q=2\x1b\\");
 }
 
 pub fn unplace(out: &mut String, id: u32) {
@@ -266,10 +286,26 @@ mod tests {
     fn placement_uses_explicit_size_and_cursor() {
         let mut s = String::new();
         place(&mut s, &Place { id: 7, row: 2, col: 0, y: 38, width: 1292, height: 76, cols: 68, rows: 2, z: 0 });
-        assert_eq!(s, "\x1b[3;1H\x1b_Ga=p,i=7,p=1,x=0,y=38,w=1292,h=76,c=68,r=2,C=1,q=2\x1b\\");
+        assert_eq!(s, "\x1b[3;1H\x1b_Ga=p,i=7,p=1,x=0,y=38,w=1292,h=76,c=68,r=2,C=1,q=1\x1b\\");
         s.clear();
         place(&mut s, &Place { id: 8, row: 2, col: 0, y: 0, width: 1292, height: 76, cols: 68, rows: 2, z: 1 });
-        assert_eq!(s, "\x1b[3;1H\x1b_Ga=p,i=8,p=1,x=0,y=0,w=1292,h=76,c=68,r=2,C=1,z=1,q=2\x1b\\");
+        assert_eq!(s, "\x1b[3;1H\x1b_Ga=p,i=8,p=1,x=0,y=0,w=1292,h=76,c=68,r=2,C=1,z=1,q=1\x1b\\");
+    }
+
+    #[test]
+    fn a_missing_image_reply_names_the_image() {
+        assert_eq!(gone("Gi=26,p=1;ENOENT: image not found"), Some(26));
+        assert_eq!(gone("Gi=7,p=1;ENOENT:Put command refers to non-existent image with id: 7 and number: 0"), Some(7));
+        assert_eq!(gone("Gi=4001;OK"), None);
+        assert_eq!(gone("Gi=9,p=1;EINVAL: bad placement"), None);
+        assert_eq!(gone("Ga=p;ENOENT: no id"), None);
+    }
+
+    #[test]
+    fn a_check_places_the_image_in_one_cell_and_removes_it() {
+        let mut s = String::new();
+        check(&mut s, 7);
+        assert_eq!(s, "\x1b[1;1H\x1b_Ga=p,i=7,p=2,c=1,r=1,C=1,q=1\x1b\\\x1b_Ga=d,d=i,i=7,p=2,q=2\x1b\\");
     }
 
     #[test]
