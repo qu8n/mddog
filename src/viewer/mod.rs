@@ -14,6 +14,7 @@ use crate::term::Key;
 /// What wakes the viewer's event loop.
 pub enum Event {
     Key(Key),
+    Gone(u32),
     Resize,
     FileChanged,
     /// The file list has new entries.

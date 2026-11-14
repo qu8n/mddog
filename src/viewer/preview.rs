@@ -16,7 +16,7 @@ use super::position;
 use crate::render::engine::{Engine, Layout, Pointer, Press, Rect, Select};
 use crate::term::kitty::{self, Shm};
 use crate::term::screen;
-use crate::term::{self, Click, Key, Probe, Size, Tty};
+use crate::term::{self, Click, Input, Key, Probe, Size, Tty};
 use crate::theme::Theme;
 use crate::{config, editor, trace, watch};
 
@@ -523,6 +523,24 @@ impl Preview {
             Event::Resize => {
                 self.resize.poke(Instant::now());
                 self.glide.take().is_some()
+            }
+            Event::Gone(kitty::END_CHECK) => {
+                self.cache.end_check();
+                false
+            }
+            Event::Gone(id) => {
+                // A terminal that drops one image without telling mddog has likely dropped others. Only inside a
+                // synchronized update, so the one-cell placements never show.
+                let mut out = term::SYNC_BEGIN.to_string();
+                if self.probe.sync && self.cache.holds(id) && self.cache.check(&mut out) {
+                    out.push_str(term::SYNC_END);
+                    self.tty.write(out.as_bytes());
+                    self.tty.flush();
+                }
+                let v = self.view();
+                let again = self.cache.lost(id, &self.cache.visible(&v), v.width);
+                trace::log(format_args!("gone id={id} again={again} resident={}", self.cache.resident()));
+                again
             }
             Event::FileChanged if !self.opened => false,
             Event::FileChanged => {
@@ -1807,8 +1825,12 @@ fn input_loop(fd: i32, tx: Sender<Event>, paused: Arc<AtomicBool>, first: Vec<u8
             }
             buf.extend_from_slice(&chunk[..n as usize]);
         }
-        for k in term::parse_keys(&mut buf, !ready) {
-            if tx.send(Event::Key(k)).is_err() {
+        for input in term::parse_input(&mut buf, !ready) {
+            let e = match input {
+                Input::Key(k) => Event::Key(k),
+                Input::Gone(id) => Event::Gone(id),
+            };
+            if tx.send(e).is_err() {
                 return;
             }
         }

@@ -494,6 +494,37 @@ fn closing_help_sends_the_page_again() {
     assert!(sent.is_some_and(|s| s < place), "image {id} was placed after help closed but not sent again");
 }
 
+/// A terminal past its image quota deletes images without telling the viewer. The viewer learns of it when a placement
+/// fails, and must then send the tile again.
+#[test]
+fn a_tile_the_terminal_dropped_is_sent_again() {
+    let Viewer { mut child, mut tty, out } = open(GFM, 70, &[]);
+    wait_for(&out, 0, b"a=p,i=");
+    let before = quiet(&out);
+    // The last placement: a late relayout sends the first tiles again under new ids.
+    let id: String = {
+        let all = out.lock().unwrap();
+        let place = all.windows(6).rposition(|w| w == b"a=p,i=").unwrap();
+        all[place + 6..].iter().take_while(|b| b.is_ascii_digit()).map(|&b| b as char).collect()
+    };
+    tty.write_all(format!("\x1b_Gi={id},p=1;ENOENT: image not found\x1b\\").as_bytes()).unwrap();
+    let end = Instant::now() + LIMIT;
+    let sent = loop {
+        if let Some(i) = find(&out.lock().unwrap()[before..], b"a=t,") {
+            break Some(i);
+        }
+        if Instant::now() > end {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let checked = find(&out.lock().unwrap()[before..], format!("i={},p=2,", u32::MAX).as_bytes()).is_some();
+    tty.write_all(b"q").unwrap();
+    let _ = child.wait();
+    assert!(sent.is_some(), "image {id} was reported gone but no tile went again");
+    assert!(checked, "a loss did not check the other tiles");
+}
+
 /// Waits for the terminal output to stop growing, and returns its length. The quiet spell outlasts the viewer's
 /// one-second idle fold, which redraws the page after the last key.
 fn quiet(out: &Mutex<Vec<u8>>) -> usize {

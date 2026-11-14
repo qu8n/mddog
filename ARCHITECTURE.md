@@ -198,5 +198,5 @@ Most behavior is tested below the terminal. `App` and the chrome are tested with
 | Wide block | A code block or table wider than the page. It scrolls sideways on its own. The page itself never does. |
 | Band | Under herdr, an image of a tile's changed rows, placed over the tile so that the whole tile need not be sent again. |
 | Glide | An eased scroll to a jump target, drawn at pixel offsets. |
-| Storage limit | The most tile bytes mddog lets the terminal hold. Past it, the tiles farthest from the view are freed. Tiles in view are never freed, so a view larger than the limit goes over it. |
+| Storage limit | The most tile bytes mddog lets the terminal hold. Past it, the tiles farthest from the view are freed. Tiles in view are never freed, so a view larger than the limit goes over it. A terminal with a smaller quota, such as Rex, deletes images without telling mddog. mddog learns of it when a placement answers `ENOENT`. It then asks about every other tile it holds, sends the dropped ones again, and lowers the limit to what the terminal still holds. |
 | herdr | A terminal multiplexer built on libghostty, with a small image quota. mddog detects it and sends less image data. |

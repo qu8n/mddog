@@ -488,7 +488,6 @@ fn reply_start(rest: &[u8]) -> bool {
     rest[..n] == b"Gi="[..n] && rest.get(3).is_none_or(u8::is_ascii_digit)
 }
 
-/// What the terminal sends: a key, or a reply the viewer acts on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Input {
     Key(Key),

@@ -71,6 +71,7 @@ pub struct Cache {
     total: u32,
     resident: usize,
     storage_limit: usize,
+    checking: bool,
     bands: bool,
     medium: Medium,
     /// `MDDOG_DUMP_TILES`: a folder each sent tile is also written to, as PNG.
@@ -89,6 +90,7 @@ impl Cache {
             total: 0,
             resident: 0,
             storage_limit,
+            checking: false,
             bands,
             medium,
             dump: std::env::var_os("MDDOG_DUMP_TILES").map(Into::into),
@@ -231,6 +233,43 @@ impl Cache {
         self.resident = 0;
     }
 
+    /// The terminal dropped image `id`, as one does past a quota under `storage_limit`. Its tile goes again on the
+    /// next frame, and the limit falls to what the terminal still holds. Returns whether to draw now: only while
+    /// the tiles in view `vis` still fit, so a terminal that can't hold them doesn't loop.
+    pub fn lost(&mut self, id: u32, vis: &[usize], width: u32) -> bool {
+        let Some(t) = self.tiles.iter_mut().find(|t| t.resident && (t.id == id || t.bands.iter().any(|b| b.id == id))) else { return false };
+        let (ids, bytes) = t.release();
+        t.stale.extend(ids.into_iter().filter(|&i| i != id));
+        self.placed.retain(|&p| p != id);
+        self.resident -= bytes;
+        self.storage_limit = self.storage_limit.min(self.resident);
+        self.fits(vis, width)
+    }
+
+    pub fn holds(&self, id: u32) -> bool {
+        self.tiles.iter().any(|t| t.resident && (t.id == id || t.bands.iter().any(|b| b.id == id)))
+    }
+
+    /// Asks the terminal about every image the cache holds, so each one it dropped answers at once and the limit
+    /// falls to what it really keeps. Returns false, and asks nothing, while an earlier check is still out.
+    pub fn check(&mut self, out: &mut String) -> bool {
+        if self.checking {
+            return false;
+        }
+        self.checking = true;
+        for t in self.tiles.iter().filter(|t| t.resident) {
+            for id in std::iter::once(t.id).chain(t.bands.iter().map(|b| b.id)) {
+                kitty::check(out, id);
+            }
+        }
+        kitty::check(out, kitty::END_CHECK);
+        true
+    }
+
+    pub fn end_check(&mut self) {
+        self.checking = false;
+    }
+
     pub fn upload(&mut self, i: usize, b: &mut Batch) -> bool {
         let (top, height) = (self.tiles[i].top, self.tiles[i].height + self.tiles[i].post);
         let Some((id, need)) = self.send(top, height, "", b) else { return false };
@@ -263,7 +302,10 @@ impl Cache {
         let need = bmp.rgba.len();
         self.evict_for(need, b.keep, b.scroll_px, &mut b.cmds);
         let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1).max(1);
+        self.next_id = match self.next_id.wrapping_add(1) {
+            0 | kitty::END_CHECK => 1,
+            n => n,
+        };
         self.seq += 1;
         if let Some(dir) = &self.dump
             && let Some(png) = kitty::png(bmp.width, bmp.height, &bmp.rgba)
@@ -417,6 +459,42 @@ mod tests {
         assert!(c.has_bands() && c.resident() == 600, "{}", c.resident());
         c.fold();
         assert!(!c.has_bands() && c.resident() == 0);
+    }
+
+    #[test]
+    fn a_tile_the_terminal_dropped_goes_again_under_what_it_kept() {
+        let mut c = cache(false);
+        upload(&mut c, 0, &[], 100);
+        upload(&mut c, 1, &[], 100);
+        assert!(!c.lost(99, &[1], 1), "an id the cache doesn't hold");
+        assert!(c.lost(2, &[1], 1));
+        assert_eq!((c.is_resident(0), c.is_resident(1), c.resident()), (true, false, 440));
+        let cmds = upload(&mut c, 1, &[1], 100);
+        assert!(cmds.contains("i=1,"));
+        assert_eq!((c.is_resident(0), c.is_resident(1), c.resident()), (false, true, 440));
+    }
+
+    #[test]
+    fn a_check_asks_about_every_tile_once_until_it_ends() {
+        let mut c = cache(false);
+        upload(&mut c, 0, &[], 0);
+        upload(&mut c, 1, &[0], 0);
+        let mut out = String::new();
+        assert!(c.check(&mut out));
+        let asked: Vec<&str> = out.split("a=p,i=").skip(1).map(|s| s.split(',').next().unwrap()).collect();
+        assert_eq!(asked, ["1", "2", &kitty::END_CHECK.to_string()]);
+        assert!(!c.check(&mut String::new()), "a second check while the first is out");
+        c.end_check();
+        assert!(c.check(&mut String::new()));
+    }
+
+    #[test]
+    fn a_loss_waits_for_the_next_frame_when_the_view_no_longer_fits() {
+        let mut c = cache(false);
+        upload(&mut c, 0, &[], 0);
+        upload(&mut c, 1, &[0], 0);
+        assert!(!c.lost(2, &[0, 1], 1));
+        assert!(!c.is_resident(1) && c.resident() == 440);
     }
 
     #[test]
