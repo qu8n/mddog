@@ -1,4 +1,4 @@
-#![expect(clippy::unwrap_used, reason = "a failed step should fail the test")]
+#![allow(clippy::unwrap_used, reason = "a failed step should fail the test")]
 
 //! Search, links, anchors, selection, hover, presses and wide blocks, through the engine calls the viewer makes.
 //! Points on the page come from search rects and the layout, so the tests don't depend on exact pixels.
