@@ -28,10 +28,12 @@ fn main() {
     let mut options = true;
     let mut headless: Option<u16> = None;
     let mut webp = false;
+    let mut serve = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--webp" if options => webp = true,
+            "--serve" if options => serve = true,
             "--headless" if options => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u16| (1..=255).contains(&n)) {
                 Some(n) => headless = Some(n),
                 None => usage("--headless needs a column count from 1 to 255"),
@@ -60,6 +62,12 @@ fn main() {
         _ => fail(&format!("can open only one file at a time, but got {}: {}", files.len(), files.join(", "))),
     };
     config::load().unwrap_or_else(|e| fail(&format!("config: {e}")));
+    if serve {
+        if !files.is_empty() || headless.is_some() {
+            usage("--serve takes no file: the host sends the text");
+        }
+        std::process::exit(serve::run());
+    }
     if webp && headless.is_none() {
         usage("--webp needs --headless");
     }

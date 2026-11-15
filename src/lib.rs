@@ -8,7 +8,11 @@ pub mod editor;
 #[doc(hidden)]
 pub mod headless;
 #[doc(hidden)]
+pub mod link;
+#[doc(hidden)]
 pub mod render;
+#[doc(hidden)]
+pub mod serve;
 #[doc(hidden)]
 pub mod sweep;
 #[doc(hidden)]
