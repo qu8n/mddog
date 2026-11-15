@@ -58,7 +58,7 @@ mdd README.md   # preview a file
 
 ## Docs
 
-Read the full docs at **[mddog.pages.dev/docs](https://mddog.pages.dev/docs)** for key bindings, Claude Code plugin, configuration, themes, and more.
+Read the full docs at **[mddog.pages.dev/docs](https://mddog.pages.dev/docs)** for key bindings, the Claude Code and Neovim plugins, configuration, themes, and more.
 
 ## Credits
 

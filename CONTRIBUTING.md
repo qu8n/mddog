@@ -22,9 +22,12 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 | `tests/search.rs` | search, links, anchors, selection, hover, presses, copy buttons, Mermaid buttons, and wide blocks, through the engine calls the viewer makes |
 | `tests/math.rs` | the parser's math against `tests/math.golden`, and the TeX layout of commands taken from those files |
 | `tests/headless.rs` | `--headless` end to end |
+| `tests/serve.rs` | `--serve` end to end: the handshake, tiles, stale and skipped requests, links, and size changes |
+| `tests/neovim.rs` | the Neovim plugin, through `tests/nvim/preview.lua` in a headless Neovim against this build. Skipped without Neovim 0.12 or later on PATH |
 | `tests/watch.rs` | the file watcher, including saves done as write-then-rename |
 
 - `tests/help.rs` runs `mdd` in a pty as its own session leader, so Ctrl-z can't stop it there. the Ctrl-z tests call `launch` with `job` set, which forks a small job-control parent as a shell does: `mdd` runs in its own foreground group, and the parent passes its stops and exit status up to the test.
+- `tests/nvim/preview.lua` replaces `nvim_ui_send` with a stub that records the escapes it would send, since a headless Neovim has no terminal. To run it alone: `MDDOG_BIN=target/debug/mdd nvim --clean --headless -l tests/nvim/preview.lua`.
 - `tests/search.rs` is an ordinary test file. Each test makes an `Engine`, loads a Markdown string, and calls the same methods the viewer does. Points on the page come from search rects and the layout, not from fixed pixels. `docs/behavior.md` names these tests.
 - `tests/math.rs` renders each `fixtures/math/` file's `Doc` into one line per block that holds math or a `$`: inline math as `⟨...⟩`, display math as `⟦...⟧`, and code spans in backticks. It must match `tests/math.golden` exactly. `UPDATE_GOLDEN=1 cargo test --test math` rewrites it. `fixtures/math/SOURCES.md` lists where each fixture came from.
 - A unit test in `src/render/highlight/textmate.rs` checks TextMate output against `tests/textmate.golden`. `UPDATE_GOLDEN=1 cargo test` rewrites it.
@@ -61,7 +64,7 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 | `TERM_PROGRAM=herdr` | `mdd` | Use herdr's storage limit, and send selection and search changes as bands (an XTVERSION reply that starts with `libghostty` does the same) |
 | `EDITOR` | `mdd` | The editor for `e` |
 | `XDG_CONFIG_HOME` | `mdd` | Where to look for `mddog/config.toml` |
-| `MDDOG_BIN` | the plugin, `reference/e2e/` | The binary to run |
+| `MDDOG_BIN` | the Claude Code and Neovim plugins, `reference/e2e/` | The binary to run |
 | `MDDOG_INSTALL_DIR`, `MDDOG_RELEASE_URL` | `install.sh` | Where to install, and which release to fetch |
 | `MDDOG_PANE` | `reference/e2e/` | The herdr pane the checks drive |
 

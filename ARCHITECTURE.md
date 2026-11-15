@@ -25,13 +25,14 @@ flowchart LR
   D --> F["headless: PNG or WebP files"]
 ```
 
-mddog is one Rust binary, `mdd`, for macOS only. It uses CoreText to lay out text and CoreGraphics to draw. It has no library users. It runs in three modes:
+mddog is one Rust binary, `mdd`, for macOS only. It uses CoreText to lay out text and CoreGraphics to draw. It has no library users. It runs in four modes:
 
 | Mode | Started by | What it does |
 |---|---|---|
 | Viewer | `mdd FILE`, `mdd -`, or piped input | Draws the page in the terminal and handles keys and the mouse |
 | File list | `mdd`, `mdd FOLDER`, or Ctrl-p in the viewer | Lists the Markdown files under a folder to pick from |
 | Headless | `mdd --headless COLS [--webp] FILE` | Writes image files and prints JSON, for the Claude Code plugin |
+| Serve | `mdd --serve` | Answers JSON requests on standard input with tile files, for the Neovim plugin |
 
 The **theme** decides how the page looks. It is one file of tokens: colors, fonts, and a few sizes. A theme can recolor GitHub's look, or switch to a second look modeled on Obsidian. A theme can't change the layout rules. Those are code.
 
@@ -39,7 +40,7 @@ The **theme** decides how the page looks. It is one file of tokens: colors, font
 
 ### `src/main.rs`
 
-The command line. It parses the options, checks the file before it takes the terminal (so a typo or a binary file gets a plain error), loads the config, refuses tmux, zellij, and Warp by their environment variables before it sends the terminal anything, and starts one of the three modes. For the viewer, standard input is copied to a private temp file first, so the viewer always reads a real file. Headless mode refuses standard input.
+The command line. It parses the options, checks the file before it takes the terminal (so a typo or a binary file gets a plain error), loads the config, refuses tmux, zellij, and Warp by their environment variables before it sends the terminal anything, and starts one of the four modes. For the viewer, standard input is copied to a private temp file first, so the viewer always reads a real file. Headless mode refuses standard input.
 
 ### `src/config.rs`, `src/theme.rs`
 
@@ -90,13 +91,13 @@ The interactive viewer and the file list.
 - `position.rs`: keeps the view on the same content when the page is laid out again.
 - `loading.rs`: the skeleton that shows while a slow file loads.
 - `picker.rs`: the file list.
-- `link.rs` and `clipboard.rs`: following links, and copying text.
+- `clipboard.rs`: copying text.
 
 **Architecture invariant:** `app.rs` holds no terminal or engine state. It depends only on `term::Key`. So it is tested row by row against `docs/behavior.md` without a terminal. `chrome.rs` is pure in the same way.
 
 **Architecture invariant:** `cache.rs` does not write to the terminal. `Preview` passes it a function that draws a tile, so its tests use a fake.
 
-**Architecture invariant:** the viewer never passes a local path to the system `open` command. A cloned repo could link to an app or a `.command` file. A link to a local Markdown file opens inside mddog, and only when the file is inside the repo (else the home folder, else the folder of the file shown).
+**Architecture invariant:** mddog never passes a local path to the system `open` command. A cloned repo could link to an app or a `.command` file. A link to a local Markdown file opens inside mddog, and only when the file is inside the repo (else the home folder, else the folder of the file shown). `src/link.rs` holds this rule, and both the viewer and serve mode follow links through it.
 
 ### `src/term/`
 
@@ -109,6 +110,18 @@ The terminal layer. `term/mod.rs` sets raw mode on `/dev/tty`, probes the termin
 `--headless` mode, for hosts that own the screen and the input. It renders the whole page at a given width, writes the tiles to a private temp folder, prints one JSON line that lists them, and does that again on every file change. With `--webp` it writes small WebP tiles for Claude Code's desktop and mobile apps.
 
 **Architecture invariant:** headless mode does not use `viewer`. It calls the `Engine` directly, as the viewer does, and takes the tile limits from `term::kitty`.
+
+### `src/serve.rs`
+
+`--serve` mode, for the Neovim plugin. The host sends JSON requests on standard input, and `mdd` answers each one on standard output. The module comment lists the requests. The host sends the text of its buffer, so the page follows unsaved edits, and asks only for the tiles near its view. `mdd` writes each tile to a temp file of raw pixels, or of PNG for a terminal on another machine, and the host sends it to the terminal. `mdd` reads the cell size from the controlling terminal's window size, which doesn't send anything to the terminal, so it can't mix with the host's own output.
+
+**Architecture invariant:** serve mode does not use `viewer`, and never writes to the terminal. It calls the `Engine` directly, and follows links through `src/link.rs`.
+
+**Architecture invariant:** a tile has at most 297 rows and the page at most 297 columns, the number of row and column marks in Kitty's Unicode placeholders.
+
+### `src/link.rs`
+
+Which links mddog follows, and where a local link goes. The viewer and serve mode share it, so the rule about local paths below has one home.
 
 ### `src/watch.rs`, `src/editor.rs`, `src/tmp.rs`, `src/sweep.rs`, `src/trace.rs`
 
@@ -124,11 +137,17 @@ A Claude Code plugin that shows a page in a pane next to the chat. It is TypeScr
 
 **API boundary:** the `--headless` options and the JSON line it prints. The plugin and `mdd` ship apart, through the Claude Code marketplace and `install.sh`, with no version check between them. So a change on one side can break the other.
 
+### `lua/mddog/`, `plugin/mddog.lua`
+
+The Neovim plugin, at the repo root so that plugin managers can install it from the repo. It runs `mdd --serve` and shows the page with Kitty's Unicode placeholders: the preview buffer holds one line of placeholder text for each row of the page, and each tile's lines get a highlight whose foreground colour is that tile's image id. Neovim then scrolls the page, clips it to the window, and lets floats cover it, with no code that places images. The plugin loads the tiles near the view and drops far ones, since the terminal keeps only so many image bytes. Each page revision uses the other half of the preview's image ids, so the old page stays on screen until the new one's tiles arrive.
+
+**API boundary:** the `--serve` protocol. The plugin comes from git and `mdd` from Homebrew, so they can differ. `hello` checks that both speak the same protocol version, and fails with a message that says which side to update.
+
 ### Other folders
 
 - `assets/`: built-in themes, TextMate grammars, and README images.
 - `fixtures/`: Markdown files for manual and automated checks, such as `fixtures/gfm.md` and `fixtures/math/`.
-- `tests/`: integration tests. See `CONTRIBUTING.md`.
+- `tests/`: integration tests, and `tests/nvim/` for the Neovim plugin. See `CONTRIBUTING.md`.
 - `reference/`: development tools in Node and Python: GitHub page capture, grammar export, end-to-end checks, and the benchmark.
 - `website/`: the docs site, built with Fumadocs.
 - `docs/`: the behavior spec and notes on testing in real terminals.

@@ -1,0 +1,65 @@
+---
+title: Neovim plugin
+description: Preview the Markdown buffer in a split, inside Neovim.
+---
+
+The mddog plugin for [Neovim](https://neovim.io) shows the Markdown buffer you are editing in a split beside it, the way mddog draws it. The preview follows your edits as you type, before you save.
+
+## Requirements
+
+- [mddog](/docs#install), in a version that has `mdd --serve`
+- Neovim 0.12 or later
+- A terminal that supports Kitty's Unicode placeholders: Ghostty, kitty, or Rex. WezTerm and iTerm2 don't, and neither do GUIs such as Neovide
+- `termguicolors` on
+
+## Install
+
+With the built-in plugin manager:
+
+```lua
+vim.pack.add({ 'https://github.com/qu8n/mddog' })
+```
+
+With [lazy.nvim](https://github.com/folke/lazy.nvim):
+
+```lua
+{ 'qu8n/mddog', cmd = 'Mddog' }
+```
+
+Then run `:checkhealth mddog` to check that everything is in place.
+
+## Usage
+
+- `:Mddog` opens the preview of the current Markdown buffer, and closes it when it is open
+- The preview scrolls to follow the top of the Markdown window
+- To scroll the preview by itself, move into it and use the usual keys or the mouse wheel
+- In the preview, `]]` and `[[` jump to the next and previous heading, and `q` closes it
+- Click a link to follow it. A web link opens in your browser, a heading link scrolls the preview, and a link to another Markdown file in the repo opens that file. Click a copy button to copy the code, or a `<details>` summary to open it
+
+To open the preview with a key, map the command:
+
+```lua
+vim.keymap.set('n', '<leader>mp', '<cmd>Mddog<cr>', { desc = 'mddog preview' })
+```
+
+## Configuration
+
+`setup` is optional. These are the defaults:
+
+```lua
+require('mddog').setup({
+  bin = nil,        -- the mdd command: a path, or a list such as { 'cargo', 'run', '--release', '--' }
+  sync = true,      -- scroll the preview to follow the Markdown window
+  width = 0.5,      -- the preview's share of the Markdown window's width
+  debounce = 150,   -- milliseconds after a change before the preview follows it
+})
+```
+
+`bin` falls back to `$MDDOG_BIN`, then to `mdd` on your `PATH`.
+
+## Limitations
+
+- You can't select text in the preview. Copy from the Markdown buffer instead
+- Scroll sync is exact at block boundaries, and estimated inside a long list, table, or code block
+- Inside tmux, the preview needs `set -g allow-passthrough on`, and is untested
+- Over SSH, the page travels to your terminal as PNG, which is slower
