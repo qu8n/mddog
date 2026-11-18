@@ -238,11 +238,33 @@ impl Tty {
         self.flush();
         let mut buf = Vec::new();
         self.read_timeout(&mut buf, Instant::now() + timeout, |b| find_da1(b).is_some());
+        // herdr answers the graphics queries after the DA1 reply. Without this wait, the late replies would
+        // read as no graphics, and then as keys.
+        if find_da1(&buf).is_some() && graphics_replies(&buf) < 3 {
+            self.read_timeout(&mut buf, Instant::now() + GRAPHICS_GRACE, |b| graphics_replies(b) >= 3);
+        }
         kitty::shm_unlink(&shm_name);
         let _ = std::fs::remove_file(&temp_path);
         crate::trace::log(format_args!("probe {}", buf.escape_ascii()));
         parse_probe(&buf)
     }
+}
+
+/// How long to wait for graphics replies that follow the DA1 reply.
+const GRAPHICS_GRACE: Duration = Duration::from_millis(150);
+
+/// How many of the three graphics query replies are in `b`.
+fn graphics_replies(b: &[u8]) -> usize {
+    let s = String::from_utf8_lossy(b);
+    ["Gi=4001;", "Gi=4002;", "Gi=4003;"].iter().filter(|k| s.contains(*k)).count()
+}
+
+/// Where the probe's replies end: after DA1, or after the last graphics reply when that comes later.
+fn probe_end(buf: &[u8]) -> Option<usize> {
+    let da1 = find_da1(buf)?;
+    let s = String::from_utf8_lossy(buf);
+    let last = s.rfind("Gi=400").and_then(|i| s[i..].find("\x1b\\").map(|j| i + j + 2));
+    Some(last.map_or(da1, |l| l.max(da1)).min(buf.len()))
 }
 
 fn parse_probe(buf: &[u8]) -> (Probe, Vec<u8>) {
@@ -262,7 +284,7 @@ fn parse_probe(buf: &[u8]) -> (Probe, Vec<u8>) {
     p.kitty_direct = s.contains("Gi=4001;OK");
     p.kitty_shm = s.contains("Gi=4002;OK");
     p.kitty_temp = s.contains("Gi=4003;OK");
-    let end = find_da1(buf);
+    let end = probe_end(buf);
     p.answered = end.is_some();
     let rest = end.map_or_else(Vec::new, |end| buf[end..].to_vec());
     (p, rest)
@@ -764,6 +786,15 @@ mod tests {
         let mut b = b"\x1b".to_vec();
         assert!(parse_keys(&mut b, false).is_empty());
         assert_eq!(parse_keys(&mut b, true), vec![Key::Esc]);
+    }
+
+    #[test]
+    fn probe_reads_graphics_replies_that_follow_the_da1_reply() {
+        // herdr answers DA1 first, then the graphics queries. Those replies are not keys.
+        let (p, rest) = parse_probe(b"\x1b[?62;22c\x1b_Gi=4001;OK\x1b\\\x1b_Gi=4002;EINVAL\x1b\\\x1b_Gi=4003;EINVAL\x1b\\j");
+        assert!(p.kitty_direct && !p.no_graphics());
+        assert_eq!(rest, b"j");
+        assert_eq!(graphics_replies(b"\x1b_Gi=4001;OK\x1b\\\x1b_Gi=4003;OK\x1b\\"), 2);
     }
 
     #[test]
