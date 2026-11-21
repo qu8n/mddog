@@ -55,6 +55,9 @@ miniz_oxide = "0.9"
 [dev-dependencies]
 regex = "1.13.1"
 
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 # Full LTO with one codegen unit: 2.4 MB smaller than thin LTO. Unwinding stays on: the remote image
 # pool catches a panicking fetch so it keeps its worker, and headless keeps going past a failed tile.

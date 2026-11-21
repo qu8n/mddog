@@ -5,6 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
@@ -25,8 +26,6 @@ jobs:
             echo "::error::tag $tag, Cargo.toml $cargo, plugin.json $plugin: set all three to the same version"
             exit 1
           fi
-      - name: Run the gate before publishing
-        run: ./check.sh
       - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - run: cargo build --release --locked --target aarch64-apple-darwin --target x86_64-apple-darwin
       - name: Package one tarball per architecture
@@ -57,6 +56,21 @@ jobs:
             echo
             echo "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"
           } > notes.md
+      - name: Wait for the check on this commit to pass on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 120); do
+            run=$(gh run list -R "$GITHUB_REPOSITORY" -w check.yml -b main -e push -c "$GITHUB_SHA" --json status,conclusion -q '.[0] // empty | "\(.status) \(.conclusion)"' || true)
+            case $run in
+              "completed success") exit 0 ;;
+              completed*) echo "::error::the check on $GITHUB_SHA ended as: $run"; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "::error::no finished check on main for $GITHUB_SHA after 30 minutes"
+          exit 1
       - run: gh release create "$GITHUB_REF_NAME" mdd-macos-*.tar.gz mdd-macos-*.tar.gz.sha256 --notes-file notes.md
         env:
           GH_TOKEN: ${{ github.token }}
