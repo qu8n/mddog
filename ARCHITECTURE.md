@@ -126,7 +126,7 @@ The crate root. Every module is `pub` but `#[doc(hidden)]`. The library exists o
 
 A Claude Code plugin that shows a page in a pane next to the chat. It is TypeScript (`hooks/register.tsx`), not part of the Rust build. A plugin can't host a program that needs a terminal, so it runs `mdd --headless` and draws the tiles it lists. Claude Code owns the pane, its scrolling, and its input, so mddog's own keys don't work there.
 
-**API boundary:** the `--headless` options and the JSON line it prints. The plugin and `mdd` ship apart, through the Claude Code marketplace and `install.sh`, with no version check between them. So a change on one side can break the other.
+**API boundary:** the `--headless` options and the JSON line it prints, typed in `hooks/headless.ts`. The plugin and `mdd` ship apart, through the Claude Code marketplace and `install.sh`. Each line carries a `protocol` number. When it differs from the plugin's `PROTOCOL`, the pane says which side to update and doesn't draw the page. Bump it on both sides with any change to the options or the line.
 
 ### Other folders
 

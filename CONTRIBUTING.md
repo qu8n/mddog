@@ -4,7 +4,7 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 
 ## Checks
 
-- `./check.sh` is the gate: `cargo fmt --check`, then `cargo clippy --locked --all-targets -- -D warnings`, then `cargo test --locked`.
+- `./check.sh` is the gate: `cargo fmt --check`, then `cargo clippy --locked --all-targets -- -D warnings`, then `cargo test --locked`, then `plugins/claude-code/check.sh`.
 - `.githooks/pre-push` runs `./check.sh` before each push, and `.githooks/commit-msg` checks each commit subject except merge, revert and `fixup!` commits, which the squash merge folds away. Turn both on once per clone with `git config core.hooksPath .githooks`. `git push --no-verify` and `git commit --no-verify` skip them.
 - PR titles follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `type(scope)!: summary`, 72 characters at most. `type` is one of `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`, or `style`. `scope` is optional, in lowercase letters, digits and dashes. `main` takes squash merges only, and the squash commit uses the PR title as its subject, so the `main` ruleset requires the `pr-title` check (`.github/workflows/pr-title.yml`). `.githooks/subject-check` holds the rule, and both the hook and the check run it. The check runs `main`'s copy of the workflow and script, so a PR can't change the rule it is checked against.
 - `[lints.clippy]` in `Cargo.toml` turns on some pedantic and nursery lints, `unwrap_used` among them. `clippy.toml` exempts unit tests, and each `tests/*.rs` file that needs `unwrap` has its own `#![expect]` or `#![allow]`. Outside tests, an `expect` names the invariant that holds, such as a built-in asset or a constant regex.
@@ -12,7 +12,8 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 - CI (`.github/workflows/check.yml`) runs `./check.sh` on every pull request and on every push that changes more than `website/`. Pull requests always run it, because the `main` ruleset requires its `check` result. It runs on a macOS runner, because the renderer and the pty tests need macOS. Only runs on `main` save the build cache.
 - Dependencies build at `opt-level = 2` in dev builds, locally too, so tests run faster. Each dependency builds more slowly the first time.
 - `python3 reference/keymap-check.py` checks that every test named in `docs/behavior.md` ran and passed.
-- `claude plugin test plugins/claude-code` runs the plugin's tests in `plugins/claude-code/tests/`. `./check.sh` and CI don't run them. `tsc -p plugins/claude-code` type-checks them once a live load has written `.claude-plugin/types/` (gitignored). The tracked `plugins/claude-code/types/` is a different folder: it types the plugin's own `open` tool.
+- `plugins/claude-code/check.sh` checks the plugin: `tsc`, then `claude plugin validate`, then `claude plugin test`. It needs `claude` and `npx`. `tsc` needs the plugin API types, which Claude Code writes only when it loads a mod or the `/plugin-authoring` skill. No command writes them, so the script runs `claude -p /plugin-authoring` logged out and takes the file that run writes into `CLAUDE_CODE_TMPDIR`. Claude Code doesn't document this, so CI installs the version in `plugins/claude-code/claude-code-version`, and a new release can't break the build by itself. Move the pin by hand. The tracked `plugins/claude-code/types/` is a different folder: it types the plugin's own `open` tool.
+- `plugins/claude-code/tests/headless.fixture.ts` holds the lines `mdd --headless` prints, with and without `--webp`. `tests/headless.rs` fails when the real lines have other fields than the fixture, and `tsc` fails when the fixture doesn't fit the `Out` type in `hooks/headless.ts`. The plugin tests draw the fixture. To rewrite it, run `MDDOG_BLESS=1 cargo test --test headless`. When the fields or the `--headless` options change, bump `PROTOCOL` in `src/headless.rs` and `hooks/headless.ts`. Blessing refuses new fields under the old number.
 - The docs site has its own gate: `cd website && pnpm install && pnpm types:check && pnpm build`.
 - `.github/workflows/website.yml` deploys the site to Cloudflare Pages (https://mddog.pages.dev) on every push to `main` that changes `website/`. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. To deploy by hand, run `pnpm run deploy` in `website/`. Plain `pnpm deploy` is a different, built-in pnpm command, and it fails.
 
@@ -24,7 +25,7 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 | `tests/engine.rs` | the engine's typed answers: wide-block scroll and restore, button indices after a relayout, an empty file, search, select and hover, diagram expand and collapse, and raw HTML |
 | `tests/search.rs` | search, links, anchors, selection, hover, presses, copy buttons, Mermaid buttons, and wide blocks, through the engine calls the viewer makes |
 | `tests/math.rs` | the parser's math against `tests/math.golden`, and the TeX layout of commands taken from those files |
-| `tests/headless.rs` | `--headless` end to end |
+| `tests/headless.rs` | `--headless` end to end, and the plugin's fixture of its output |
 | `tests/watch.rs` | the file watcher, including saves done as write-then-rename |
 
 - `tests/help.rs` runs `mdd` in a pty as its own session leader, so Ctrl-z can't stop it there. the Ctrl-z tests call `launch` with `job` set, which forks a small job-control parent as a shell does: `mdd` runs in its own foreground group, and the parent passes its stops and exit status up to the test.
@@ -76,5 +77,5 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 Releases use [cargo-release](https://github.com/crate-ci/cargo-release) (`brew install cargo-release`), set up in `release.toml`.
 
 1. On a clean `main`, run `cargo release patch` (or `minor`, `major`, or an exact version) to see what it will do. It changes nothing.
-2. Run it again with `--execute`. It runs `claude plugin test plugins/claude-code`, sets the version in `Cargo.toml`, `Cargo.lock` and `plugins/claude-code/.claude-plugin/plugin.json`, commits as `chore: release X.Y.Z`, tags `vX.Y.Z`, and pushes both.
+2. Run it again with `--execute`. It runs `plugins/claude-code/check.sh`, sets the version in `Cargo.toml`, `Cargo.lock` and `plugins/claude-code/.claude-plugin/plugin.json`, commits as `chore: release X.Y.Z`, tags `vX.Y.Z`, and pushes both.
 3. The tag starts `.github/workflows/release.yml`. It checks that the tag matches both versions, runs `./check.sh`, then builds both architectures and publishes the release, with every commit since the last tag as its notes. Last, it points `Formula/mddog.rb` in `qu8n/homebrew-tap` at the new tarballs and pushes, using the `HOMEBREW_TAP_TOKEN` repo secret (a fine-grained token with write access to that repo's contents).

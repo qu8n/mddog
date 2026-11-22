@@ -10,6 +10,7 @@ use crate::term;
 use crate::term::kitty;
 use crate::watch;
 
+const PROTOCOL: u32 = 1;
 const TILE_ROWS: u32 = 100;
 /// The desktop pane's cell in CSS px. register.tsx draws a column as `MDD_COLUMN_PX`, so the two change together.
 const PANE_CELL: (f64, f64) = (8.0, 16.0);
@@ -155,7 +156,7 @@ impl Renderer {
         };
         self.round = round;
         let keep = kitty::storage_limit(term::herdr_by_env(), term::rex_by_env()) / kitty::TILE_BYTES;
-        let line = serde_json::to_string(&Out { keep, tiles }).map_err(|e| e.to_string())?;
+        let line = serde_json::to_string(&Out { protocol: PROTOCOL, keep, tiles }).map_err(|e| e.to_string())?;
         let mut out = std::io::stdout().lock();
         if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
             self.gone = true;
@@ -225,6 +226,7 @@ impl Renderer {
 /// One line of standard output per render. The plugin's `register.tsx` reads it, so the two change together.
 #[derive(serde::Serialize)]
 struct Out {
+    protocol: u32,
     /// How many tiles the terminal keeps at once.
     keep: usize,
     tiles: Vec<OutTile>,

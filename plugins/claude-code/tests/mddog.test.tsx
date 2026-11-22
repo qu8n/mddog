@@ -1,4 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
+import { PROTOCOL, type Out, type Tile } from '../hooks/headless'
+import { png, webp } from './headless.fixture'
 
 const PANE = {
   plugin: 'mddog',
@@ -15,6 +17,8 @@ const PANE = {
   },
 } as const
 
+const line = ({ keep = 1000, tiles }: { keep?: number; tiles: Tile[] }) => `${JSON.stringify({ protocol: PROTOCOL, keep, tiles } satisfies Out)}\n`
+
 const mddog = (args: string) =>
   ({ command: 'mddog', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } }) as const
 
@@ -27,8 +31,9 @@ test('/mddog shows the tiles mddog prints and tells the model the file', async (
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.spawn', async function* (_, e) {
     spawned.push([...e.argv])
-    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":100},' }
-    yield { stream: 'stdout', text: '{"file":"/tmp/t/1-1.png","rows":7}]}\n' }
+    const text = line({ tiles: [{ file: '/tmp/t/1-0.png', rows: 100 }, { file: '/tmp/t/1-1.png', rows: 7 }] })
+    yield { stream: 'stdout', text: text.slice(0, 40) }
+    yield { stream: 'stdout', text: text.slice(40) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -56,7 +61,7 @@ test('the model opens a file in the pane with the open tool', async ($, on) => {
   on('fs.exists', (_, e) => ({ value: e.path.endsWith('notes/plan.md') }))
   on('process.spawn', async function* (_, e) {
     spawned.push([...e.argv])
-    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
+    yield { stream: 'stdout', text: line({ tiles: [{ file: '/tmp/t/1-0.png', rows: 12 }] }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -83,7 +88,7 @@ test('only the tiles nearest the view are mounted, so the images stay under the 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   const tiles = Array.from({ length: 10 }, (_, i) => ({ file: `/tmp/t/1-${i}.png`, rows: 50 }))
   on('process.spawn', async function* () {
-    yield { stream: 'stdout', text: `${JSON.stringify({ keep: 3, tiles })}\n` }
+    yield { stream: 'stdout', text: line({ keep: 3, tiles }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -109,7 +114,7 @@ test('a child that a newer render aborts starts again', async ($, on) => {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.spawn', async function* () {
     if (++spawns === 1) throw new Error('aborted')
-    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
+    yield { stream: 'stdout', text: line({ tiles: [{ file: '/tmp/t/1-0.png', rows: 12 }] }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -134,7 +139,7 @@ test('a child that keeps failing to start ends in an error until the next /mddog
   on('process.spawn', async function* () {
     spawns++
     if (failing || spawns === 5) throw new Error('aborted')
-    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
+    yield { stream: 'stdout', text: line({ tiles: [{ file: '/tmp/t/1-0.png', rows: 12 }] }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -162,7 +167,7 @@ test('the open tool says so when the pane waits undrawn on a narrow terminal', a
   on('fs.exists', () => ({ value: true }))
   on('process.spawn', async function* () {
     spawns++
-    yield { stream: 'stdout', text: '{"tiles":[{"file":"/tmp/t/1-0.png","rows":12}]}\n' }
+    yield { stream: 'stdout', text: line({ tiles: [{ file: '/tmp/t/1-0.png', rows: 12 }] }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -194,7 +199,7 @@ test('the desktop pane draws WebP tiles as Svgs of a set CSS size, a window of t
   const tiles = Array.from({ length: 15 }, (_, i) => ({ file: `/tmp/t/1-${i}.webp`, rows: 20, width: 1392, height: 640, bytes: 33_750 }))
   on('process.spawn', async function* (_, e) {
     spawned.push([...e.argv])
-    yield { stream: 'stdout', text: `${JSON.stringify({ columns: 87, tiles })}\n` }
+    yield { stream: 'stdout', text: line({ tiles }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -243,7 +248,7 @@ test('the desktop pane keeps a long page under the drawing limit, gaps included'
   // 3,000 tiles: about 470 gap Svgs of 4096 px, past the room the tiles leave.
   const tiles = Array.from({ length: 3000 }, (_, i) => ({ file: `/tmp/t/1-${i}.webp`, rows: 20, width: 1600, height: 640, bytes: 33_750 }))
   on('process.spawn', async function* () {
-    yield { stream: 'stdout', text: `${JSON.stringify({ columns: 90, tiles })}\n` }
+    yield { stream: 'stdout', text: line({ tiles }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -268,7 +273,7 @@ test('the desktop pane draws the tiles in view first, and leaves a tile too big 
   // Each tile about 14.3 rows (640 px of 1600 at 87 columns), so a view of 40 rows from the top shows tiles 0 to 2. Tile 3 is past 131,072 characters.
   const tiles = Array.from({ length: 6 }, (_, i) => ({ file: `/tmp/t/1-${i}.webp`, rows: 20, width: 1600, height: 640, bytes: i === 3 ? 100_002 : 67_500 }))
   on('process.spawn', async function* () {
-    yield { stream: 'stdout', text: `${JSON.stringify({ columns: 90, tiles })}\n` }
+    yield { stream: 'stdout', text: line({ tiles }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -300,7 +305,7 @@ test('the terminal and the desktop draw the pane at once, each from its own mdd'
     spawned.push([...e.argv])
     const webp = e.argv.join(' ').includes('--webp')
     const tile = webp ? { file: '/tmp/t/1-0.webp', rows: 20, width: 1392, height: 640, bytes: 3 } : { file: '/tmp/t/1-0.png', rows: 20 }
-    yield { stream: 'stdout', text: `${JSON.stringify({ columns: 40, tiles: [tile] })}\n` }
+    yield { stream: 'stdout', text: line({ tiles: [tile] }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -330,7 +335,7 @@ test('the desktop pane covers the view and a tile each side with small copies, t
     small: { file: `/tmp/t/1-${i}s.webp`, width: 696, height: 160, bytes: 10_002 },
   }))
   on('process.spawn', async function* () {
-    yield { stream: 'stdout', text: `${JSON.stringify({ columns: 87, tiles })}\n` }
+    yield { stream: 'stdout', text: line({ tiles }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -361,7 +366,7 @@ test('a scroll on the desktop measures the row, so a deep offset draws the tiles
   // 10 tiles of 160 CSS px, 1,600 in all, at 100,000 characters: two fit a drawing.
   const tiles = Array.from({ length: 10 }, (_, i) => ({ file: `/tmp/t/1-${i}.webp`, rows: 10, width: 1392, height: 320, bytes: 75_000 }))
   on('process.spawn', async function* () {
-    yield { stream: 'stdout', text: `${JSON.stringify({ columns: 87, tiles })}\n` }
+    yield { stream: 'stdout', text: line({ tiles }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -395,7 +400,7 @@ test('once scrolling stops, the margins give way so the view goes sharp', async 
     small: { file: `/tmp/t/1-${i}s.webp`, width: 696, height: 160, bytes: 20_000 },
   }))
   on('process.spawn', async function* () {
-    yield { stream: 'stdout', text: `${JSON.stringify({ columns: 87, tiles })}\n` }
+    yield { stream: 'stdout', text: line({ tiles }) }
     return { value: { code: 0, signal: null } }
   })
 
@@ -415,4 +420,51 @@ test('once scrolling stops, the margins give way so the view goes sharp', async 
   await clock.advance(300)
   const settled = await width()
   expect([settled(1), settled(2)]).toEqual(['1392', '1392'])
+})
+
+test('the desktop and the terminal draw the line mdd really prints', async ($, on) => {
+  on('command.register', () => ({ value: { command: 'mddog' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('fs.exists', () => ({ value: true }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('fs.read', () => ({ value: { base64: 'AAAA' } }))
+  on('process.spawn', async function* (_, e) {
+    yield { stream: 'stdout', text: `${JSON.stringify(e.argv.join(' ').includes('--webp') ? webp : png)}\n` }
+    return { value: { code: 0, signal: null } }
+  })
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await $.command.run(mddog('doc.md'))
+  const term = await $.ui.mount(PANE)
+  expect((await term.find({ type: 'Image', key: 'tile-0' }))?.props.rows).toBe(png.tiles[0]?.rows)
+  expect(await term.find({ type: 'Text', text: /older|couldn't/ })).toBeFalsy()
+  await term.unmount()
+  const desk = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
+  const svgs = (await desk.findAll({ type: 'Svg' })).map(s => s.props as { alt: string; source: string })
+  expect(svgs.find(s => s.alt === 'doc.md, part 1 of 1')?.source).toContain('data:image/webp;base64,AAAA')
+  await desk.unmount()
+})
+
+test('an mdd with another protocol says which side to update instead of drawing', async ($, on) => {
+  let protocol: number | undefined
+  on('command.register', () => ({ value: { command: 'mddog' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('fs.exists', () => ({ value: true }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout', text: `${JSON.stringify({ ...png, protocol })}\n` }
+    return { value: { code: 0, signal: null } }
+  })
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  for (const [sent, says] of [[undefined, /mdd is older.*install\.sh/], [PROTOCOL + 1, /plugin is older.*claude plugin update mddog@mddog/]] as const) {
+    protocol = sent
+    await $.command.run(mddog('doc.md'))
+    const ui = await $.ui.mount(PANE)
+    expect((await ui.find({ type: 'Text', text: says }))?.text).toBeTruthy()
+    expect(await ui.find({ type: 'Image', key: 'tile-0' })).toBeFalsy()
+    await ui.unmount()
+  }
 })

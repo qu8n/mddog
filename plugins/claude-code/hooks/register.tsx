@@ -1,11 +1,8 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
+import { mismatch, type Out, type Picture, type Tile } from './headless'
 
 const PANE = 'mddog'
 const TOOL = 'mcp__mddog__open'
-
-// A tile's picture: the sharp one at the top level, and on the desktop a small copy at 1x.
-type Picture = { file: string; width?: number; height?: number; bytes?: number }
-type Tile = Picture & { rows: number; small?: Picture }
 
 // The desktop app has no Image element. It draws an Svg as <img src="data:image/svg+xml,...">
 // without the scrub it gives interactive ones, so an <image> with a data: WebP inside shows.
@@ -104,9 +101,16 @@ function start($: EngineInterface, v: View, cols: number, webp: boolean) {
         rest = lines.pop() ?? ''
         const last = lines.at(-1)
         if (last) {
-          const out = JSON.parse(last)
+          const out = JSON.parse(last) as Out
+          const wrong = mismatch(out.protocol)
+          if (wrong) {
+            v.error = wrong
+            v.tiles = []
+            $.ui.invalidate('ui.render')
+            break
+          }
           v.tiles = out.tiles
-          v.keep = out.keep ?? Infinity
+          v.keep = out.keep
           v.aborts = 0
           v.error = ''
           $.ui.invalidate('ui.render')

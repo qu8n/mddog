@@ -3,3 +3,4 @@ set -e
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
+plugins/claude-code/check.sh

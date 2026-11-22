@@ -25,6 +25,10 @@ jobs:
             echo "::error::tag $tag, Cargo.toml $cargo, plugin.json $plugin: set all three to the same version"
             exit 1
           fi
+      - name: Install Claude Code for the plugin checks
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s "$(cat plugins/claude-code/claude-code-version)"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Run the gate before publishing
         run: ./check.sh
       - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
