@@ -27,7 +27,7 @@ pub const SECTIONS: &[Section] = &[
             row(&["d", "Ctrl-d"], "Down half a screen"),
             row(&["u", "Ctrl-u"], "Up half a screen"),
             row(&["Space", "PgDn"], "Down a screen"),
-            row(&["b", "PgUp", "Ctrl-b"], "Up a screen"),
+            row(&["PgUp", "Ctrl-b"], "Up a screen"),
             row(&["gg", "Home"], "To the top"),
             row(&["G", "End"], "To the bottom"),
             row(&["←", "h"], "Wide code and tables left"),
