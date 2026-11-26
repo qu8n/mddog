@@ -21,7 +21,7 @@ use crate::term::kitty::{self, Shm};
 use crate::term::screen;
 use crate::term::{self, Click, Input, Key, Probe, Size, Tty};
 use crate::theme::Theme;
-use crate::{config, editor, trace, watch};
+use crate::{config, editor, resume, trace, watch};
 
 /// How long the page waits on its remote images before it ticks slowly again and prefetches.
 const LATE_LIMIT: Duration = Duration::from_secs(60);
@@ -67,6 +67,14 @@ enum Region {
     Sidebar,
     Page,
     Status,
+}
+
+/// The last OSC 7577 sequence a run sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Sent {
+    Nothing,
+    Report,
+    Clear,
 }
 
 struct Grid {
@@ -207,6 +215,8 @@ pub struct Viewer {
     quit: bool,
     /// Whether a file is loaded. False while the list that `mdd` started with is up.
     opened: bool,
+    /// The last resume sequence this run sent.
+    sent: Sent,
     picker: Option<Picker>,
     listing: bool,
     preview: Option<Preview>,
@@ -416,6 +426,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         resize: app::Debounce::default(),
         quit: false,
         opened: picker.is_none(),
+        sent: Sent::Nothing,
         listing: picker.is_some(),
         titled: String::new(),
         picker,
@@ -428,6 +439,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     if p.listing {
         p.settle_scale();
         p.show();
+        p.report();
         crate::sweep::spawn();
         p.start_threads(leftover);
         p.event_loop();
@@ -453,11 +465,15 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         let quit = std::iter::from_fn(|| p.rx.try_recv().ok()).fold(false, |q, e| q | matches!(e, Event::Quit));
         p.tty.read_timeout(&mut leftover, Instant::now() + Duration::from_millis(1), quits);
         if quit || quits(&leftover) {
+            if !quit {
+                p.user_quit();
+            }
             p.shutdown();
             return 0;
         }
     };
     trace::mark("markdown rendered");
+    p.report();
     p.render_doc(first.0, first.1, false);
     trace::mark("first paint sent");
     crate::sweep::spawn();
@@ -662,6 +678,7 @@ impl Viewer {
                     }
                     Pick::Close if self.opened => {
                         self.listing = false;
+                        self.report();
                         self.end_preview();
                         if std::ptr::eq(config::theme(), self.theme) && self.app.toc_cols(self.size.cols) == self.img_col {
                             return true;
@@ -670,7 +687,7 @@ impl Viewer {
                         false
                     }
                     Pick::Close | Pick::Quit => {
-                        self.quit = true;
+                        self.user_quit();
                         false
                     }
                     Pick::Suspend => {
@@ -764,7 +781,7 @@ impl Viewer {
                 false
             }
             Action::Quit => {
-                self.quit = true;
+                self.user_quit();
                 false
             }
             Action::Search(q) => {
@@ -927,6 +944,7 @@ impl Viewer {
                 p.follow(&from, &cwd);
                 p.list(tx);
                 self.listing = true;
+                self.report();
                 // A drag's release would reach the list and open the file under the pointer.
                 self.drag = None;
                 self.bar_held = false;
@@ -1921,6 +1939,47 @@ impl Viewer {
         unsafe { libc::kill(0, libc::SIGTSTP) };
         let live = self.live();
         self.enter_screen(live);
+        self.report();
+    }
+
+    /// Sends the resume report for the file or file list shown, or `clear` when there is none.
+    fn report(&mut self) {
+        let Some(token) = resume::token() else { return };
+        let Some(time) = resume::now() else { return };
+        let target = if self.listing {
+            self.picker.as_ref().and_then(|p| resume::path(&p.root)).filter(|p| p.is_dir())
+        } else if self.opened && !self.stdin {
+            resume::path(&self.file).filter(|p| p.is_file())
+        } else {
+            None
+        };
+        let pid = std::process::id();
+        let seq = target.as_deref().and_then(Path::to_str).and_then(|path| resume::report(pid, time, &[resume::program_name(), path], token));
+        match seq {
+            Some(seq) => {
+                self.tty.write(seq.as_bytes());
+                self.tty.flush();
+                self.sent = Sent::Report;
+            }
+            None if self.sent == Sent::Report => self.clear_report(),
+            None => {}
+        }
+    }
+
+    fn clear_report(&mut self) {
+        let Some(token) = resume::token() else { return };
+        let Some(time) = resume::now() else { return };
+        self.tty.write(resume::clear(std::process::id(), time, token).as_bytes());
+        self.tty.flush();
+        self.sent = Sent::Clear;
+    }
+
+    /// A quit the user asked for, unlike a signal or a lost terminal.
+    fn user_quit(&mut self) {
+        if self.sent != Sent::Clear {
+            self.clear_report();
+        }
+        self.quit = true;
     }
 
     /// Opens a file from the list.
@@ -2017,6 +2076,7 @@ impl Viewer {
         self.listing = false;
         self.end_preview();
         self.opened = true;
+        self.report();
         let src = String::from_utf8_lossy(&bytes).into_owned();
         self.render_doc(bytes, src, false);
         self.watch();

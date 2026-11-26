@@ -119,6 +119,7 @@ fn start_sized(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Pat
         .env_remove("TMUX")
         .env_remove("ZELLIJ")
         .env("MDDOG_CACHE_DIR", test_cache())
+        .env_remove("OSC7577_TOKEN")
         .envs(env.iter().copied())
         .stdin(Stdio::from(slave.try_clone().unwrap()))
         .stdout(Stdio::from(slave.try_clone().unwrap()))
@@ -880,18 +881,19 @@ fn help_flag_points_to_the_key_screen() {
 
 #[test]
 fn ctrl_z_suspends_and_resumes() {
-    suspends_and_resumes(b"\x1a");
+    suspends_and_resumes(b"\x1a", &[]);
 }
 
 #[test]
 fn kitty_ctrl_z_suspends_and_resumes() {
-    suspends_and_resumes(b"\x1b[122;5u");
+    suspends_and_resumes(b"\x1b[122;5u", &[]);
 }
 
 /// Ctrl-Z sent as `key`. The viewer pops its kitty keyboard flags before it
 /// leaves, so the shell gets legacy keys, and pushes them again on return.
-fn suspends_and_resumes(key: &[u8]) {
-    let Viewer { mut child, mut tty, out } = launch(GFM, 80, &[], true);
+/// Returns the output and where the viewer left the screen.
+fn suspends_and_resumes(key: &[u8], env: &[(&str, &str)]) -> (Vec<u8>, usize) {
+    let Viewer { mut child, mut tty, out } = launch(GFM, 80, env, true);
     let pid = child.id() as libc::pid_t;
     wait_for(&out, 0, b"a=p,");
     let start = out.lock().unwrap().len();
@@ -916,6 +918,370 @@ fn suspends_and_resumes(key: &[u8]) {
     assert!(stopped, "Ctrl-Z did not stop the viewer");
     assert!(!early, "the viewer came back before SIGCONT");
     assert_eq!(quit, Some(true));
+    let o = out.lock().unwrap().clone();
+    (o, left)
+}
+
+const TOKEN: &str = "dummy-token-replace-me";
+
+/// One OSC 7577 report: its keys in order, and the body the mac covers.
+struct Report {
+    keys: Vec<(String, String)>,
+    body: String,
+}
+
+impl Report {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.keys.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    fn argv(&self) -> Vec<String> {
+        self.get("argv").unwrap().split(',').map(|a| String::from_utf8(unbase64(a)).unwrap()).collect()
+    }
+
+    fn mac_ok(&self) -> bool {
+        use sha2::Digest;
+        let want: String = sha2::Sha256::digest(format!("{}:{TOKEN}", self.body)).iter().map(|b| format!("{b:02x}")).collect();
+        self.keys.last().is_some_and(|(k, v)| k == "mac" && *v == want)
+    }
+}
+
+fn unbase64(s: &str) -> Vec<u8> {
+    let abc = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bits: Vec<u32> = s.trim_end_matches('=').bytes().map(|c| abc.iter().position(|&a| a == c).unwrap() as u32).collect();
+    let mut out = Vec::new();
+    for q in bits.chunks(4) {
+        let n = q.iter().enumerate().fold(0u32, |n, (i, &b)| n | (b << (18 - 6 * i)));
+        out.extend_from_slice(&n.to_be_bytes()[1..q.len()]);
+    }
+    out
+}
+
+/// Every complete OSC 7577 report in `out`.
+fn reports(out: &[u8]) -> Vec<Report> {
+    let mut found = Vec::new();
+    let mut at = 0;
+    while let Some(i) = find(&out[at..], b"\x1b]7577;") {
+        let start = at + i + 7;
+        let Some(len) = find(&out[start..], b"\x1b\\") else { break };
+        let seq = std::str::from_utf8(&out[start..start + len]).unwrap();
+        let (body, _) = seq.rsplit_once(":mac=").unwrap();
+        let keys = seq.split(':').map(|kv| kv.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())).unwrap()).collect();
+        found.push(Report { keys, body: body.to_string() });
+        at = start + len;
+    }
+    found
+}
+
+/// Waits for report number `n`, counting from 1.
+fn wait_report(out: &Mutex<Vec<u8>>, n: usize) -> Report {
+    let end = Instant::now() + LIMIT;
+    loop {
+        if let Some(r) = reports(&out.lock().unwrap()).into_iter().nth(n - 1) {
+            return r;
+        }
+        assert!(Instant::now() < end, "no resume report {n}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn same_file(a: &str, b: &std::path::Path) -> bool {
+    std::path::Path::new(a).is_absolute() && std::fs::canonicalize(a).unwrap() == std::fs::canonicalize(b).unwrap()
+}
+
+#[test]
+fn the_resume_report_names_the_file_and_follows_a_switch() {
+    let dir = scratch("resume");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::write(dir.join("alpha.md"), "# Alpha title\n").unwrap();
+    std::fs::write(dir.join("beta.md"), "# Beta title\n").unwrap();
+    let cfg = no_preview(&dir);
+    let env = [("XDG_CONFIG_HOME", cfg.to_str().unwrap()), ("OSC7577_TOKEN", TOKEN)];
+    let Viewer { mut child, mut tty, out } = start(&["alpha.md"], Some(&dir), 80, &env, false);
+    let first = wait_report(&out, 1);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let shown = wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"\x10").unwrap();
+    wait_for(&out, shown, b"Beta title");
+    let listed = wait_report(&out, 2);
+    tty.write_all(b"bet\r").unwrap();
+    let second = wait_report(&out, 3);
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let o = out.lock().unwrap().clone();
+    let all = reports(&o);
+    assert_eq!(quit, Some(true));
+    assert_eq!(first.keys.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["pid", "time", "argv", "mac"]);
+    assert_eq!(first.get("pid"), Some(child.id().to_string().as_str()));
+    assert!(first.get("time").unwrap().parse::<u64>().unwrap().abs_diff(now) <= 60);
+    let argv = first.argv();
+    assert_eq!(argv.len(), 2, "{argv:?}");
+    assert_eq!(argv[0], env!("CARGO_BIN_EXE_mdd"));
+    assert!(same_file(&argv[1], &dir.join("alpha.md")), "{argv:?}");
+    assert!(first.mac_ok());
+    assert!(same_file(&listed.argv()[1], &dir), "{:?}", listed.argv());
+    let argv = second.argv();
+    assert!(same_file(&argv[1], &dir.join("beta.md")), "{argv:?}");
+    assert!(second.mac_ok());
+    let last = all.last().unwrap();
+    assert_eq!(all.len(), 4);
+    assert_eq!(last.get("clear"), Some("1"));
+    assert_eq!(last.get("pid"), Some(child.id().to_string().as_str()));
+    assert!(last.mac_ok());
+    assert!(find(&o, TOKEN.as_bytes()).is_none(), "the token went to the terminal");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_editor_gets_no_resume_token() {
+    let dir = scratch("resume-editor");
+    let file = dir.join("a.md");
+    std::fs::write(&file, "# One\n").unwrap();
+    let env = [("OSC7577_TOKEN", TOKEN), ("EDITOR", "sh -c 'printf %s \"${OSC7577_TOKEN-unset}\" > \"$0.env\"'")];
+    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &env);
+    wait_report(&out, 1);
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"e").unwrap();
+    let left = wait_for(&out, 0, b"\x1b[?1049l");
+    wait_for(&out, left, b"\x1b[?1049h");
+    let seen = std::fs::read_to_string(dir.join("a.md.env"));
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(seen.unwrap(), "unset");
+}
+
+#[test]
+fn piped_input_sends_no_resume_report() {
+    let shell = "printf '# Piped\\n' | \"$MDD\" -";
+    let env = [("MDD", env!("CARGO_BIN_EXE_mdd")), ("OSC7577_TOKEN", TOKEN)];
+    let Viewer { mut child, mut tty, out } = start_exe("/bin/sh".as_ref(), &["-c", shell], None, 80, (18, 38), &env, false);
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    quiet(&out);
+    let all = reports(&out.lock().unwrap());
+    assert_eq!(quit, Some(true));
+    assert_eq!(all.len(), 1, "piped input sent a resume report");
+    assert_eq!(all[0].get("clear"), Some("1"));
+}
+
+#[test]
+fn help_version_and_headless_send_no_resume_report() {
+    let env = [("OSC7577_TOKEN", TOKEN)];
+    for arg in ["--help", "--version"] {
+        let Viewer { mut child, out, .. } = start(&[arg], None, 80, &env, false);
+        let quit = exits_within(&mut child, LIMIT);
+        let _ = child.kill();
+        quiet(&out);
+        let o = out.lock().unwrap();
+        assert_eq!(quit, Some(true), "{arg}");
+        assert!(find(&o, b"mdd").is_some(), "{arg}");
+        assert!(find(&o, b"\x1b]7577;").is_none(), "{arg}");
+    }
+    let Viewer { mut child, out, .. } = start(&["--headless", "40", GFM], None, 80, &env, false);
+    wait_for(&out, 0, b"tiles");
+    signal(child.id().cast_signed(), libc::SIGTERM);
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    quiet(&out);
+    assert!(quit.is_some());
+    assert!(find(&out.lock().unwrap(), b"\x1b]7577;").is_none());
+}
+
+#[test]
+fn signals_send_no_resume_clear() {
+    for sig in [libc::SIGTERM, libc::SIGHUP] {
+        let Viewer { mut child, out, .. } = open(GFM, 80, &[("OSC7577_TOKEN", TOKEN)]);
+        wait_report(&out, 1);
+        wait_for(&out, 0, b"a=p,");
+        signal(child.id().cast_signed(), sig);
+        let quit = exits_within(&mut child, LIMIT);
+        let _ = child.kill();
+        quiet(&out);
+        let all = reports(&out.lock().unwrap());
+        assert!(quit.is_some(), "signal {sig}");
+        assert_eq!(all.len(), 1, "signal {sig}");
+        assert_eq!(all[0].get("clear"), None, "signal {sig}");
+    }
+}
+
+#[test]
+fn going_back_to_piped_input_sends_clear() {
+    let dir = scratch("resume-piped-back");
+    let trace = dir.join("trace.log");
+    std::fs::write(dir.join("beta.md"), "# Beta title\n").unwrap();
+    let shell = "printf '[beta](beta.md)\\n' | \"$MDD\" -";
+    let env = [("MDD", env!("CARGO_BIN_EXE_mdd")), ("OSC7577_TOKEN", TOKEN), ("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = start_exe("/bin/sh".as_ref(), &["-c", shell], Some(&dir), 80, (18, 38), &env, false);
+    wait_for(&out, 0, b"a=p,");
+    wait_count(&trace, "page loaded", 1);
+    tty.write_all(b"fs").unwrap();
+    let opened = wait_report(&out, 1);
+    tty.write_all(b"\x7f").unwrap();
+    let back = wait_report(&out, 2);
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    quiet(&out);
+    let all = reports(&out.lock().unwrap());
+    assert_eq!(quit, Some(true));
+    assert!(same_file(&opened.argv()[1], &dir.join("beta.md")), "{:?}", opened.argv());
+    assert!(opened.mac_ok());
+    assert_eq!(back.get("clear"), Some("1"));
+    assert!(back.mac_ok());
+    assert_eq!(all.len(), 2, "a second clear at quit");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_quit_before_any_report_sends_clear() {
+    let dir = scratch("resume-early-quit");
+    let fifo = dir.join("slow.md");
+    assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    let Viewer { mut child, mut tty, out } = open(fifo.to_str().unwrap(), 80, &[("OSC7577_TOKEN", TOKEN)]);
+    wait_for(&out, 0, b"\x1b[c");
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    quiet(&out);
+    let first = reports(&out.lock().unwrap());
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::write(dir.join("alpha.md"), "# Alpha title\n").unwrap();
+    std::fs::remove_file(&fifo).unwrap();
+    let cfg = no_preview(&dir);
+    let env = [("XDG_CONFIG_HOME", cfg.to_str().unwrap()), ("OSC7577_TOKEN", TOKEN)];
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir), 80, &env, false);
+    wait_for(&out, 0, b"Alpha title");
+    wait_for(&out, 0, b"\x1b[c");
+    std::thread::sleep(Duration::from_millis(300));
+    tty.write_all(b"\x1b").unwrap();
+    let listed = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    quiet(&out);
+    let list = reports(&out.lock().unwrap());
+    assert_eq!(quit, Some(true));
+    assert_eq!(first.len(), 1, "first render");
+    assert_eq!(first[0].get("clear"), Some("1"));
+    assert!(first[0].mac_ok());
+    assert_eq!(listed, Some(true));
+    assert_eq!(list.len(), 2, "file list");
+    assert!(same_file(&list[0].argv()[1], &dir), "{:?}", list[0].argv());
+    assert_eq!(list[1].get("clear"), Some("1"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_resume_report_keeps_a_symlink_path() {
+    let dir = scratch("resume-link");
+    std::fs::write(dir.join("target.md"), "# Target\n").unwrap();
+    let link = dir.join("link.md");
+    std::os::unix::fs::symlink("target.md", &link).unwrap();
+    let Viewer { mut child, mut tty, out } = open(link.to_str().unwrap(), 80, &[("OSC7577_TOKEN", TOKEN)]);
+    let first = wait_report(&out, 1);
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(quit, Some(true));
+    assert_eq!(first.argv(), [env!("CARGO_BIN_EXE_mdd"), link.to_str().unwrap()]);
+}
+
+#[test]
+fn the_resume_report_resolves_dot_dot_after_a_symlink() {
+    let dir = scratch("resume-link-dots");
+    std::fs::create_dir_all(dir.join("docs")).unwrap();
+    std::fs::create_dir_all(dir.join("deep/inner")).unwrap();
+    std::fs::write(dir.join("docs/a.md"), "# Docs\n").unwrap();
+    std::fs::write(dir.join("deep/a.md"), "# Deep\n").unwrap();
+    std::os::unix::fs::symlink("../deep/inner", dir.join("docs/link")).unwrap();
+    let Viewer { mut child, mut tty, out } = open(dir.join("docs/link/../a.md").to_str().unwrap(), 80, &[("OSC7577_TOKEN", TOKEN)]);
+    let first = wait_report(&out, 1);
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let real = std::fs::canonicalize(dir.join("deep/a.md")).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(quit, Some(true));
+    assert_eq!(first.argv(), [env!("CARGO_BIN_EXE_mdd"), real.to_str().unwrap()]);
+}
+
+#[test]
+fn a_pipe_path_sends_no_resume_report() {
+    let shell = "\"$MDD\" <(printf '# Pipe title\\n')";
+    let env = [("MDD", env!("CARGO_BIN_EXE_mdd")), ("OSC7577_TOKEN", TOKEN)];
+    let Viewer { mut child, mut tty, out } = start_exe("/bin/bash".as_ref(), &["-c", shell], None, 80, (18, 38), &env, false);
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    quiet(&out);
+    let all = reports(&out.lock().unwrap());
+    assert_eq!(quit, Some(true));
+    assert_eq!(all.len(), 1, "a pipe sent a resume report");
+    assert_eq!(all[0].get("clear"), Some("1"));
+}
+
+#[test]
+fn the_file_list_reports_its_folder() {
+    let dir = scratch("resume-list");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::write(dir.join("alpha.md"), "# Alpha title\n").unwrap();
+    let cfg = no_preview(&dir);
+    let env = [("XDG_CONFIG_HOME", cfg.to_str().unwrap()), ("OSC7577_TOKEN", TOKEN)];
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir), 80, &env, false);
+    let listed = wait_report(&out, 1);
+    wait_for(&out, 0, b"Alpha title");
+    tty.write_all(b"alpha\r").unwrap();
+    let opened = wait_report(&out, 2);
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    assert_eq!(quit, Some(true));
+    assert_eq!(listed.argv().len(), 2, "{:?}", listed.argv());
+    assert_eq!(listed.argv()[0], env!("CARGO_BIN_EXE_mdd"));
+    assert!(same_file(&listed.argv()[1], &dir), "{:?}", listed.argv());
+    assert!(listed.mac_ok());
+    assert!(same_file(&opened.argv()[1], &dir.join("alpha.md")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ctrl_p_reports_the_folder_and_esc_the_file_again() {
+    let dir = scratch("resume-list-esc");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::write(dir.join("alpha.md"), "# Alpha title\n").unwrap();
+    let cfg = no_preview(&dir);
+    let env = [("XDG_CONFIG_HOME", cfg.to_str().unwrap()), ("OSC7577_TOKEN", TOKEN)];
+    let Viewer { mut child, mut tty, out } = start(&["alpha.md"], Some(&dir), 80, &env, false);
+    let first = wait_report(&out, 1);
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"\x10").unwrap();
+    let listed = wait_report(&out, 2);
+    tty.write_all(b"\x1b").unwrap();
+    let back = wait_report(&out, 3);
+    tty.write_all(b"q").unwrap();
+    let quit = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    assert_eq!(quit, Some(true));
+    assert!(same_file(&listed.argv()[1], &dir), "{:?}", listed.argv());
+    assert_eq!(back.argv(), first.argv());
+    assert!(back.mac_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ctrl_z_reports_again_after_resume() {
+    let (o, left) = suspends_and_resumes(b"\x1a", &[("OSC7577_TOKEN", TOKEN)]);
+    let before = reports(&o[..left]);
+    let after = reports(&o[left..]);
+    assert_eq!(before.len(), 1);
+    assert!(after.len() >= 2, "no report after SIGCONT");
+    assert!(after[0].argv() == before[0].argv() && after[0].mac_ok());
+    assert_eq!(after.last().unwrap().get("clear"), Some("1"));
 }
 
 /// A config with the preview off, for tests that take the next image or file name on screen as the file that opened.
