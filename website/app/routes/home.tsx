@@ -23,7 +23,7 @@ import { gitConfig } from '@/lib/shared';
 
 const tagline = 'View Markdown in your terminal, with real fonts, tables, diagrams, math, and images.';
 const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
-const install = `brew install ${gitConfig.user}/tap/mddog`;
+const install = 'curl -fsSL https://mddog.pages.dev/install.sh | sh';
 const plugin = `claude plugin marketplace add ${gitConfig.user}/${gitConfig.repo}
 claude plugin install mddog@mddog`;
 const usage = `mdd README.md       # view a file
@@ -134,7 +134,7 @@ function Hero() {
           <p className="mt-5 max-w-2xl text-xl text-fd-muted-foreground text-pretty">
             View Markdown with real fonts, tables, diagrams, math, and images.
           </p>
-          <div className="mt-8 max-w-xs">
+          <div className="mt-8 max-w-md">
             <DynamicCodeBlock lang="sh" code={install} />
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">

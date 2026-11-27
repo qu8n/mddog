@@ -13,21 +13,20 @@ See [Compatibility](/docs/compatibility) for what works, what doesn't, and avail
 ## Install
 
 ```sh
+curl -fsSL https://mddog.pages.dev/install.sh | sh
+```
+
+Run the same command again to update. If you use the [Claude Code plugin](/docs/claude-code), update the plugin too.
+
+The script downloads the latest release and puts the `mdd` binary in `~/.local/bin`. To install somewhere else, set `MDDOG_INSTALL_DIR` to a folder you can write to.
+
+On macOS, you can use Homebrew instead:
+
+```sh
 brew install qu8n/tap/mddog
 ```
 
-To update, run `brew upgrade mddog`. If you use the [Claude Code plugin](/docs/claude-code), update the plugin too.
-
-<details>
-  <summary>Install without Homebrew</summary>
-
-  ```sh
-  curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
-  ```
-
-  The script downloads the latest release and puts the `mdd` binary in `~/.local/bin`. To install somewhere else, set `MDDOG_INSTALL_DIR` to a folder you can write to. To update, run the script again.
-
-</details>
+To update, run `brew upgrade mddog`.
 
 <details>
   <summary>Install with Nix</summary>
@@ -74,7 +73,7 @@ To update, run `brew upgrade mddog`. If you use the [Claude Code plugin](/docs/c
   Remove the `mdd` binary, the image cache, and your config folder if you made one:
 
   ```sh
-  brew uninstall mddog   # or, if you used the script: rm ~/.local/bin/mdd
+  rm ~/.local/bin/mdd    # or, if you used Homebrew: brew uninstall mddog
                          # or, if you used Nix: nix profile remove mddog
   rm -rf ~/Library/Caches/mddog   # on Linux: rm -rf ~/.cache/mddog
   rm -r ~/.config/mddog

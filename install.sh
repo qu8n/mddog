@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs the latest mdd release.
-#   curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
+#   curl -fsSL https://mddog.pages.dev/install.sh | sh
 # MDDOG_INSTALL_DIR picks the folder (default ~/.local/bin).
 set -eu
 
@@ -77,4 +77,6 @@ Get started:
     mdd             pick a Markdown file to preview
     mdd FILE.md     preview one file
     mdd --help      see all options
+
+To update mddog, run the same install command again.
 EOF

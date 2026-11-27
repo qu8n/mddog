@@ -64,7 +64,7 @@ export function SelectPreview({ className }: PreviewProps) {
   );
 }
 
-const installCode = 'brew install qu8n/tap/mddog';
+const installCode = 'curl -fsSL https://mddog.pages.dev/install.sh | sh';
 
 export function CodeCopyPreview({ className }: PreviewProps) {
   const [copied, copy] = useCopy<'code'>();

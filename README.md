@@ -43,14 +43,12 @@ See [Compatibility](https://mddog.pages.dev/docs/compatibility) for what works, 
 ## Install
 
 ```sh
-brew install qu8n/tap/mddog
+curl -fsSL https://mddog.pages.dev/install.sh | sh
 ```
 
-Or, without Homebrew:
+Run the same command again to update.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
-```
+On macOS, you can use Homebrew instead: `brew install qu8n/tap/mddog` (update with `brew upgrade mddog`).
 
 For Nix, building from source, updating, and uninstalling, see [Install](https://mddog.pages.dev/docs#install) in the docs.
 

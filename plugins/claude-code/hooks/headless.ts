@@ -5,7 +5,7 @@ export type Picture = { file: string; width?: number; height?: number; bytes?: n
 export type Tile = Picture & { rows: number; small?: Picture }
 export type Out = { protocol: typeof PROTOCOL; keep: number; tiles: Tile[] }
 
-export const UPDATE_MDD = 'curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh'
+export const UPDATE_MDD = 'curl -fsSL https://mddog.pages.dev/install.sh | sh'
 export const UPDATE_PLUGIN = 'claude plugin marketplace update mddog && claude plugin update mddog@mddog'
 
 export function mismatch(protocol: unknown) {

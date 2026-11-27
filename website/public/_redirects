@@ -1,2 +1,3 @@
 /docs/features /docs/markdown 301
 /docs/install /docs#install 301
+/install.sh https://raw.githubusercontent.com/qu8n/mddog/main/install.sh 302
