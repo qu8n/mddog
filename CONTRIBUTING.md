@@ -29,7 +29,7 @@ The pty tests need a `/dev/shm` bigger than Docker's 64 MB default, so pass `--s
 
 | File | Covers |
 |---|---|
-| `tests/help.rs` | `mdd` in a pty: startup and the file list, keys, resize and font zoom, tile alignment, links, copy, the pointer shape, signals, the editor, and Ctrl-z |
+| `tests/help.rs` | `mdd` in a pty: startup and the file list, keys, resize and font zoom, tile alignment, links, copy, the pointer shape, signals, the editor, Ctrl-z, and session resume |
 | `tests/engine.rs` | the engine's typed answers: wide-block scroll and restore, button indices after a relayout, an empty file, search, select and hover, diagram expand and collapse, and raw HTML |
 | `tests/search.rs` | search, links, anchors, selection, hover, presses, copy buttons, Mermaid buttons, and wide blocks, through the engine calls the viewer makes |
 | `tests/math.rs` | the parser's math against `tests/math.golden`, and the TeX layout of commands taken from those files |
@@ -72,6 +72,7 @@ The pty tests need a `/dev/shm` bigger than Docker's 64 MB default, so pass `--s
 | `MDDOG_CACHE_DIR=DIR` | `mdd` | Use `DIR` as the cache root in place of `~/Library/Caches/mddog` on macOS or `$XDG_CACHE_HOME/mddog` (default `~/.cache/mddog`) on Linux |
 | `TERM_PROGRAM=herdr` | `mdd` | Use herdr's storage limit, and send selection and search changes as bands (an XTVERSION reply that starts with `libghostty` does the same) |
 | `TERM_PROGRAM=rex` | `mdd` | Use Rex's storage limit, send selection and search changes as bands, and take an 80x24 pane at 640x384 px as not shown yet (an XTVERSION reply that starts with `rex ` does the same) |
+| `OSC7577_TOKEN` | `mdd` | Sign the session resume report (OSC 7577) with it. `mdd` removes it from its environment at startup, so the programs it runs never get it |
 | `EDITOR` | `mdd` | The editor for `e` |
 | `XDG_CONFIG_HOME` | `mdd` | Where to look for `mddog/config.toml` |
 | `MDDOG_BIN` | the plugin, `reference/e2e/` | The binary to run |

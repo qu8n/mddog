@@ -12,6 +12,8 @@ pub mod headless;
 #[doc(hidden)]
 pub mod render;
 #[doc(hidden)]
+pub mod resume;
+#[doc(hidden)]
 pub mod sweep;
 #[doc(hidden)]
 pub mod term;
