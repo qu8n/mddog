@@ -4,7 +4,7 @@ use mddog::render::engine::{Engine, Pointer, Press, Select};
 
 fn engine(src: &str) -> Engine {
     let e = Engine::new(640.0, 2.0, false);
-    e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
+    e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()), mddog::render::doc::Callouts::Github);
     e
 }
 
@@ -30,7 +30,7 @@ fn a_rescale_keeps_a_wide_block_on_the_same_text() {
     e.rescale(1.0, 640.0, f64::INFINITY);
     assert!(at_left(&e), "a font zoom moved the block sideways");
     let small = Engine::new(640.0, 1.0, false);
-    small.load(&wide, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
+    small.load(&wide, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()), mddog::render::doc::Callouts::Github);
     small.code_restore(&saved);
     assert!(at_left(&small), "a reload at another scale moved the block sideways");
 }
@@ -206,7 +206,7 @@ fn a_heading_takes_its_align_attribute() {
 fn alignment_keeps_heading_spacing() {
     let height = |src: &str| {
         let e = Engine::new(640.0, 2.0, false);
-        e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("obsidian-light").unwrap_or_else(|| unreachable!()));
+        e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("obsidian-light").unwrap_or_else(|| unreachable!()), mddog::render::doc::Callouts::Github);
         e.layout().height
     };
     let plain = height("# A\n\n## B\n\n## C\n\ntext\n");
@@ -225,7 +225,7 @@ fn a_table_lays_out_the_same_at_any_scale() {
     let src = "| name | what it does |\n|---|:-:|\n| alpha | a long cell that has to wrap across more than one line in the column |\n| b | ok |\n";
     let at = |scale: f64| {
         let e = Engine::new(640.0, scale, false);
-        e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
+        e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()), mddog::render::doc::Callouts::Github);
         (e.layout().height, e.search("column", None)[0][0])
     };
     let one = at(1.0);
@@ -318,7 +318,7 @@ fn a_huge_svg_draws_scaled_down() {
         let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="{h}"><rect width="10" height="{h}"/></svg>"#);
         std::fs::write(dir.join(format!("{name}.svg")), svg).unwrap_or_else(|e| panic!("{e}"));
         let e = Engine::new(640.0, 2.0, false);
-        e.load(&format!("![{name}]({name}.svg)\n"), &dir, false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
+        e.load(&format!("![{name}]({name}.svg)\n"), &dir, false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()), mddog::render::doc::Callouts::Github);
         let height = e.layout().height;
         assert!(height < 20_000.0, "{name}: page is {height} px tall");
     }
@@ -333,7 +333,7 @@ fn an_svg_whose_rounded_size_is_too_big_still_draws() {
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="2399.5" height="13983.5"><rect width="10" height="10"/></svg>"#;
     std::fs::write(dir.join("big.svg"), svg).unwrap_or_else(|e| panic!("{e}"));
     let e = Engine::new(3000.0, 1.0, false);
-    e.load("![big picture](big.svg)\n", &dir, false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
+    e.load("![big picture](big.svg)\n", &dir, false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()), mddog::render::doc::Callouts::Github);
     let height = e.layout().height;
     assert!(height > 13_000.0, "page is {height} px tall");
     let _ = std::fs::remove_dir_all(&dir);
@@ -345,7 +345,7 @@ fn a_display_p3_page_matches_the_cells_around_it() {
     // Ghostty shows image pixels as Display P3 but cell colors as sRGB, so the page's #0d1117 must go out in P3 to
     // look like the #0d1117 cells beside it.
     let e = Engine::new(640.0, 2.0, false);
-    e.load("x\n", std::path::Path::new("."), false, mddog::theme::builtin("github-dark").unwrap_or_else(|| unreachable!()));
+    e.load("x\n", std::path::Path::new("."), false, mddog::theme::builtin("github-dark").unwrap_or_else(|| unreachable!()), mddog::render::doc::Callouts::Github);
     let corner = |e: &Engine| e.snapshot(0.0, 10.0, 2.0, |n| Some(vec![0; n])).unwrap().rgba[..4].to_vec();
     assert_eq!(corner(&e), [13, 17, 23, 255]);
     e.set_display_p3(true);
@@ -372,7 +372,7 @@ fn search_marks_are_dark_text_on_a_bright_box() {
     // out and reads the same on a light or dark page.
     for theme in ["github-light", "github-dark", "obsidian-light", "obsidian-dark"] {
         let e = Engine::new(640.0, 2.0, false);
-        e.load("ammo [ammo](https://x.y) `ammo`\n", std::path::Path::new("."), false, mddog::theme::builtin(theme).unwrap_or_else(|| unreachable!()));
+        e.load("ammo [ammo](https://x.y) `ammo`\n", std::path::Path::new("."), false, mddog::theme::builtin(theme).unwrap_or_else(|| unreachable!()), mddog::render::doc::Callouts::Github);
         let found = e.search("ammo", None);
         e.search_current(1);
         for (i, r) in found.iter().enumerate() {
@@ -557,4 +557,14 @@ fn a_wrapped_link_in_full_view_is_labeled_on_its_first_line() {
     assert_eq!(all.len(), 3);
     let wrapped = all.iter().find(|r| e.link(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0).as_deref() == Some("#x")).unwrap();
     assert!(wrapped[0] > 100.0, "the label went on the second line: {wrapped:?}");
+}
+
+#[test]
+fn a_folded_callout_opens_on_a_click() {
+    let e = Engine::new(640.0, 2.0, false);
+    e.load("> [!faq]- Folded\n> hidden body\n", std::path::Path::new("."), false, mddog::theme::builtin("obsidian-light").unwrap(), mddog::render::doc::Callouts::Obsidian);
+    assert_eq!(e.search("Folded", None).len(), 1, "the title shows");
+    assert!(e.search("hidden body", None).is_empty(), "a folded callout hides its body");
+    assert!((0..40).step_by(2).any(|y| e.press(40.0, f64::from(y)) == Press::Other), "no title to click");
+    assert_eq!(e.search("hidden body", None).len(), 1, "the click opened it");
 }

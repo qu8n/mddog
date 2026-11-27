@@ -155,6 +155,7 @@ struct Place {
 }
 
 pub struct Viewer {
+    theme_pick: Option<(Vec<config::Choice>, Option<&'static Theme>)>,
     watcher: Option<notify::RecommendedWatcher>,
     loader: Option<Loader>,
     tty: Tty,
@@ -308,12 +309,12 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let mut tty = match Tty::open() {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("mdd: needs a terminal to show the page ({}). It can't write to a pipe or a file. Run it in a terminal window.", term::io_error(&e));
+            eprintln!("mdd: needs a terminal to show the page ({}). It can't write to a pipe or a file. Run it in a terminal window.", crate::error::io(&e));
             return 1;
         }
     };
     if let Err(e) = tty.raw() {
-        eprintln!("mdd: can't take keys from the terminal: {}", term::io_error(&e));
+        eprintln!("mdd: can't take keys from the terminal: {}", crate::error::io(&e));
         return 1;
     }
     term::on_panic_restore(tty.saved());
@@ -415,6 +416,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         img_cols: size.cols,
         loaded: false,
         theme: config::get().themes.light,
+        theme_pick: None,
         touched: false,
         late: None,
         glide: None,
@@ -452,7 +454,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
             Ok(Ok(v)) => break v,
             Ok(Err(e)) => {
                 p.shutdown();
-                eprintln!("mdd: {}: {}", term::printable(&p.file.display().to_string()), term::io_error(&e));
+                eprintln!("mdd: {}: {}", term::printable(&p.file.display().to_string()), crate::error::io(&e));
                 return 1;
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -607,7 +609,7 @@ impl Viewer {
                 if self.listing {
                     return true;
                 }
-                if self.opened && !std::ptr::eq(config::theme(), self.theme) {
+                if self.opened && self.theme_stale() {
                     self.rerender_keep();
                 }
                 false
@@ -680,7 +682,7 @@ impl Viewer {
                         self.listing = false;
                         self.report();
                         self.end_preview();
-                        if std::ptr::eq(config::theme(), self.theme) && self.app.toc_cols(self.size.cols) == self.img_col {
+                        if !self.theme_stale() && self.app.toc_cols(self.size.cols) == self.img_col {
                             return true;
                         }
                         self.rerender_keep();
@@ -838,7 +840,7 @@ impl Viewer {
             }
             // The help takes the page's colors. When the macOS appearance changed since the page was
             // drawn, reload it first; the reload draws the help.
-            Action::Help if !std::ptr::eq(config::theme(), self.theme) => {
+            Action::Help if self.theme_stale() => {
                 self.rerender_keep();
                 false
             }
@@ -901,15 +903,19 @@ impl Viewer {
             }
             Action::OpenThemes => {
                 let height = self.app.toc_list_height as usize;
-                self.app.themes = Some(themes::List::new(config::choices(), config::fixed(), config::follows(), config::theme(), height));
+                let choices = config::choices();
+                let current = current_choice(&choices, config::follows(), config::theme());
+                let labels = choices.iter().map(|c| c.label().to_string()).collect();
+                self.theme_pick = Some((choices, config::fixed()));
+                self.app.themes = Some(themes::List::new(labels, current, height));
                 self.refit();
                 false
             }
             Action::PreviewTheme => {
-                if let Some(list) = &self.app.themes {
-                    config::show(Some(list.choices[list.shown].theme()));
+                if let (Some(list), Some((choices, _))) = (&self.app.themes, &self.theme_pick) {
+                    config::show(Some(choices[list.shown].theme()));
                 }
-                if std::ptr::eq(config::theme(), self.theme) {
+                if !self.theme_stale() {
                     self.draw_chrome();
                 } else {
                     self.rerender_keep();
@@ -917,21 +923,22 @@ impl Viewer {
                 false
             }
             Action::CloseThemes => {
-                let Some(list) = self.app.themes.take() else { return false };
-                config::show(list.before);
+                let (Some(_), Some((_, before))) = (self.app.themes.take(), self.theme_pick.take()) else { return false };
+                config::show(before);
                 self.refit();
                 false
             }
             Action::DropThemes => {
-                if let Some(list) = self.app.themes.take() {
-                    config::show(list.before);
+                if let (Some(_), Some((_, before))) = (self.app.themes.take(), self.theme_pick.take()) {
+                    config::show(before);
                 }
                 false
             }
             Action::PickTheme => {
-                let Some(list) = self.app.themes.take() else { return false };
-                config::show(Some(list.chosen().theme()));
-                let note = config::save(list.chosen()).unwrap_or_else(|e| e);
+                let (Some(list), Some((choices, _))) = (self.app.themes.take(), self.theme_pick.take()) else { return false };
+                let chosen = &choices[list.sel];
+                config::show(Some(chosen.theme()));
+                let note = config::save(chosen).unwrap_or_else(|e| e);
                 self.refit();
                 self.notify(&note);
                 false
@@ -1399,8 +1406,12 @@ impl Viewer {
         !self.stdin
     }
 
+    fn theme_stale(&self) -> bool {
+        !std::ptr::eq(config::theme(), self.theme)
+    }
+
     fn refit(&mut self) {
-        if std::ptr::eq(config::theme(), self.theme) && self.app.toc_cols(self.size.cols) == self.img_col {
+        if !self.theme_stale() && self.app.toc_cols(self.size.cols) == self.img_col {
             self.draw_chrome();
         } else {
             self.rerender_keep();
@@ -1443,7 +1454,7 @@ impl Viewer {
         self.size_engine(css_width);
         self.app.expanded = false;
         self.touched = false;
-        self.engine.load(&src, &base, self.app.wrap, theme);
+        self.engine.load(&src, &base, self.app.wrap, theme, config::get().callouts);
         self.settle_scale();
         trace::mark("page loaded");
         if !code.is_empty() {
@@ -1513,7 +1524,7 @@ impl Viewer {
     }
 
     fn max_css(&self) -> f64 {
-        f64::from(u32::from(config::get().max_width.0) * self.cell_w) / self.scale
+        f64::from(config::get().max_width.px(self.cell_w)) / self.scale
     }
 
     /// Takes the terminal's size and returns the TOC width and the page width in CSS pixels.
@@ -1532,7 +1543,7 @@ impl Viewer {
     /// when only a reload gives the right result: the file changed, the macOS appearance changed
     /// under a light and dark theme pair, a diagram is expanded, or a click or a selection changed the page.
     fn resize_in_place(&mut self) -> bool {
-        if self.app.expanded || self.touched || !std::ptr::eq(config::theme(), self.theme) || !self.loaded || self.engine.has_selection() {
+        if self.app.expanded || self.touched || self.theme_stale() || !self.loaded || self.engine.has_selection() {
             return false;
         }
         if self.live() && std::fs::read(&self.file).ok().is_none_or(|b| b != self.stamp) {
@@ -1988,7 +1999,7 @@ impl Viewer {
             Ok(bytes) => self.open(path, bytes, None),
             Err(e) => {
                 if let Some(p) = self.picker.as_mut() {
-                    p.note = Some(format!("Can't open {}: {}", path.display(), term::io_error(&e)));
+                    p.note = Some(format!("Can't open {}: {}", path.display(), crate::error::io(&e)));
                 }
                 self.show();
             }
@@ -2007,7 +2018,7 @@ impl Viewer {
             }
             link::Follow::Show(path, heading) => match std::fs::read(&path) {
                 Ok(bytes) => self.open(path, bytes, heading),
-                Err(e) => self.notify(&format!("Can't open {}: {}", path.display(), term::io_error(&e))),
+                Err(e) => self.notify(&format!("Can't open {}: {}", path.display(), crate::error::io(&e))),
             },
         }
         false
@@ -2224,9 +2235,31 @@ fn image_wait(late: Option<Instant>, pending: usize, now: Instant) -> (bool, Opt
     (late.is_some() || pending > 0, late.filter(|&until| pending > 0 && now <= until))
 }
 
+fn current_choice(choices: &[config::Choice], follows: bool, now: &'static Theme) -> usize {
+    choices
+        .iter()
+        .position(|c| match c {
+            config::Choice::Follow { .. } => follows,
+            config::Choice::Theme { theme, .. } => !follows && std::ptr::eq(*theme, now),
+        })
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opens_on_the_theme_in_use() {
+        let theme = |n: &str| crate::theme::builtin(n).unwrap();
+        let (light, dark) = (theme("github-light"), theme("github-dark"));
+        let follow = config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light, dark };
+        let pick = |n: &str| config::Choice::Theme { value: n.into(), theme: theme(n) };
+        let all = vec![follow, pick("github-light"), pick("github-dark")];
+        assert_eq!(current_choice(&all, true, dark), 0);
+        assert_eq!(current_choice(&all, false, dark), 2);
+        assert_eq!(current_choice(&all[1..], false, dark), 1);
+    }
 
     #[test]
     fn images_after_the_late_limit_still_arrive() {

@@ -464,20 +464,6 @@ pub fn wrap(text: &str, cols: usize) -> String {
     out
 }
 
-pub fn io_error(e: &io::Error) -> String {
-    match e.kind() {
-        io::ErrorKind::NotFound => "no such file".into(),
-        io::ErrorKind::PermissionDenied => "permission denied".into(),
-        io::ErrorKind::IsADirectory => "it is a directory, not a file".into(),
-        _ => {
-            let s = e.to_string();
-            let s = s.split(" (os error").next().unwrap_or(&s);
-            let mut c = s.chars();
-            c.next().map_or_else(String::new, |f| f.to_lowercase().chain(c).collect())
-        }
-    }
-}
-
 pub fn printable(s: &str) -> String {
     s.chars().map(|c| if c.is_control() { '\u{fffd}' } else { c }).collect()
 }

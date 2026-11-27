@@ -130,13 +130,13 @@ impl Chrome<'_> {
         let p = &self.palette;
         let reset = p.reset();
         for r in 0..view_rows(self.rows) {
-            let i = r.checked_sub(app::TOC_HEADER as usize).map(|n| n + list.offset).filter(|&i| i < list.choices.len());
+            let i = r.checked_sub(app::TOC_HEADER as usize).map(|n| n + list.offset).filter(|&i| i < list.labels.len());
             let (text, style) = match (r, i) {
                 (1, _) => (" THEMES".to_string(), format!("\x1b[1m{}", fg(p.fg_bright))),
                 (2, _) => ("─".repeat(content), fg(p.border)),
                 (_, Some(i)) => {
                     let mark = if i == list.current { "•" } else { " " };
-                    let label = format!(" {mark} {}", term::printable(list.choices[i].label()));
+                    let label = format!(" {mark} {}", term::printable(&list.labels[i]));
                     let max = content.saturating_sub(1);
                     let label = if term::width(&label) > max { term::fit(&label, max.saturating_sub(1)).0 + "…" } else { label };
                     let style = match (i == list.sel, i == list.shown) {

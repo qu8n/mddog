@@ -6,6 +6,8 @@ pub mod config;
 #[doc(hidden)]
 pub mod editor;
 #[doc(hidden)]
+pub mod error;
+#[doc(hidden)]
 pub mod headless;
 #[doc(hidden)]
 pub mod render;

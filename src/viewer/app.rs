@@ -1092,10 +1092,9 @@ mod tests {
 
     #[test]
     fn a_key_that_ends_labels_leaves_the_theme_list_alone() {
-        let dark = crate::theme::builtin("github-dark").unwrap();
         let mut a = app(100, 20);
         a.set_headings(&[h(1, "One", 0)]);
-        a.themes = Some(super::super::themes::List::new(vec![crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }], None, false, dark, 10));
+        a.themes = Some(super::super::themes::List::new(vec!["github-dark".into()], 0, 10));
         for k in [Key::Ctrl('p'), Key::Char('t')] {
             a.labels = Some(Labels::new(3));
             assert_eq!(a.handle(k), vec![Action::EndLabels], "{k:?}");
@@ -1680,10 +1679,8 @@ mod tests {
     fn theme_list_keys() {
         let mut a = app(100, 20);
         assert_eq!(a.handle(Key::Char('T')), vec![Action::OpenThemes]);
-        let dark = crate::theme::builtin("github-dark").unwrap();
-        let follow = crate::config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light: crate::theme::builtin("github-light").unwrap(), dark };
-        let choices = vec![follow, crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }];
-        a.themes = Some(super::super::themes::List::new(choices, None, true, dark, 10));
+        let two = || vec!["follow".to_string(), "github-dark".to_string()];
+        a.themes = Some(super::super::themes::List::new(two(), 0, 10));
         assert_eq!(a.toc_cols(120), toc_width(120));
         assert_eq!(a.handle(Key::Char('k')), vec![]);
         assert_eq!(a.handle(Key::Char('j')), vec![Action::Status]);
@@ -1701,16 +1698,13 @@ mod tests {
         assert_eq!(keys(&mut a, &[Key::Char('['), Key::Char(' '), Key::Char('[')]), vec![Action::Status]);
         assert_eq!(a.handle(Key::Char('t')), vec![Action::DropThemes, Action::ToggleToc]);
         assert!(a.toc_visible);
-        let follow = crate::config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light: crate::theme::builtin("github-light").unwrap(), dark };
-        a.themes = Some(super::super::themes::List::new(vec![follow, crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }], None, false, dark, 10));
+        a.themes = Some(super::super::themes::List::new(two(), 1, 10));
         assert_eq!(a.handle(Key::Char('t')), vec![Action::DropThemes, Action::ToggleToc]);
         assert!(a.toc_visible, "t from the theme list hid the contents it was covering");
-        let follow = crate::config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light: crate::theme::builtin("github-light").unwrap(), dark };
-        a.themes = Some(super::super::themes::List::new(vec![follow, crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }], None, false, dark, 10));
+        a.themes = Some(super::super::themes::List::new(two(), 1, 10));
         assert_eq!(a.handle(Key::Ctrl('t')), vec![Action::DropThemes, Action::ToggleToc]);
         assert!(a.toc_visible, "Ctrl-t from the theme list hid the contents it was covering");
-        let follow = crate::config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light: crate::theme::builtin("github-light").unwrap(), dark };
-        a.themes = Some(super::super::themes::List::new(vec![follow, crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }], None, false, dark, 10));
+        a.themes = Some(super::super::themes::List::new(two(), 1, 10));
         assert_eq!(a.hints().iter().map(|h| h.2).collect::<Vec<_>>(), vec![Key::Char(' '), Key::Enter, Key::Esc]);
         assert_eq!(a.handle(Key::Enter), vec![Action::PickTheme]);
         assert_eq!(a.handle(Key::Char('T')), vec![Action::CloseThemes]);
@@ -2112,5 +2106,109 @@ mod tests {
         let g2 = glide(g.at(now).0, 2000, 5000, now);
         assert_eq!(g2.at(now), (g.at(now).0, false));
         assert_eq!(g2.at(now + GLIDE), (2000, true));
+    }
+
+    const HELP_SKIPPED: &[&str] = &["wheel", "Shift-wheel", "drag its bar", "click a link", "click a button", "drag", "double-click", "click a hint", "click an entry"];
+
+    fn help_keys(name: &str) -> Option<Vec<Key>> {
+        if HELP_SKIPPED.contains(&name) {
+            return None;
+        }
+        let one = |k| Some(vec![k]);
+        match name {
+            "↓" => one(Key::Down),
+            "↑" => one(Key::Up),
+            "←" => one(Key::Left),
+            "→" => one(Key::Right),
+            "Space" => one(Key::Char(' ')),
+            "PgDn" => one(Key::PageDown),
+            "PgUp" => one(Key::PageUp),
+            "Home" => one(Key::Home),
+            "End" => one(Key::End),
+            "Backspace" => one(Key::Backspace),
+            "Enter" => one(Key::Enter),
+            "Esc" => one(Key::Esc),
+            "Cmd-c" | "Super-c" => one(Key::Copy),
+            "gg" | "]]" | "[[" => {
+                let c = name.chars().next().unwrap();
+                Some(vec![Key::Char(c), Key::Char(c)])
+            }
+            _ => {
+                if let Some(c) = name.strip_prefix("Ctrl-") {
+                    return one(Key::Ctrl(c.chars().next().unwrap()));
+                }
+                let mut cs = name.chars();
+                match (cs.next(), cs.next()) {
+                    (Some(c), None) => one(Key::Char(c)),
+                    _ => panic!("help names {name:?}, which this test neither maps nor skips"),
+                }
+            }
+        }
+    }
+
+    fn help_app() -> App {
+        let mut a = app(200, 20);
+        a.scroll = 50;
+        a.toc_visible = true;
+        a.query = "x".into();
+        a.matches = vec![10, 60, 100];
+        a.back = vec![3];
+        let heads: Vec<Heading> = (0..12).map(|i| h(1, "H", i * 15)).collect();
+        a.set_headings(&heads);
+        a
+    }
+
+    fn fingerprint(a: &App) -> String {
+        format!(
+            "{} {} {} {} {:?} {} {} {} {:?} {:?} {} {:?} {}",
+            a.scroll,
+            a.wrap,
+            a.toc_visible,
+            a.toc_offset,
+            a.prompt,
+            a.query,
+            a.help,
+            a.current,
+            a.prefix,
+            a.numkey,
+            a.reverse,
+            a.pinned,
+            a.back.len()
+        )
+    }
+
+    #[test]
+    fn every_key_the_help_screen_lists_does_something() {
+        let mut unbound = vec![];
+        for name in super::super::keys::SECTIONS.iter().flat_map(|s| s.rows).flat_map(|r| r.keys.iter().copied()) {
+            if name == "1-9" {
+                for c in '1'..='9' {
+                    let mut a = help_app();
+                    let before = fingerprint(&a);
+                    if a.handle(Key::Char(c)).is_empty() && fingerprint(&a) == before {
+                        unbound.push(c.to_string());
+                    }
+                }
+                continue;
+            }
+            let Some(ks) = help_keys(name) else { continue };
+            let mut contexts = vec![help_app()];
+            if matches!(name, "Ctrl-u" | "Ctrl-w") {
+                let mut p = help_app();
+                p.prompt = Some("ab cd".into());
+                if name == "Ctrl-w" {
+                    contexts.clear();
+                }
+                contexts.push(p);
+            }
+            for mut a in contexts {
+                let before = fingerprint(&a);
+                let acted = ks.iter().flat_map(|k| a.handle(*k)).count() > 0 || fingerprint(&a) != before;
+                if !acted {
+                    unbound.push(name.to_string());
+                }
+            }
+        }
+        assert!(unbound.is_empty(), "help lists keys that do nothing: {unbound:?}");
     }
 }

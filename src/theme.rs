@@ -258,7 +258,7 @@ pub fn file(path: &Path) -> Result<Theme, String> {
 fn read_small(path: &Path) -> Result<String, String> {
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
-    let io = |e: std::io::Error| crate::term::io_error(&e);
+    let io = |e: std::io::Error| crate::error::io(&e);
     let f = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path).map_err(io)?;
     if !f.metadata().map_err(io)?.is_file() {
         return Err("not a file".into());

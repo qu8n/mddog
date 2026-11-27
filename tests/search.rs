@@ -8,7 +8,7 @@ use mddog::render::engine::{Engine, Pointer, Press, Rect, Select};
 
 fn page(src: &str, width: f64) -> Engine {
     let e = Engine::new(width, 2.0, false);
-    e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-dark").unwrap());
+    e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-dark").unwrap(), mddog::render::doc::Callouts::Github);
     e
 }
 
