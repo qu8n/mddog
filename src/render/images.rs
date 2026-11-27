@@ -290,6 +290,15 @@ pub fn base_dir(file: &Path, stdin: bool) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    fn png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut enc = ::png::Encoder::new(&mut out, width, height);
+        enc.set_color(::png::ColorType::Rgba);
+        enc.set_depth(::png::BitDepth::Eight);
+        enc.write_header().ok()?.write_image_data(rgba).ok()?;
+        Some(out)
+    }
+
     #[test]
     fn prefetch_takes_the_images_layout_will_draw() {
         let md = "![a](a.png)\n\n| ![b](b.png) |\n|---|\n\n> - ![c](c.svg)\n\n<details open><summary>s</summary>\n\n![d](d.png)\n\n</details>\n\n<details><summary>s</summary>\n\n![e](e.png)\n\n</details>\n\n![a](a.png) ![r](https://x.test/r.png)\n";
@@ -314,7 +323,7 @@ mod tests {
         use super::{Images, Status};
         let dir = std::env::temp_dir().join(format!("mddog-imgcap-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("dot.png"), crate::term::kitty::png(2, 2, &[255; 16]).unwrap()).unwrap();
+        std::fs::write(dir.join("dot.png"), png(2, 2, &[255; 16]).unwrap()).unwrap();
         let mut wanted = vec![];
         let mut online = Images::new(dir.clone());
         assert!(matches!(online.get("dot.png", &mut wanted), Status::Ready(_)));
@@ -329,7 +338,7 @@ mod tests {
     #[test]
     fn a_capped_load_refuses_an_image_too_big_to_decode() {
         // 20000x1 px compresses to almost nothing but is far wider than any preview needs.
-        let wide = crate::term::kitty::png(20_000, 1, &vec![255; 80_000]).unwrap();
+        let wide = png(20_000, 1, &vec![255; 80_000]).unwrap();
         assert!(wide.len() < 1 << 20);
         assert!(super::decoded(&wide, true).is_none());
         assert!(super::decoded(&wide, false).is_some());
@@ -340,7 +349,7 @@ mod tests {
         use super::{Images, Status};
         let dir = std::env::temp_dir().join(format!("mddog-imgbudget-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let png = crate::term::kitty::png(64, 64, &[255; 64 * 64 * 4]).unwrap();
+        let png = png(64, 64, &[255; 64 * 64 * 4]).unwrap();
         std::fs::write(dir.join("a.png"), &png).unwrap();
         std::fs::write(dir.join("b.png"), &png).unwrap();
         let mut wanted = vec![];
@@ -357,7 +366,7 @@ mod tests {
         use super::{Images, Status};
         let dir = std::env::temp_dir().join(format!("mddog-imgprefetch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let png = crate::term::kitty::png(64, 64, &[255; 64 * 64 * 4]).unwrap();
+        let png = png(64, 64, &[255; 64 * 64 * 4]).unwrap();
         let names: Vec<String> = (0..6).map(|i| format!("{i}.png")).collect();
         for n in &names {
             std::fs::write(dir.join(n), &png).unwrap();

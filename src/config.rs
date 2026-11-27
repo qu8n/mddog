@@ -3,6 +3,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use serde::Deserialize;
 
+pub use crate::render::doc::Callouts;
 use crate::theme::{self, Theme};
 
 #[derive(Deserialize, Debug, PartialEq)]
@@ -180,17 +181,6 @@ impl TryFrom<i64> for MaxWidth {
     fn try_from(n: i64) -> Result<MaxWidth, String> {
         u16::try_from(n).ok().filter(|&n| n >= 20).map(MaxWidth).ok_or_else(|| "expected a number of cells, 20 or more, such as 100".to_string())
     }
-}
-
-/// The `callouts` key: which app's rules a `> [!kind]` block follows.
-#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Callouts {
-    /// github.com's alerts: five kinds, the marker alone on the first line, only at the top level of the page.
-    #[default]
-    Github,
-    /// Obsidian's callouts: any kind, aliases, a title, a fold marker, and nesting.
-    Obsidian,
 }
 
 /// The `theme` key: one theme, or one for each macOS appearance.

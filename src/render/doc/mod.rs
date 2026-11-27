@@ -2,9 +2,18 @@
 use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 
-use crate::config::Callouts;
-
 mod dollars;
+
+/// Which app's rules a `> [!kind]` block follows.
+#[derive(serde::Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Callouts {
+    /// github.com's alerts: five kinds, the marker alone on the first line, only at the top level of the page.
+    #[default]
+    Github,
+    /// Obsidian's callouts: any kind, aliases, a title, a fold marker, and nesting.
+    Obsidian,
+}
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Marks {
@@ -1004,9 +1013,9 @@ pub fn slug(s: &str) -> String {
     o
 }
 
-/// Parses `src` with the config's `callouts` rule.
+/// Parses `src` with GitHub's callouts.
 pub fn parse(src: &str) -> Doc {
-    parse_with(src, crate::config::get().callouts)
+    parse_with(src, Callouts::default())
 }
 
 pub fn parse_with(src: &str, callouts: Callouts) -> Doc {

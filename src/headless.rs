@@ -132,7 +132,7 @@ impl Renderer {
         }
         let width_px = self.cols * self.cell_w;
         self.engine.resize(f64::from(width_px) / self.scale, f64::from(u32::from(crate::config::get().max_width.0) * self.cell_w) / self.scale);
-        self.engine.load(&String::from_utf8_lossy(&bytes), &crate::render::images::base_dir(&self.file, false), false, crate::config::theme());
+        self.engine.load(&String::from_utf8_lossy(&bytes), &crate::render::images::base_dir(&self.file, false), false, crate::config::theme(), crate::config::get().callouts);
         if self.engine.pending_images() > 0 {
             self.engine.wait_images(REMOTE_LIMIT);
         }

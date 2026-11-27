@@ -57,7 +57,7 @@ fn a_line_break_in_ruby_is_a_space() {
 
 fn page(src: &str) -> Engine {
     let e = Engine::new(640.0, 2.0, false);
-    e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap());
+    e.load(src, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap(), mddog::render::doc::Callouts::Github);
     e
 }
 

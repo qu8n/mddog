@@ -71,7 +71,7 @@ The renderer. It turns Markdown into pixels and knows nothing about terminals. I
 
 `Engine` is the API boundary of the renderer. It owns the fonts, the theme, the `Doc`, the images, the `Page`, and the overlay. Its main calls are `load`, `resize`, `rescale`, `snapshot`, and then one group each for search, selection, hover and presses, wide blocks, diagrams, and late images. The file also defines the types those calls take and return, such as `Layout`, `Press`, and `Select`.
 
-**Architecture invariant:** `render` does not use `viewer`, `term`, `headless`, or `config`. It reads `theme` for the token types, `tmp` for one file-owner check, and `trace` for timing marks. The caller passes in everything else: the source, the theme, the width, the scale, and the font smoothing flag.
+**Architecture invariant:** `render` does not use `viewer`, `term`, `headless`, or `config`. It reads `theme` for the token types, `tmp` for one file-owner check, and `trace` for timing marks. The caller passes in everything else: the source, the theme, the width, the scale, the font smoothing flag, and the callouts rule.
 
 **Architecture invariant:** the engine keeps no bitmap of the whole page. It draws each tile from the display list when asked. So pixel memory does not grow with the page, and a tile that was freed can be drawn again.
 
@@ -87,7 +87,7 @@ The interactive viewer and the file list.
 
 - `view.rs`: `Viewer`, the viewer itself. It runs the event loop, owns the `Engine`, writes to the terminal, and carries out the actions that `App` returns. `Viewer::show` is the one path that draws the page.
 - `app.rs`: `App`, the state machine that turns a key or mouse event into `Action`s (scroll, glide, search, contents, history).
-- `chrome.rs` and `keys.rs`: the status row, the contents sidebar, and the `?` screen, drawn as terminal text from `App`. `keys.rs` is the one list of keys that the `?` screen shows.
+- `chrome.rs` and `keys.rs`: the status row, the contents sidebar, and the `?` screen, drawn as terminal text from `App`. `keys.rs` is the one list of keys that the `?` screen shows, and a test in `app.rs` fails when a key it lists does nothing.
 - `cache.rs`: `Cache`, the tiles the terminal holds: their ids, the bytes they use, which to free, and the bands used under herdr and Rex.
 - `position.rs`: keeps the view on the same content when the page is laid out again.
 - `loading.rs`: the skeleton that shows while a slow file loads.

@@ -157,15 +157,16 @@ fn draw(engine: &mut Option<Engine>, job: &Job) -> Option<Vec<(u32, Shm)>> {
     }
     let src = read_start(&k.path)?;
     let base = crate::render::images::base_dir(&k.path, false);
+    let callouts = crate::config::get().callouts;
     match head(&src, css_h) {
         Some(cut) => {
-            e.load(&cut, &base, false, job.theme);
+            e.load(&cut, &base, false, job.theme, callouts);
             // Tall blocks can push the cut's end above the bottom of the preview.
             if e.layout().height < css_h {
-                e.load(&src, &base, false, job.theme);
+                e.load(&src, &base, false, job.theme, callouts);
             }
         }
-        None => e.load(&src, &base, false, job.theme),
+        None => e.load(&src, &base, false, job.theme, callouts),
     }
     let step = kitty::tile_rows(k.width, k.cell_h).max(1) * k.cell_h;
     let mut tiles = vec![];
@@ -474,10 +475,10 @@ mod tests {
         let th = crate::theme::builtin("github-light").unwrap();
         let e = Engine::new(400.0, 2.0, true);
         e.set_offline(true);
-        e.load("![badge](https://example.com/never-fetched.svg)\n", Path::new("."), false, th);
+        e.load("![badge](https://example.com/never-fetched.svg)\n", Path::new("."), false, th, crate::render::doc::Callouts::Github);
         assert_eq!(e.pending_images(), 0);
         let online = Engine::new(400.0, 2.0, true);
-        online.load("![badge](https://example.invalid/b.svg)\n", Path::new("."), false, th);
+        online.load("![badge](https://example.invalid/b.svg)\n", Path::new("."), false, th, crate::render::doc::Callouts::Github);
         assert_eq!(online.pending_images(), 1);
     }
 

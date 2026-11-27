@@ -153,13 +153,13 @@ impl Engine {
     }
 
     /// Parses and lays out `src` in place of the page.
-    pub fn load(&self, src: &str, base: &Path, wrap: bool, th: &crate::theme::Theme) {
+    pub fn load(&self, src: &str, base: &Path, wrap: bool, th: &crate::theme::Theme, callouts: doc::Callouts) {
         let mut st = self.st.borrow_mut();
         crate::trace::mark("parse start");
         st.th = Theme::new(th);
         let (body, code) = (st.th.font_body.clone(), st.th.font_code.clone());
         st.fonts.set_families(body, code);
-        st.doc = Some(doc::parse(if src.trim().is_empty() { "*This file is empty.*" } else { src }));
+        st.doc = Some(doc::parse_with(if src.trim().is_empty() { "*This file is empty.*" } else { src }, callouts));
         crate::trace::mark("parsed");
         st.images = Images::new(base.to_path_buf());
         st.images.offline = self.offline.get();
