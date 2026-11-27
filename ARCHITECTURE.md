@@ -114,9 +114,9 @@ The terminal layer. `term/mod.rs` sets raw mode on `/dev/tty`, probes the termin
 
 **Architecture invariant:** headless mode does not use `viewer`. It calls the `Engine` directly, as the viewer does, and takes the tile limits from `term::kitty`.
 
-### `src/watch.rs`, `src/editor.rs`, `src/tmp.rs`, `src/sweep.rs`, `src/trace.rs`
+### `src/watch.rs`, `src/editor.rs`, `src/tmp.rs`, `src/sweep.rs`, `src/trace.rs`, `src/resume.rs`
 
-Small helpers. `watch` watches a file's folder, so a save done as write-then-rename still counts. `editor` runs `$EDITOR`. `tmp` names and writes private temp files, and reads a temp name's pid back. `sweep` removes temp files that crashed or killed runs left behind, and prunes the remote image cache. `trace` writes the debug log that `MDDOG_TRACE` turns on.
+Small helpers. `watch` watches a file's folder, so a save done as write-then-rename still counts. `editor` runs `$EDITOR`. `tmp` names and writes private temp files, and reads a temp name's pid back. `sweep` removes temp files that crashed or killed runs left behind, and prunes the remote image cache. `trace` writes the debug log that `MDDOG_TRACE` turns on. `resume` builds the OSC 7577 reports that tell the terminal how to reopen the file or file list shown, and holds the token `main` takes from the environment.
 
 ### `src/lib.rs`
 
@@ -150,7 +150,7 @@ The file list's preview (`viewer/preview.rs`) is the one exception to "only the 
 
 Headless mode has the same rule: the engine and every snapshot stay on its main thread. Besides the engine's own workers, it has a signal thread, the file watcher, and threads that encode the image files.
 
-The viewer has no helper process, no socket, and no daemon. The only programs it runs are `$EDITOR` (through `sh -c`), `pbcopy` on macOS or `wl-copy`, `xclip` or `xsel` on Linux to copy, and the config's `open_command` (`open` on macOS or `xdg-open` on Linux by default) for web and mail links.
+The viewer has no helper process, no socket, and no daemon. The only programs it runs are `$EDITOR` (through `sh -c`), `pbcopy` on macOS or `wl-copy`, `xclip` or `xsel` on Linux to copy, and the config's `open_command` (`open` on macOS or `xdg-open` on Linux by default) for web and mail links. None of them gets `OSC7577_TOKEN`, since `main` removes it before anything starts.
 
 ### Coordinates and scale
 

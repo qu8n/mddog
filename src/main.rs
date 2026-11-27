@@ -27,6 +27,8 @@ In the viewer, press ? to list the keys.
 ";
 
 fn main() {
+    resume::take_token();
+    resume::set_program(std::env::args_os().next().as_deref());
     trace::start();
     let mut files: Vec<String> = Vec::new();
     let mut options = true;
