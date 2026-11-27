@@ -71,7 +71,7 @@ The renderer. It turns Markdown into pixels and knows nothing about terminals. I
 
 `Engine` is the API boundary of the renderer. It owns the fonts, the theme, the `Doc`, the images, the `Page`, and the overlay. Its main calls are `load`, `resize`, `rescale`, `snapshot`, and then one group each for search, selection, hover and presses, wide blocks, diagrams, and late images. The file also defines the types those calls take and return, such as `Layout`, `Press`, and `Select`.
 
-**Architecture invariant:** `render` does not use `viewer`, `term`, `headless`, or `config`. It reads `theme` for the token types, `tmp` for one file-owner check, and `trace` for timing marks. The caller passes in everything else: the source, the theme, the width, the scale, the font smoothing flag, and the callouts rule.
+**Architecture invariant:** `render` does not use `viewer`, `term`, `headless`, or `config`. It reads `theme` for the token types, `tmp` for one file-owner check, and `trace` for timing marks. The caller passes in everything else: the source, the theme, the width, the scale, the font smoothing flag, and the callouts rule. The one exception is the home and cache folders: `remote` and `media` read `HOME`, and `remote` reads `MDDOG_CACHE_DIR` and `XDG_CACHE_HOME`.
 
 **Architecture invariant:** the engine keeps no bitmap of the whole page. It draws each tile from the display list when asked. So pixel memory does not grow with the page, and a tile that was freed can be drawn again.
 
@@ -96,7 +96,7 @@ The interactive viewer and the file list.
 - `preview.rs`: `Preview`, the file list's preview: the top screen of the selected file, drawn on a worker thread with its own `Engine` and kept off the network.
 - `link.rs` and `clipboard.rs`: following links, and copying text.
 
-**Architecture invariant:** `app.rs` holds no terminal or engine state. It depends only on `term::Key`. So it is tested row by row against `docs/behavior.md` without a terminal. `chrome.rs` is pure in the same way.
+**Architecture invariant:** `app.rs` holds no terminal or engine state. Besides the viewer's own pure modules (`labels`, `themes`), it depends only on `term::Key`. So it is tested row by row against `docs/behavior.md` without a terminal. `chrome.rs` is pure in the same way.
 
 **Architecture invariant:** `cache.rs` does not write to the terminal. `Viewer` passes it a function that draws a tile, so its tests use a fake.
 
@@ -106,7 +106,7 @@ The interactive viewer and the file list.
 
 The terminal layer. `term/mod.rs` sets raw mode on `/dev/tty`, probes the terminal at startup (`Tty::probe`), and parses keys and mouse reports. `kitty.rs` sends, places, and frees Kitty images, and holds the tile size limits and the storage limit. `screen.rs` reads the display's backing scale.
 
-**Architecture invariant:** the viewer refuses to start when the terminal can't do what it needs: one that answers the probe without Kitty graphics, or a place it can't show images or scroll them: tmux, zellij, and Warp. Those three are found from the environment in `main.rs`, before the probe, because tmux takes the probe's graphics query as the pane's title. It never falls back to drawing the page as text.
+**Architecture invariant:** the viewer refuses to start when the terminal can't do what it needs: one that answers the probe without Kitty graphics, or a place it can't show images or scroll them: tmux, zellij, and Warp. Those three are found from the environment by `term::refused_by_env`, which `main.rs` calls before the probe, because tmux takes the probe's graphics query as the pane's title. It never falls back to drawing the page as text.
 
 ### `src/headless.rs`
 
@@ -114,9 +114,9 @@ The terminal layer. `term/mod.rs` sets raw mode on `/dev/tty`, probes the termin
 
 **Architecture invariant:** headless mode does not use `viewer`. It calls the `Engine` directly, as the viewer does, and takes the tile limits from `term::kitty`.
 
-### `src/watch.rs`, `src/editor.rs`, `src/tmp.rs`, `src/sweep.rs`, `src/trace.rs`
+### `src/watch.rs`, `src/editor.rs`, `src/error.rs`, `src/tmp.rs`, `src/sweep.rs`, `src/trace.rs`
 
-Small helpers. `watch` watches a file's folder, so a save done as write-then-rename still counts. `editor` runs `$EDITOR`. `tmp` names and writes private temp files, and reads a temp name's pid back. `sweep` removes temp files that crashed or killed runs left behind, and prunes the remote image cache. `trace` writes the debug log that `MDDOG_TRACE` turns on.
+Small helpers. `watch` watches a file's folder, so a save done as write-then-rename still counts. `editor` runs `$EDITOR`. `error` turns an I/O error into a short message. `tmp` names and writes private temp files, and reads a temp name's pid back. `sweep` removes temp files that crashed or killed runs left behind, and prunes the remote image cache. `trace` writes the debug log that `MDDOG_TRACE` turns on.
 
 ### `src/lib.rs`
 

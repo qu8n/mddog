@@ -117,7 +117,7 @@ fn looks_binary(head: &[u8]) -> bool {
 
 fn stdin_copy() -> Result<PathBuf, String> {
     let mut bytes = Vec::new();
-    std::io::stdin().read_to_end(&mut bytes).map_err(|e| format!("can't read standard input: {}", term::io_error(&e)))?;
+    std::io::stdin().read_to_end(&mut bytes).map_err(|e| format!("can't read standard input: {}", mddog::error::io(&e)))?;
     if bytes.is_empty() {
         usage("no file given, and standard input is empty");
     }
@@ -125,7 +125,7 @@ fn stdin_copy() -> Result<PathBuf, String> {
         return Err("standard input looks like a binary file, not Markdown".into());
     }
     let path = tmp::stdin_copy();
-    tmp::write_private(&path, &bytes).map_err(|e| format!("can't save standard input to a temp file: {}", term::io_error(&e)))?;
+    tmp::write_private(&path, &bytes).map_err(|e| format!("can't save standard input to a temp file: {}", mddog::error::io(&e)))?;
     Ok(path)
 }
 
@@ -145,7 +145,7 @@ fn check_file(path: &Path) -> Result<(), String> {
                 None => format!("{shown}: no such file"),
             });
         }
-        Err(e) => return Err(format!("{shown}: {}", term::io_error(&e))),
+        Err(e) => return Err(format!("{shown}: {}", mddog::error::io(&e))),
     };
     if meta.is_dir() {
         return Err(match viewer::picker::readmes(path).into_iter().next() {
@@ -155,7 +155,7 @@ fn check_file(path: &Path) -> Result<(), String> {
     }
     let mut head = Vec::new();
     if meta.is_file() {
-        std::fs::File::open(path).and_then(|f| f.take(8000).read_to_end(&mut head)).map_err(|e| format!("{shown}: {}", term::io_error(&e)))?;
+        std::fs::File::open(path).and_then(|f| f.take(8000).read_to_end(&mut head)).map_err(|e| format!("{shown}: {}", mddog::error::io(&e)))?;
     }
     if looks_binary(&head) {
         return Err(format!("{shown} looks like a binary file, not Markdown"));

@@ -37,7 +37,7 @@ pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
     }
     let dir = crate::tmp::tiles_dir();
     if let Err(e) = std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(&dir) {
-        eprintln!("mdd: can't make {}: {}", dir.display(), term::io_error(&e));
+        eprintln!("mdd: can't make {}: {}", dir.display(), crate::error::io(&e));
         return 1;
     }
     if let Ok(mut signals) = signal_hook::iterator::Signals::new([libc::SIGTERM, libc::SIGINT, libc::SIGHUP]) {
@@ -125,13 +125,13 @@ impl Renderer {
 
     fn render(&mut self) -> Result<(), String> {
         let last = self.stamp.take();
-        let bytes = std::fs::read(&self.file).map_err(|e| format!("{}: {}", term::printable(&self.file.display().to_string()), term::io_error(&e)))?;
+        let bytes = std::fs::read(&self.file).map_err(|e| format!("{}: {}", term::printable(&self.file.display().to_string()), crate::error::io(&e)))?;
         if last.as_ref() == Some(&bytes) {
             self.stamp = last;
             return Ok(());
         }
         let width_px = self.cols * self.cell_w;
-        self.engine.resize(f64::from(width_px) / self.scale, f64::from(u32::from(crate::config::get().max_width.0) * self.cell_w) / self.scale);
+        self.engine.resize(f64::from(width_px) / self.scale, f64::from(crate::config::get().max_width.px(self.cell_w)) / self.scale);
         self.engine.load(&String::from_utf8_lossy(&bytes), &crate::render::images::base_dir(&self.file, false), false, crate::config::theme(), crate::config::get().callouts);
         if self.engine.pending_images() > 0 {
             self.engine.wait_images(REMOTE_LIMIT);
@@ -219,7 +219,7 @@ impl Renderer {
                 let path = self.dir.join(format!("{round}-{}.webp", tiles.len()));
                 let small = self.dir.join(format!("{round}-{}s.webp", tiles.len()));
                 for (p, b) in [(&path, &t.sharp), (&small, &t.small)] {
-                    std::fs::write(p, b).map_err(|e| format!("can't write {}: {}", p.display(), term::io_error(&e)))?;
+                    std::fs::write(p, b).map_err(|e| format!("can't write {}: {}", p.display(), crate::error::io(&e)))?;
                 }
                 tiles.push(OutTile {
                     picture: Picture { file: path, size: Some(Size { width: t.width, height: t.height, bytes: t.sharp.len() }) },

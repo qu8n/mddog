@@ -299,12 +299,12 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let mut tty = match Tty::open() {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("mdd: needs a terminal to show the page ({}). It can't write to a pipe or a file. Run it in a terminal window.", term::io_error(&e));
+            eprintln!("mdd: needs a terminal to show the page ({}). It can't write to a pipe or a file. Run it in a terminal window.", crate::error::io(&e));
             return 1;
         }
     };
     if let Err(e) = tty.raw() {
-        eprintln!("mdd: can't take keys from the terminal: {}", term::io_error(&e));
+        eprintln!("mdd: can't take keys from the terminal: {}", crate::error::io(&e));
         return 1;
     }
     term::on_panic_restore(tty.saved());
@@ -442,7 +442,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
             Ok(Ok(v)) => break v,
             Ok(Err(e)) => {
                 p.shutdown();
-                eprintln!("mdd: {}: {}", term::printable(&p.file.display().to_string()), term::io_error(&e));
+                eprintln!("mdd: {}: {}", term::printable(&p.file.display().to_string()), crate::error::io(&e));
                 return 1;
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -1506,7 +1506,7 @@ impl Viewer {
     }
 
     fn max_css(&self) -> f64 {
-        f64::from(u32::from(config::get().max_width.0) * self.cell_w) / self.scale
+        f64::from(config::get().max_width.px(self.cell_w)) / self.scale
     }
 
     /// Takes the terminal's size and returns the TOC width and the page width in CSS pixels.
@@ -1940,7 +1940,7 @@ impl Viewer {
             Ok(bytes) => self.open(path, bytes, None),
             Err(e) => {
                 if let Some(p) = self.picker.as_mut() {
-                    p.note = Some(format!("Can't open {}: {}", path.display(), term::io_error(&e)));
+                    p.note = Some(format!("Can't open {}: {}", path.display(), crate::error::io(&e)));
                 }
                 self.show();
             }
@@ -1959,7 +1959,7 @@ impl Viewer {
             }
             link::Follow::Show(path, heading) => match std::fs::read(&path) {
                 Ok(bytes) => self.open(path, bytes, heading),
-                Err(e) => self.notify(&format!("Can't open {}: {}", path.display(), term::io_error(&e))),
+                Err(e) => self.notify(&format!("Can't open {}: {}", path.display(), crate::error::io(&e))),
             },
         }
         false

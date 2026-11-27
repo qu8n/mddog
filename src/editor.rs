@@ -25,7 +25,7 @@ pub fn run(file: &Path) -> Result<(), String> {
         Ok(s) if s.success() => Ok(()),
         Ok(s) if s.code() == Some(127) => Err(format!("Editor \"{name}\" not found. Set $EDITOR to your editor")),
         Ok(s) => Err(format!("Editor \"{name}\" failed ({s})")),
-        Err(e) => Err(format!("Could not start the editor: {}", crate::term::io_error(&e))),
+        Err(e) => Err(format!("Could not start the editor: {}", crate::error::io(&e))),
     }
 }
 

@@ -176,6 +176,12 @@ impl Size {
 #[serde(try_from = "i64")]
 pub struct MaxWidth(pub u16);
 
+impl MaxWidth {
+    pub fn px(self, cell_w: u32) -> u32 {
+        u32::from(self.0) * cell_w
+    }
+}
+
 impl TryFrom<i64> for MaxWidth {
     type Error = String;
     fn try_from(n: i64) -> Result<MaxWidth, String> {
@@ -308,7 +314,7 @@ pub fn read(dir: &Path) -> Result<Config, String> {
     let config = match std::fs::read_to_string(&path) {
         Ok(text) => parse(&text, dir).map_err(|e| format!("{}: {e}", path.display()))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
-        Err(e) => return Err(format!("{}: {}", path.display(), crate::term::io_error(&e))),
+        Err(e) => return Err(format!("{}: {}", path.display(), crate::error::io(&e))),
     };
     Ok(config)
 }
@@ -482,15 +488,15 @@ pub fn save(choice: &Choice) -> Result<String, String> {
     let _lock = std::fs::create_dir_all(dir)
         .and_then(|()| std::fs::File::open(dir))
         .and_then(|f| f.lock().map(|()| f))
-        .map_err(|e| format!("Can't save the theme in {}: {}", tilde(&path), crate::term::io_error(&e)))?;
+        .map_err(|e| format!("Can't save the theme in {}: {}", tilde(&path), crate::error::io(&e)))?;
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(format!("Can't read {}: {}", tilde(&path), crate::term::io_error(&e))),
+        Err(e) => return Err(format!("Can't read {}: {}", tilde(&path), crate::error::io(&e))),
     };
     let new = set_theme(&text, value).map_err(|e| format!("Can't save the theme in {}: {e}", tilde(&path)))?;
     if new != text {
-        replace(&path, &text, &new).map_err(|e| format!("Can't write {}: {}", tilde(&path), crate::term::io_error(&e)))?;
+        replace(&path, &text, &new).map_err(|e| format!("Can't write {}: {}", tilde(&path), crate::error::io(&e)))?;
     }
     Ok(match choice {
         Choice::Follow { .. } => format!("Saved: follow the {APPEARANCE} appearance, in {}", tilde(&path)),

@@ -117,7 +117,7 @@ fn run(argv: &[String], capture: bool) -> Result<(), String> {
 fn run_for(argv: &[String], limit: std::time::Duration, capture: bool) -> Result<(), String> {
     use std::io::{Read, Seek, SeekFrom};
     let prog = &argv[0];
-    let io = |e: std::io::Error| format!("{prog}: {}", crate::term::io_error(&e));
+    let io = |e: std::io::Error| format!("{prog}: {}", crate::error::io(&e));
     let mut log = if capture { Some(crate::tmp::unnamed().map_err(io)?) } else { None };
     let err_out = match &log {
         Some(f) => Stdio::from(f.try_clone().map_err(io)?),
