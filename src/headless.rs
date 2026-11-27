@@ -29,7 +29,7 @@ const WEBP_SMALL_MAX: usize = 20_000;
 const WEBP_LOSSY_FROM: usize = 12_000;
 
 pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
-    let desktop = std::thread::spawn(crate::config::desktop_dark);
+    let desktop = std::thread::spawn(crate::appearance::desktop_dark);
     std::thread::spawn(crate::render::svg::warm);
     if let Some(m) = crate::render::text::missing_fonts() {
         eprintln!("mdd: {m}");
@@ -58,14 +58,15 @@ pub fn run(file: PathBuf, cols: u16, webp: bool) -> i32 {
         return 1;
     };
     let engine = Engine::new(800.0, crate::term::screen::display_scale(), crate::config::font_smoothing());
+    let mut shown = crate::appearance::Shown::new(&crate::config::get().themes);
     if let Ok(Some(dark)) = desktop.join() {
-        crate::config::set_dark(dark);
+        shown.set_dark(dark);
     }
     let scale = engine.scale.get();
     // The desktop pane, which asks for WebP, lays the page out at its own cell, whatever terminal Claude Code was
     // started from.
     let (cell_w, cell_h) = if webp { ((PANE_CELL.0 * scale) as u32, (PANE_CELL.1 * scale) as u32) } else { cell_size(scale).unwrap_or_else(|| term::fallback_cell(scale)) };
-    let mut r = Renderer { engine, file, dir, scale, cell_w, cell_h, cols: u32::from(cols), round: 0, stamp: None, gone: false, webp };
+    let mut r = Renderer { engine, shown, file, dir, scale, cell_w, cell_h, cols: u32::from(cols), round: 0, stamp: None, gone: false, webp };
     let mut swept = false;
     let code = loop {
         if let Err(e) = r.render() {
@@ -99,6 +100,7 @@ fn cell_size(scale: f64) -> Option<(u32, u32)> {
 
 struct Renderer {
     engine: Engine,
+    shown: crate::appearance::Shown,
     file: PathBuf,
     dir: PathBuf,
     scale: f64,
@@ -132,7 +134,7 @@ impl Renderer {
         }
         let width_px = self.cols * self.cell_w;
         self.engine.resize(f64::from(width_px) / self.scale, f64::from(crate::config::get().max_width.px(self.cell_w)) / self.scale);
-        self.engine.load(&String::from_utf8_lossy(&bytes), &crate::render::images::base_dir(&self.file, false), false, crate::config::theme(), crate::config::get().callouts);
+        self.engine.load(&String::from_utf8_lossy(&bytes), &crate::render::images::base_dir(&self.file, false), false, self.shown.theme(), crate::config::get().callouts);
         if self.engine.pending_images() > 0 {
             self.engine.wait_images(REMOTE_LIMIT);
         }

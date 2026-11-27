@@ -605,6 +605,29 @@ fn the_file_list_from_the_theme_list_gives_the_page_back_its_width() {
 }
 
 #[test]
+fn a_theme_preview_paints_the_cells_in_the_new_background() {
+    let dir = scratch("theme-preview-clear");
+    std::fs::write(dir.join("mddog/config.toml"), "theme = \"github-light\"\n").unwrap();
+    let trace = dir.join("trace.log");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("MDDOG_SCALE", "2"), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = open(GFM, 100, &env);
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"T").unwrap();
+    wait_trace(&trace, "key Char('T')");
+    let before = quiet(&out);
+    tty.write_all(b"j ").unwrap();
+    wait_for(&out, before, b"a=p,");
+    let after = quiet(&out);
+    let sent = out.lock().unwrap()[before..after].to_vec();
+    tty.write_all(b"\x1bq").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    let clear = format!("{}\x1b[H\x1b[J", mddog::theme::builtin("github-dark").unwrap().palette.reset());
+    assert!(find(&sent, clear.as_bytes()).is_some(), "the cells kept the old theme's background");
+}
+
+#[test]
 fn hints_work_while_help_shows() {
     let Viewer { mut child, mut tty, out } = open(GFM, 100, &[]);
     wait_for(&out, 0, b"a=p,");

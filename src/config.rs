@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use serde::Deserialize;
 
@@ -351,40 +351,6 @@ fn key_at(text: &str, at: usize) -> Option<String> {
     Some(table.map_or_else(|| key.to_string(), |t| format!("{t}.{key}")))
 }
 
-struct Shown {
-    light: &'static Theme,
-    dark: Option<&'static Theme>,
-    fixed: Option<&'static Theme>,
-}
-
-fn shown() -> MutexGuard<'static, Shown> {
-    static SHOWN: LazyLock<Mutex<Shown>> = LazyLock::new(|| {
-        let t = &get().themes;
-        Mutex::new(Shown { light: t.light, dark: t.dark, fixed: None })
-    });
-    SHOWN.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-pub fn theme() -> &'static Theme {
-    let (light, dark, fixed) = {
-        let s = shown();
-        (s.light, s.dark, s.fixed)
-    };
-    match (fixed, dark) {
-        (Some(t), _) => t,
-        (None, Some(dark)) if system_dark() => dark,
-        _ => light,
-    }
-}
-
-pub fn fixed() -> Option<&'static Theme> {
-    shown().fixed
-}
-
-pub fn show(t: Option<&'static Theme>) {
-    shown().fixed = t;
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Choice {
     Follow { value: String, light: &'static Theme, dark: &'static Theme },
@@ -405,18 +371,13 @@ impl Choice {
         }
     }
 
-    pub fn theme(&self) -> &'static Theme {
+    pub fn theme(&self, dark: bool) -> &'static Theme {
         match self {
-            Choice::Follow { dark, .. } if system_dark() => dark,
+            Choice::Follow { dark: t, .. } if dark => t,
             Choice::Follow { light, .. } => light,
             Choice::Theme { theme, .. } => theme,
         }
     }
-}
-
-pub fn follows() -> bool {
-    let s = shown();
-    s.dark.is_some() && s.fixed.is_none()
 }
 
 pub fn choices() -> Vec<Choice> {
@@ -473,11 +434,14 @@ fn css_in(dir: &Path, prefix: &str) -> Vec<String> {
     names
 }
 
+pub fn themes_of(choice: &Choice) -> Result<Themes, String> {
+    let spec = ThemeSpec::try_from(choice.value().to_string()).map_err(|e| format!("Can't save the theme: {e}"))?;
+    spec.load(DIR.get().map_or(Path::new(""), PathBuf::as_path)).map_err(|e| format!("Can't save the theme: {e}"))
+}
+
 pub fn save(choice: &Choice) -> Result<String, String> {
     let value = choice.value();
     let spec = ThemeSpec::try_from(value.to_string()).map_err(|e| format!("Can't save the theme: {e}"))?;
-    let themes = spec.load(DIR.get().map_or(Path::new(""), PathBuf::as_path)).map_err(|e| format!("Can't save the theme: {e}"))?;
-    *shown() = Shown { light: themes.light, dark: themes.dark, fixed: None };
     let dir = DIR.get().ok_or("Can't save the theme: HOME is not set")?;
     for s in spec.sources() {
         if let Source::File(f) = s {
@@ -587,77 +551,9 @@ const FOLLOW_LABEL: &str = "Follow terminal";
 #[cfg(not(target_os = "macos"))]
 const APPEARANCE: &str = "terminal's";
 
-#[cfg(target_os = "macos")]
-pub fn set_dark(_dark: bool) {}
-
-#[cfg(target_os = "macos")]
-pub fn desktop_dark() -> Option<bool> {
-    None
-}
-
-#[cfg(not(target_os = "macos"))]
-static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-#[cfg(not(target_os = "macos"))]
-pub fn set_dark(dark: bool) {
-    DARK.store(dark, std::sync::atomic::Ordering::Relaxed);
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn desktop_dark() -> Option<bool> {
-    let until = std::time::Instant::now() + std::time::Duration::from_millis(500);
-    let owned = gdbus(&["org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "org.freedesktop.portal.Desktop"], until)?;
-    if owned.trim() != "(true,)" && !portal_activatable(&gdbus(&["org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.ListActivatableNames"], until)?) {
-        return None;
-    }
-    portal_scheme(&gdbus(&["org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings.Read", "org.freedesktop.appearance", "color-scheme"], until)?)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn gdbus(call: &[&str], until: std::time::Instant) -> Option<String> {
-    use std::process::{Command, Stdio};
-    let [dest, path, method, args @ ..] = call else { return None };
-    let mut child = Command::new("gdbus")
-        .args(["call", "--session", "--timeout", "1", "--dest", dest, "--object-path", path, "--method", method])
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    while child.try_wait().ok()?.is_none() {
-        if std::time::Instant::now() >= until {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    Some(String::from_utf8_lossy(&child.wait_with_output().ok()?.stdout).into_owned())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn portal_activatable(reply: &str) -> bool {
-    reply.contains("'org.freedesktop.portal.Desktop'")
-}
-
-#[cfg(not(target_os = "macos"))]
-fn portal_scheme(reply: &str) -> Option<bool> {
-    match reply.split("uint32 ").nth(1)?.chars().next()? {
-        '1' => Some(true),
-        '2' => Some(false),
-        _ => None,
-    }
-}
-
 #[cfg(not(target_os = "macos"))]
 fn system_smoothing() -> bool {
     true
-}
-
-#[cfg(not(target_os = "macos"))]
-fn system_dark() -> bool {
-    DARK.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 #[cfg(target_os = "macos")]
@@ -668,36 +564,12 @@ fn system_smoothing() -> bool {
     d.objectForKey(&key).is_none() || d.integerForKey(&key) != 0
 }
 
-#[cfg(target_os = "macos")]
-fn system_dark() -> bool {
-    use objc2_foundation::{NSString, NSUserDefaults};
-    let style = NSUserDefaults::standardUserDefaults().stringForKey(&NSString::from_str("AppleInterfaceStyle"));
-    style.is_some_and(|s| s.to_string().eq_ignore_ascii_case("dark"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn parse(text: &str) -> Result<Config, String> {
         super::parse(text, Path::new("/nonexistent"))
-    }
-
-    #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn the_portal_reply_names_the_scheme() {
-        assert_eq!(portal_scheme("(<<uint32 1>>,)\n"), Some(true));
-        assert_eq!(portal_scheme("(<<uint32 2>>,)\n"), Some(false));
-        assert_eq!(portal_scheme("(<<uint32 0>>,)\n"), None);
-        assert_eq!(portal_scheme(""), None);
-    }
-
-    #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn a_portal_that_can_start_counts() {
-        assert!(portal_activatable("(['org.freedesktop.DBus', 'org.freedesktop.portal.Desktop', 'org.gnome.Shell'],)\n"));
-        assert!(!portal_activatable("(['org.freedesktop.DBus', 'org.freedesktop.portal.Desktop.Extra'],)\n"));
-        assert!(!portal_activatable(""));
     }
 
     #[test]

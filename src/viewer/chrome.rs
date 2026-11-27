@@ -174,13 +174,15 @@ type Line = Vec<(usize, String, Ink)>;
 
 const HELP_GAP: usize = 4;
 
-pub fn help(out: &mut String, cols: u16, rows: u16, top: &mut u32, p: &Palette) {
+pub fn help_max(cols: u16, rows: u16) -> u32 {
+    help_lines(usize::from(cols)).len().saturating_sub(view_rows(rows)) as u32
+}
+
+pub fn help(out: &mut String, cols: u16, rows: u16, top: u32, p: &Palette) {
     let cols = usize::from(cols);
     let rows = view_rows(rows);
     let lines = help_lines(cols);
-    let max = lines.len().saturating_sub(rows) as u32;
-    *top = (*top).min(max);
-    let top = *top as usize;
+    let top = (top as usize).min(lines.len().saturating_sub(rows));
     let reset = p.reset();
     out.push_str(&format!("{reset}{}", crate::term::CLEAR));
     for r in 0..rows {
@@ -380,7 +382,7 @@ mod tests {
         (app.entries, app.toc_visible, app.toc_list_height) = (entries, true, 4);
         let mut out = String::new();
         Chrome { app: &app, name: "a.md", cols: 80, rows: 8, img_col: 26, palette: light }.draw(&mut out);
-        help(&mut out, 80, 8, &mut 0, &light);
+        help(&mut out, 80, 8, 0, &light);
         let grounds = [light.bg, light.bar_bg, light.selection_bg];
         let inks = [light.fg_muted, light.fg_bright, light.border, light.fg, light.link];
         let drawn = colors(&out);
@@ -488,9 +490,7 @@ mod tests {
     #[test]
     fn help_fits_any_width_and_clamps_its_top() {
         assert!(help_lines(40).len() > help_lines(120).len());
-        let mut top = 10_000;
-        help(&mut String::new(), 80, 10, &mut top, &dark());
-        assert_eq!(top as usize, help_lines(80).len() - 9);
+        assert_eq!(help_max(80, 10) as usize, help_lines(80).len() - 9);
         for cols in [24, 30, 46, 80, 96, 140, 200] {
             for line in help_lines(cols) {
                 let mut end = 0;
@@ -507,7 +507,7 @@ mod tests {
     fn help_colors_the_keys_and_marks_their_alternates() {
         let p = dark();
         let mut out = String::new();
-        help(&mut out, 120, 200, &mut 0, &p);
+        help(&mut out, 120, 200, 0, &p);
         assert!(out.contains(&format!("{}Ctrl-p", fg(p.link))) && !out.contains(&format!("\x1b[1m{}Ctrl-p", fg(p.link))));
         assert!(out.contains(&format!("{}or{}", fg(p.fg_muted), p.reset())) && out.contains(&format!("{}Ctrl-e", fg(p.link))));
         assert!(out.contains(&format!("{}──", fg(p.border))) && !out.contains("┌") && !out.contains("│"));

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::term::{self, Size};
 use crate::theme::{self, Rgb, Theme};
-use crate::{config, trace};
+use crate::{appearance, trace};
 
 const STEP: Duration = Duration::from_millis(100);
 /// A page ready sooner shows without a skeleton. Warm starts are ready in about 40 to 75 ms.
@@ -88,6 +88,7 @@ struct Shared {
     stop: AtomicBool,
     drawn: Mutex<Shown>,
     tune: Mutex<Tune>,
+    shown: Mutex<appearance::Shown>,
 }
 
 /// Locks `m` even if the other thread panicked while holding it. The values are plain data, so a
@@ -104,8 +105,8 @@ pub struct Loader {
 }
 
 impl Loader {
-    pub fn start(fd: i32, name: &str) -> Loader {
-        let shared = Arc::new(Shared { stop: AtomicBool::new(false), drawn: Mutex::new(Shown::No), tune: Mutex::new(Tune::default()) });
+    pub fn start(fd: i32, name: &str, shown: appearance::Shown) -> Loader {
+        let shared = Arc::new(Shared { stop: AtomicBool::new(false), drawn: Mutex::new(Shown::No), tune: Mutex::new(Tune::default()), shown: Mutex::new(shown) });
         let s = shared.clone();
         let name = term::printable(name);
         let thread = std::thread::spawn(move || {
@@ -142,7 +143,8 @@ impl Loader {
                 let look = {
                     let t = *lock(&s.tune);
                     let scale = t.scale.unwrap_or(crate::term::screen::SCALE_GUESS);
-                    Look::new(config::theme(), scale, cell_for(t, size, scale))
+                    let theme = lock(&s.shown).theme();
+                    Look::new(theme, scale, cell_for(t, size, scale))
                 };
                 let bytes = frame(i, &name, size, &look, last != Some((size, look)));
                 {
@@ -163,8 +165,9 @@ impl Loader {
 
     /// Gives the skeleton what the terminal probe found: the screen scale, and the cell size in device pixels for
     /// a terminal of `size`.
-    pub fn tune(&self, scale: f64, cell: (u32, u32), size: Size) {
+    pub fn tune(&self, scale: f64, cell: (u32, u32), size: Size, shown: appearance::Shown) {
         *lock(&self.shared.tune) = Tune { scale: Some(scale), cell: Some((cell, size)) };
+        *lock(&self.shared.shown) = shown;
     }
 
     /// Stops the skeleton, after it has been up for `MIN_SHOWN` if it was drawn.

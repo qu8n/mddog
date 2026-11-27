@@ -2,6 +2,8 @@
 compile_error!("mddog runs on macOS and Linux");
 
 #[doc(hidden)]
+pub mod appearance;
+#[doc(hidden)]
 pub mod config;
 #[doc(hidden)]
 pub mod editor;

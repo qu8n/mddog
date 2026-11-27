@@ -5,17 +5,16 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use super::Event;
-use super::app::{self, Action, App, Heading, Notice, OnClick};
+use super::app::{self, Action, App, Heading, OnClick};
 use super::cache::{Batch, Cache, Pixels, View};
 use super::chrome::{self, Chrome};
 use super::clipboard;
-use super::labels::Labels;
 use super::link::{self, Link};
 use super::loading::Loader;
 use super::picker::{self, Area, Pick, Picker};
 use super::position;
 use super::preview::{self, Preview};
-use super::themes;
+use crate::appearance::{self, Shown};
 use crate::render::engine::{Engine, Layout, Pointer, Press, Rect, Select};
 use crate::term::kitty::{self, Shm};
 use crate::term::screen;
@@ -156,6 +155,7 @@ struct Place {
 
 pub struct Viewer {
     theme_pick: Option<(Vec<config::Choice>, Option<&'static Theme>)>,
+    shown: Shown,
     watcher: Option<notify::RecommendedWatcher>,
     loader: Option<Loader>,
     tty: Tty,
@@ -302,7 +302,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         })
     });
     // The first read of the macOS appearance takes about 2 ms, so make it while the file renders.
-    std::thread::spawn(config::theme);
+    std::thread::spawn(appearance::system_dark);
     std::thread::spawn(screen::display_scale);
     std::thread::spawn(crate::render::text::warm);
     std::thread::spawn(crate::render::svg::warm);
@@ -320,18 +320,19 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     term::on_panic_restore(tty.saved());
     // Pixel mouse reports wait for the probe to say the terminal has them.
     tty.write(term::enter(false).as_bytes());
+    let mut shown = Shown::new(&config::get().themes);
     let name = if stdin { "standard input".to_string() } else { file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned()) };
     let loader = match picker.as_mut() {
         Some(p) => {
             // The list shows before the engine starts, so it is up at once.
             p.first_batch(Duration::from_millis(50));
             let mut out = String::new();
-            p.draw(&mut out, tty.size().cols, tty.size().rows, std::time::SystemTime::now(), &config::theme().palette);
+            p.draw(&mut out, tty.size().cols, tty.size().rows, std::time::SystemTime::now(), &shown.theme().palette);
             tty.write(out.as_bytes());
             tty.flush();
             None
         }
-        None => Some(Loader::start(tty.fd, &name)),
+        None => Some(Loader::start(tty.fd, &name, shown)),
     };
     trace::mark("tty ready");
     let (probe, leftover) = tty.probe(PROBE_WAIT);
@@ -347,7 +348,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     trace::mark("engine created");
     engine.set_display_p3(probe.display_p3());
     if let Some(dark) = probe.dark {
-        config::set_dark(dark);
+        shown.set_dark(dark);
     }
     let refusal = if probe.no_graphics() {
         Some(format!("mdd: this terminal can't show images so it can't show the page. mddog needs the Kitty graphics protocol: use {SUPPORTED}."))
@@ -369,7 +370,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let scale = display;
     let (cell_w, cell_h) = probe.cell_px(size, display);
     if let Some(l) = &loader {
-        l.tune(scale, (cell_w, cell_h), size);
+        l.tune(scale, (cell_w, cell_h), size, shown);
     }
     let cache = Cache::new(probe.storage_limit(), probe.herdr() || probe.rex(), probe.medium(), 1 + (std::process::id() % 1000) * 1000);
     let base = crate::render::images::base_dir(&file, stdin);
@@ -416,6 +417,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         img_cols: size.cols,
         loaded: false,
         theme: config::get().themes.light,
+        shown,
         theme_pick: None,
         touched: false,
         late: None,
@@ -558,7 +560,7 @@ impl Viewer {
             need_show |= self.copy_due();
             if self.notice_until.is_some_and(|due| Instant::now() >= due) {
                 self.notice_until = None;
-                self.app.notice = None;
+                self.app.clear_notice();
                 self.draw_chrome();
             }
             if need_show {
@@ -605,7 +607,7 @@ impl Viewer {
                 self.handle(Event::Background(dark))
             }
             Event::Scheme(dark) | Event::Background(dark) => {
-                config::set_dark(dark);
+                self.shown.set_dark(dark);
                 if self.listing {
                     return true;
                 }
@@ -810,7 +812,7 @@ impl Viewer {
                 true
             }
             Action::ToggleToc if self.app.toc_visible && app::toc_width(self.size.cols) == 0 => {
-                self.app.toc_visible = false;
+                self.app.hide_toc();
                 self.notify(&format!("Too narrow for the table of contents. It needs {} columns", app::TOC_MIN_COLS));
                 false
             }
@@ -884,7 +886,7 @@ impl Viewer {
                     self.notify("No links or buttons on screen");
                     return false;
                 }
-                self.app.labels = Some(Labels::new(self.targets.len()));
+                self.app.start_labels(self.targets.len());
                 self.draw_labels()
             }
             Action::Labels => self.draw_labels(),
@@ -902,18 +904,17 @@ impl Viewer {
                 false
             }
             Action::OpenThemes => {
-                let height = self.app.toc_list_height as usize;
                 let choices = config::choices();
-                let current = current_choice(&choices, config::follows(), config::theme());
+                let current = current_choice(&choices, self.shown.follows(), self.shown.theme());
                 let labels = choices.iter().map(|c| c.label().to_string()).collect();
-                self.theme_pick = Some((choices, config::fixed()));
-                self.app.themes = Some(themes::List::new(labels, current, height));
+                self.theme_pick = Some((choices, self.shown.fixed()));
+                self.app.open_themes(labels, current);
                 self.refit();
                 false
             }
             Action::PreviewTheme => {
                 if let (Some(list), Some((choices, _))) = (&self.app.themes, &self.theme_pick) {
-                    config::show(Some(choices[list.shown].theme()));
+                    self.shown.show(Some(choices[list.shown].theme(self.shown.is_dark())));
                 }
                 if !self.theme_stale() {
                     self.draw_chrome();
@@ -923,22 +924,28 @@ impl Viewer {
                 false
             }
             Action::CloseThemes => {
-                let (Some(_), Some((_, before))) = (self.app.themes.take(), self.theme_pick.take()) else { return false };
-                config::show(before);
+                let (Some(_), Some((_, before))) = (self.app.close_themes(), self.theme_pick.take()) else { return false };
+                self.shown.show(before);
                 self.refit();
                 false
             }
             Action::DropThemes => {
-                if let (Some(_), Some((_, before))) = (self.app.themes.take(), self.theme_pick.take()) {
-                    config::show(before);
+                if let (Some(_), Some((_, before))) = (self.app.close_themes(), self.theme_pick.take()) {
+                    self.shown.show(before);
                 }
                 false
             }
             Action::PickTheme => {
-                let (Some(list), Some((choices, _))) = (self.app.themes.take(), self.theme_pick.take()) else { return false };
+                let (Some(list), Some((choices, _))) = (self.app.close_themes(), self.theme_pick.take()) else { return false };
                 let chosen = &choices[list.sel];
-                config::show(Some(chosen.theme()));
-                let note = config::save(chosen).unwrap_or_else(|e| e);
+                self.shown.show(Some(chosen.theme(self.shown.is_dark())));
+                let note = match config::themes_of(chosen) {
+                    Ok(themes) => {
+                        self.shown.adopt(themes);
+                        config::save(chosen).unwrap_or_else(|e| e)
+                    }
+                    Err(e) => e,
+                };
                 self.refit();
                 self.notify(&note);
                 false
@@ -1011,8 +1018,7 @@ impl Viewer {
                     let on_click = self.app.notice.as_ref().map(|n| n.click);
                     let back = on_click == Some(OnClick::GoBack);
                     let Some(key) = self.chrome().hint_at(col).or(back.then_some(Key::Backspace)) else {
-                        if self.app.notice.is_some() {
-                            self.app.notice = None;
+                        if self.app.clear_notice() {
                             self.notice_until = None;
                             self.draw_chrome();
                         }
@@ -1031,7 +1037,7 @@ impl Viewer {
                         }
                     }
                     if on_click == Some(OnClick::Quit) {
-                        self.app.notice = None;
+                        self.app.clear_notice();
                     }
                     let actions = self.app.handle(key);
                     return self.act_all(actions);
@@ -1214,7 +1220,7 @@ impl Viewer {
                 let (top, height) = self.view_css();
                 let rects = self.engine.expand(i, top, height);
                 let shown = self.redraw(&rects);
-                self.app.expanded = shown;
+                self.app.set_expanded(shown);
                 shown
             }
             Press::Redraw(rects) => self.redraw(&rects),
@@ -1374,13 +1380,12 @@ impl Viewer {
 
     fn reload_if_changed(&mut self) {
         let Ok(bytes) = std::fs::read(&self.file) else {
-            if !self.app.missing {
-                self.app.missing = true;
+            if self.app.file_lost() {
                 self.draw_chrome();
             }
             return;
         };
-        let was_missing = std::mem::take(&mut self.app.missing);
+        let was_missing = self.app.file_found();
         if bytes == self.stamp && self.loaded {
             if was_missing {
                 self.draw_chrome();
@@ -1407,7 +1412,7 @@ impl Viewer {
     }
 
     fn theme_stale(&self) -> bool {
-        !std::ptr::eq(config::theme(), self.theme)
+        !std::ptr::eq(self.shown.theme(), self.theme)
     }
 
     fn refit(&mut self) {
@@ -1433,7 +1438,7 @@ impl Viewer {
     }
 
     fn notify_with(&mut self, msg: &str, click: OnClick, shown: Duration) {
-        self.app.notice = Some(Notice { text: msg.to_string(), click });
+        self.app.show_notice(msg, click);
         self.notice_until = Some(Instant::now() + shown);
         self.draw_chrome();
     }
@@ -1449,10 +1454,11 @@ impl Viewer {
         };
         let (toc, css_width) = self.fit();
         let base = self.base();
-        let theme = config::theme();
+        let theme = self.shown.theme();
+        self.needs_clear |= !std::ptr::eq(theme, self.theme);
         self.theme = theme;
         self.size_engine(css_width);
-        self.app.expanded = false;
+        self.app.collapse();
         self.touched = false;
         self.engine.load(&src, &base, self.app.wrap, theme, config::get().callouts);
         self.settle_scale();
@@ -1489,7 +1495,7 @@ impl Viewer {
         let (_, css_width) = self.fit();
         self.engine.rescale(self.scale, css_width, self.max_css());
         if let Some(l) = &self.loader {
-            l.tune(self.scale, (self.cell_w, self.cell_h), self.size);
+            l.tune(self.scale, (self.cell_w, self.cell_h), self.size, self.shown);
         }
     }
 
@@ -1583,15 +1589,12 @@ impl Viewer {
             return;
         }
         self.matches = self.engine.search(&self.app.query, Some(self.app.current));
-        self.app.matches = self.match_rows();
-        if self.app.current >= self.app.matches.len() {
-            self.app.current = 0;
-        }
+        let rows = self.match_rows();
+        self.app.relocate_matches(rows);
     }
 
     fn measure(&mut self) {
-        if self.app.labels.is_some() {
-            self.app.labels = Some(Labels::new(0));
+        if self.app.void_labels() {
             self.targets.clear();
             self.engine.set_labels(&[], 0.0, 0.0);
         }
@@ -1661,7 +1664,8 @@ impl Viewer {
             drop(loader);
             let mut out = frees;
             self.cache.free_all(&mut out);
-            chrome::help(&mut out, self.size.cols, self.size.rows, &mut self.app.help_top, &self.theme.palette);
+            self.app.fit_help(chrome::help_max(self.size.cols, self.size.rows));
+            chrome::help(&mut out, self.size.cols, self.size.rows, self.app.help_top, &self.theme.palette);
             self.needs_clear = true;
             self.chrome().draw(&mut out);
             if self.probe.sync {
@@ -1677,7 +1681,7 @@ impl Viewer {
             let mut out = frees;
             self.cache.free_all(&mut out);
             let t = Instant::now();
-            p.draw(&mut out, self.size.cols, self.size.rows, std::time::SystemTime::now(), &config::theme().palette);
+            p.draw(&mut out, self.size.cols, self.size.rows, std::time::SystemTime::now(), &self.shown.theme().palette);
             self.place_preview(&mut out);
             trace::log(format_args!("list drawn took={:.2}ms bytes={}", t.elapsed().as_secs_f64() * 1e3, out.len()));
             self.needs_clear = true;
@@ -1880,8 +1884,7 @@ impl Viewer {
         let anchor = self.anchor();
         let back = self.back_anchors();
         // The expanded diagram's box was measured on the old page.
-        if self.app.expanded {
-            self.app.expanded = false;
+        if self.app.collapse() {
             self.engine.collapse();
         }
         self.measure();
@@ -2030,7 +2033,7 @@ impl Viewer {
         let place = Place { view: self.anchor(), back: self.back_anchors(), src: self.src.clone() };
         let mut old = self.replace_app(App::default());
         // Its timer runs on, so coming back would show it with none.
-        old.notice = None;
+        old.clear_notice();
         if self.opened {
             let visit = Visit { file: std::mem::take(&mut self.file), stdin: self.stdin, name: std::mem::take(&mut self.name), app: old, place };
             self.history.push(visit);
@@ -2038,7 +2041,7 @@ impl Viewer {
                 self.history.remove(0);
             }
         }
-        self.app.back_file = !self.history.is_empty();
+        self.app.set_back_file(!self.history.is_empty());
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
         self.start_loader(&name);
         self.land_on = heading;
@@ -2049,26 +2052,25 @@ impl Viewer {
         let Some(v) = self.history.pop() else { return };
         let Ok(bytes) = std::fs::read(&v.file) else {
             // Drop it, so the next Backspace reaches the files before it.
-            self.app.back_file = !self.history.is_empty();
+            self.app.set_back_file(!self.history.is_empty());
             self.notify(&format!("Can't read {}, so it was removed from the Back list", v.name));
             return;
         };
         self.replace_app(v.app);
-        self.app.back_file = !self.history.is_empty();
+        self.app.set_back_file(!self.history.is_empty());
         self.start_loader(&v.name);
         self.switch(v.file, v.stdin, v.name, bytes, Some(v.place));
     }
 
     /// Puts `next` in place of the page's state, keeping the settings that hold across files. Returns the old state.
-    fn replace_app(&mut self, mut next: App) -> App {
-        (next.wrap, next.toc_visible, next.themes) = (self.app.wrap, self.app.toc_visible, self.app.themes.take());
-        std::mem::replace(&mut self.app, next)
+    fn replace_app(&mut self, next: App) -> App {
+        self.app.replace(next)
     }
 
     /// Draws a skeleton over the screen if the next page is slow to show. `show` takes it down.
     fn start_loader(&mut self, name: &str) {
-        let l = Loader::start(self.tty.fd, name);
-        l.tune(self.scale, (self.cell_w, self.cell_h), self.size);
+        let l = Loader::start(self.tty.fd, name, self.shown);
+        l.tune(self.scale, (self.cell_w, self.cell_h), self.size, self.shown);
         self.loader = Some(l);
     }
 
@@ -2097,7 +2099,7 @@ impl Viewer {
     fn preview_keys(&self) -> Option<(Area, Vec<preview::Key>)> {
         let p = self.picker.as_ref()?;
         let area = p.split(self.size.cols, self.size.rows).preview?;
-        let th = config::theme();
+        let th = self.shown.theme();
         // The scan's time is stale once a file is saved, or deleted, while the list is up.
         let mtime = |path: &Path, _| std::fs::metadata(path).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         Some((area, p.around().into_iter().map(|(path, m)| preview::key(path, mtime(path, m), area, self.cell_w, self.cell_h, th)).collect()))
@@ -2110,7 +2112,7 @@ impl Viewer {
             Some((area, keys)) => {
                 let first = 500_000_000 + (std::process::id() % 1000) * 100_000;
                 let pk = self.preview.get_or_insert_with(|| Preview::new(self.tx.clone(), self.probe.medium(), self.probe.storage_limit(), first, !self.probe.iterm2()));
-                let job = (self.scale, config::theme(), config::font_smoothing(), self.probe.display_p3());
+                let job = (self.scale, self.shown.theme(), config::font_smoothing(), self.probe.display_p3());
                 pk.want(keys.clone(), job, out, Instant::now());
                 pk.place(keys.first(), area, out);
                 let shown = pk.shown().map(|k| k.path.clone());
@@ -2135,7 +2137,7 @@ impl Viewer {
         if text.is_empty() || area.row == 0 {
             return;
         }
-        let pal = &config::theme().palette;
+        let pal = &self.shown.theme().palette;
         out.push_str(&format!("\x1b[{};{}H{}{text}{}", area.row, area.col + 3, crate::theme::fg(pal.fg_muted), pal.reset()));
     }
 

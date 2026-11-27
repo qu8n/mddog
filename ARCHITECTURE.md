@@ -41,9 +41,11 @@ The **theme** decides how the page looks. It is one file of tokens: colors, font
 
 The command line. It parses the options, checks the file before it takes the terminal (so a typo or a binary file gets a plain error), loads the config, refuses tmux, zellij, and Warp by their environment variables before it sends the terminal anything, and starts one of the three modes. For the viewer, standard input is copied to a private temp file first, so the viewer always reads a real file. Headless mode refuses standard input.
 
-### `src/config.rs`, `src/theme.rs`
+### `src/config.rs`, `src/theme.rs`, `src/appearance.rs`
 
-`config` reads the optional `config.toml` once, at startup, into a `OnceLock`. Other code reads it with `config::get()` and `config::theme()`. An unknown key or a bad value stops the run with an error that names the file, line, and key. `config.example.toml` lists every key. The theme list (T) changes the theme while mddog runs: `config::show` puts a theme on screen over the config, and `config::save` writes the `theme` value back to `config.toml` and makes it the config's.
+`config` reads the optional `config.toml` once, at startup, into a `OnceLock`. Other code reads it with `config::get()`. An unknown key or a bad value stops the run with an error that names the file, line, and key. `config.example.toml` lists every key. `config::save` writes a `theme` value back to `config.toml`. Config holds no state that changes while mddog runs.
+
+`appearance::Shown` decides which theme is on screen: the config's light and dark themes, a theme the theme list (T) puts over them, and on Linux the light or dark answer from the terminal. `Viewer` owns one and headless mode owns another. Each passes the resolved theme down to the engine, the skeleton, the file list, and the previews. `appearance` also reads the system's light or dark setting.
 
 `theme` reads theme files. `TOKENS` is the one list of tokens and their kinds. The built-in themes are `assets/themes/*.css`, embedded in the binary and listed in `BUILTIN`. A theme file uses CSS syntax but is not a style sheet: only `:root` rules with known tokens are allowed. A theme can name a base theme and take the tokens it leaves out from that base. `theme::Theme` holds the resolved tokens and the `Palette` for the parts drawn in terminal cells.
 
@@ -51,7 +53,7 @@ The command line. It parses the options, checks the file before it takes the ter
 
 **Architecture invariant:** `theme.rs` holds the only SGR color formatters. Every part drawn in cells gets its colors through `Palette`.
 
-**Architecture invariant:** there is no appearance observer. `config::theme()` reads the light or dark setting each time a page is built, and a change shows on the next reload. On macOS it reads the system setting. On Linux it reads the answer the terminal gave at startup, and the terminal pushes later changes through mode 2031. The background color (OSC 11) decides, since Ghostty answers the scheme query with the desktop's scheme; a mode 2031 report only triggers a new OSC 11 query. Headless mode can't ask the terminal, so on Linux it asks the desktop portal once at startup.
+**Architecture invariant:** there is no appearance observer. `Shown::theme` reads the light or dark setting each time it resolves the theme, and a change shows on the next reload. On macOS it reads the system setting. On Linux it reads the answer the terminal gave at startup, and the terminal pushes later changes through mode 2031. The background color (OSC 11) decides, since Ghostty answers the scheme query with the desktop's scheme; a mode 2031 report only triggers a new OSC 11 query. Headless mode can't ask the terminal, so on Linux it asks the desktop portal once at startup.
 
 ### `src/render/`
 
@@ -97,6 +99,8 @@ The interactive viewer and the file list.
 - `link.rs` and `clipboard.rs`: following links, and copying text.
 
 **Architecture invariant:** `app.rs` holds no terminal or engine state. Besides the viewer's own pure modules (`labels`, `themes`), it depends only on `term::Key`. So it is tested row by row against `docs/behavior.md` without a terminal. `chrome.rs` is pure in the same way.
+
+**Architecture invariant:** only `App` changes `App`'s fields. `Viewer` reads them, and tells `App` what happened through its methods, such as `collapse`, `file_lost`, and `relocate_matches`.
 
 **Architecture invariant:** `cache.rs` does not write to the terminal. `Viewer` passes it a function that draws a tile, so its tests use a fake.
 

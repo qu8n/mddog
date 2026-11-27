@@ -272,6 +272,74 @@ impl App {
         Some(vec![Action::Collapse])
     }
 
+    pub fn set_expanded(&mut self, shown: bool) {
+        self.expanded = shown;
+    }
+
+    pub fn collapse(&mut self) -> bool {
+        std::mem::take(&mut self.expanded)
+    }
+
+    pub fn show_notice(&mut self, text: &str, click: OnClick) {
+        self.notice = Some(Notice { text: text.to_string(), click });
+    }
+
+    pub fn clear_notice(&mut self) -> bool {
+        self.notice.take().is_some()
+    }
+
+    pub fn hide_toc(&mut self) {
+        self.toc_visible = false;
+    }
+
+    pub fn start_labels(&mut self, targets: usize) {
+        self.labels = Some(Labels::new(targets));
+    }
+
+    pub fn void_labels(&mut self) -> bool {
+        let up = self.labels.is_some();
+        if up {
+            self.labels = Some(Labels::new(0));
+        }
+        up
+    }
+
+    pub fn open_themes(&mut self, labels: Vec<String>, current: usize) {
+        self.themes = Some(super::themes::List::new(labels, current, self.toc_list_height as usize));
+    }
+
+    pub fn close_themes(&mut self) -> Option<super::themes::List> {
+        self.themes.take()
+    }
+
+    pub fn file_lost(&mut self) -> bool {
+        !std::mem::replace(&mut self.missing, true)
+    }
+
+    pub fn file_found(&mut self) -> bool {
+        std::mem::take(&mut self.missing)
+    }
+
+    pub fn fit_help(&mut self, max: u32) {
+        self.help_top = self.help_top.min(max);
+    }
+
+    pub fn set_back_file(&mut self, back_file: bool) {
+        self.back_file = back_file;
+    }
+
+    pub fn relocate_matches(&mut self, rows: Vec<u32>) {
+        self.matches = rows;
+        if self.current >= self.matches.len() {
+            self.current = 0;
+        }
+    }
+
+    pub fn replace(&mut self, mut next: App) -> App {
+        (next.wrap, next.toc_visible, next.themes) = (self.wrap, self.toc_visible, self.themes.take());
+        std::mem::replace(self, next)
+    }
+
     fn reset_nav(&mut self) {
         self.numkey = None;
         self.reverse = false;
@@ -2210,5 +2278,44 @@ mod tests {
             }
         }
         assert!(unbound.is_empty(), "help lists keys that do nothing: {unbound:?}");
+    }
+
+    #[test]
+    fn viewer_events_move_app_state() {
+        let mut a = app(100, 20);
+        assert!(a.file_lost());
+        assert!(!a.file_lost());
+        assert!(a.file_found() && !a.file_found());
+        a.set_expanded(true);
+        assert!(a.collapse() && !a.collapse() && !a.expanded);
+        a.show_notice("hi", OnClick::Quit);
+        assert!(a.clear_notice() && !a.clear_notice());
+        assert!(!a.void_labels());
+        a.start_labels(3);
+        assert!(a.void_labels() && a.labels.is_some());
+        a.query = "x".into();
+        a.set_matches(vec![10, 30, 50]);
+        a.current = 2;
+        a.relocate_matches(vec![12, 32, 52]);
+        assert_eq!(a.current, 2);
+        a.relocate_matches(vec![12]);
+        assert_eq!(a.current, 0);
+    }
+
+    #[test]
+    fn replace_keeps_settings_across_files() {
+        let mut a = app(100, 20);
+        a.wrap = true;
+        a.toc_visible = true;
+        a.open_themes(vec!["a".into(), "b".into()], 1);
+        a.show_notice("old", OnClick::Hints);
+        let old = a.replace(App::default());
+        assert!(a.wrap && a.toc_visible && a.themes.is_some() && a.notice.is_none());
+        assert!(old.notice.is_some() && old.themes.is_none());
+        a.set_back_file(true);
+        assert_eq!(a.handle(Key::Backspace), vec![Action::BackFile]);
+        a.hide_toc();
+        assert!(!a.toc_visible);
+        assert!(a.close_themes().is_some() && a.themes.is_none());
     }
 }
